@@ -22,7 +22,14 @@ const tagColor = (tag: string) => {
   }
 };
 
-function Price({ value }: { value: number }) {
+function Price({ value }: { value?: number }) {
+  if (value === undefined) {
+    return (
+      <span className="font-display text-[13px] leading-none text-[var(--color-ink)]/55 italic">
+        Price · ask staff
+      </span>
+    );
+  }
   return (
     <span className="font-display text-[20px] leading-none text-[var(--color-vermillion)]">
       ฿{value}
@@ -30,7 +37,14 @@ function Price({ value }: { value: number }) {
   );
 }
 
-function AddButton({ onClick }: { onClick: () => void }) {
+function AddButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
+  if (disabled) {
+    return (
+      <span className="h-9 px-2.5 rounded-full bg-[var(--color-ink)]/15 text-[var(--color-ink)]/55 flex items-center justify-center text-[10px] uppercase tracking-[0.18em] border border-[var(--color-ink)]/15">
+        Sold out
+      </span>
+    );
+  }
   return (
     <button
       onClick={onClick}

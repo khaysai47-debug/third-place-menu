@@ -23,6 +23,7 @@ export const Route = createFileRoute("/")({
 const CATEGORY_ZH: Record<MenuCategoryId, string> = {
   signature: "招牌",
   skewers: "串燒",
+  "skewers-veg": "素串",
   "stir-fried": "小炒",
   "rice-noodles": "飯麵",
   soup: "湯品",
@@ -32,15 +33,17 @@ function MenuPage() {
   const [active, setActive] = useState<MenuCategoryId>("signature");
   const [cart, setCart] = useState<Record<string, number>>({});
 
-  const addToCart = (item: MenuItem) =>
+  const addToCart = (item: MenuItem) => {
+    if (!item.available || item.price === undefined) return;
     setCart((c) => ({ ...c, [item.id]: (c[item.id] ?? 0) + 1 }));
+  };
 
   const { count, total } = useMemo(() => {
     let count = 0, total = 0;
     for (const [id, qty] of Object.entries(cart)) {
       count += qty;
-      const item = [...CATEGORIES].flatMap((c) => itemsByCategory(c.id)).find((i) => i.id === id);
-      if (item) total += item.price * qty;
+      const item = CATEGORIES.flatMap((c) => itemsByCategory(c.id)).find((i) => i.id === id);
+      if (item && item.price !== undefined) total += item.price * qty;
     }
     return { count, total };
   }, [cart]);
@@ -87,7 +90,7 @@ function MenuPage() {
           </div>
         )}
 
-        {(active === "stir-fried" || active === "rice-noodles" || active === "soup") && (
+        {(active === "skewers-veg" || active === "stir-fried" || active === "rice-noodles" || active === "soup") && (
           <div className="px-5 space-y-3">
             {items.map((item) => (
               <MenuItemCard key={item.id} item={item} variant="compact" onAdd={addToCart} />
