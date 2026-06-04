@@ -6,6 +6,7 @@ import { IconTile } from "./IconTile";
 const ICONS: Record<MenuCategoryId, ReactElement> = {
   signature: <StarChopsticksIcon className="h-full w-full" />,
   skewers: <SkewerFlameIcon className="h-full w-full" />,
+  "skewers-veg": <SkewerFlameIcon className="h-full w-full" />,
   "stir-fried": <WokIcon className="h-full w-full" />,
   "rice-noodles": <NoodleBowlIcon className="h-full w-full" />,
   soup: <SoupBowlIcon className="h-full w-full" />,
@@ -25,7 +26,7 @@ export function CategoryNav({ active, onChange }: Props) {
             Menu · 菜譜
           </p>
           <span className="divider-stamp flex-1 mx-3" />
-          <p className="text-[10px] uppercase tracking-[0.2em] text-[var(--color-muted-foreground)]">5 sections</p>
+          <p className="text-[10px] uppercase tracking-[0.2em] text-[var(--color-muted-foreground)]">{CATEGORIES.length} sections</p>
         </div>
         <div className="flex gap-3 overflow-x-auto -mx-1 px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {CATEGORIES.map((c) => (
