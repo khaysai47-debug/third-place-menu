@@ -25,10 +25,9 @@ const CATEGORY_ZH: Record<MenuCategoryId, string> = {
   skewers: "串燒",
   "skewers-veg": "素串",
   "stir-fried": "小炒",
-  "rice-noadles": "飯麵",
   "rice-noodles": "飯麵",
   soup: "湯品",
-} as Record<MenuCategoryId, string>;
+};
 
 function MenuPage() {
   const [active, setActive] = useState<MenuCategoryId>("signature");
@@ -91,7 +90,7 @@ function MenuPage() {
           </div>
         )}
 
-        {(active === "stir-fried" || active === "rice-noodles" || active === "soup") && (
+        {(active === "skewers-veg" || active === "stir-fried" || active === "rice-noodles" || active === "soup") && (
           <div className="px-5 space-y-3">
             {items.map((item) => (
               <MenuItemCard key={item.id} item={item} variant="compact" onAdd={addToCart} />
