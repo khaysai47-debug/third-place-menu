@@ -1,8 +1,9 @@
+import type { ReactElement } from "react";
 import { CATEGORIES, type MenuCategoryId } from "@/data/menu";
 import { StarChopsticksIcon, SkewerFlameIcon, WokIcon, NoodleBowlIcon, SoupBowlIcon } from "./Icons";
 import { IconTile } from "./IconTile";
 
-const ICONS: Record<MenuCategoryId, JSX.Element> = {
+const ICONS: Record<MenuCategoryId, ReactElement> = {
   signature: <StarChopsticksIcon className="h-full w-full" />,
   skewers: <SkewerFlameIcon className="h-full w-full" />,
   "stir-fried": <WokIcon className="h-full w-full" />,
