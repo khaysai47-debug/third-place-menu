@@ -21,12 +21,11 @@ export interface OrderPayload {
   status: "draft";
 }
 
-export interface SubmitResult {
-  success: boolean;
-  error?: string;
-}
+export type SubmitResult =
+  | { success: true; orderId: string }
+  | { success: false; error: string };
 
 export function submitOrder(payload: OrderPayload): SubmitResult {
   console.log("ORDER_DRAFT_PAYLOAD", payload);
-  return { success: true };
+  return { success: true, orderId: payload.orderId };
 }
