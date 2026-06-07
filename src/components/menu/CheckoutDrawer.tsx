@@ -1,4 +1,5 @@
 import { type ReactElement, useState } from "react";
+import { type OrderPayload, submitOrder } from "@/lib/orders";
 
 interface CartItem {
   id: string;
@@ -89,7 +90,7 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
     }
 
     const now = new Date();
-    const orderPayload = {
+    const orderPayload: OrderPayload = {
       orderId: makeOrderId(),
       createdAt: now.toISOString(),
       customer: {
@@ -109,10 +110,10 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
       })),
       totalItems: items.reduce((s, i) => s + i.qty, 0),
       totalPrice: total,
-      status: "draft" as const,
+      status: "draft",
     };
 
-    console.log("ORDER_DRAFT_PAYLOAD", orderPayload);
+    submitOrder(orderPayload);
     setSuccess(true);
   };
 
