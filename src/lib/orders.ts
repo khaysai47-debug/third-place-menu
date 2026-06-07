@@ -25,7 +25,21 @@ export type SubmitResult =
   | { success: true; orderId: string }
   | { success: false; error: string };
 
-export function submitOrder(payload: OrderPayload): SubmitResult {
+const WEBHOOK_URL = "http://localhost:5678/webhook-test/third-place-order-test";
+
+export async function submitOrder(payload: OrderPayload): Promise<SubmitResult> {
   console.log("ORDER_DRAFT_PAYLOAD", payload);
-  return { success: true, orderId: payload.orderId };
+  try {
+    const response = await fetch(WEBHOOK_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      return { success: false, error: "Failed to submit order. Please try again." };
+    }
+    return { success: true, orderId: payload.orderId };
+  } catch {
+    return { success: false, error: "Failed to submit order. Please try again." };
+  }
 }

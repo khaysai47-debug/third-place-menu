@@ -74,7 +74,7 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
   const clearError = (key: string) =>
     setErrors((e) => { const next = { ...e }; delete next[key]; return next; });
 
-  const handlePlaceOrder = () => {
+  const handlePlaceOrder = async () => {
     const e: Record<string, string> = {};
 
     if (orderType === "dine-in") {
@@ -114,7 +114,7 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
       status: "draft",
     };
 
-    const result = submitOrder(orderPayload);
+    const result = await submitOrder(orderPayload);
     if (result.success) {
       setSubmitError(null);
       setSuccess(true);
