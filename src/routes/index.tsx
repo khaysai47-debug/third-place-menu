@@ -6,7 +6,7 @@ import { CategoryNav } from "@/components/menu/CategoryNav";
 import { SectionHeading } from "@/components/menu/SectionHeading";
 import { MenuItemCard } from "@/components/menu/MenuItemCard";
 import { CartBar } from "@/components/menu/CartBar";
-import { CATEGORIES, itemsByCategory, type MenuCategoryId, type MenuItem } from "@/data/menu";
+import { CATEGORIES, MENU, itemsByCategory, type MenuCategoryId, type MenuItem } from "@/data/menu";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -38,15 +38,28 @@ function MenuPage() {
     setCart((c) => ({ ...c, [item.id]: (c[item.id] ?? 0) + 1 }));
   };
 
-  const { count, total } = useMemo(() => {
-    let count = 0, total = 0;
-    for (const [id, qty] of Object.entries(cart)) {
-      count += qty;
-      const item = CATEGORIES.flatMap((c) => itemsByCategory(c.id)).find((i) => i.id === id);
-      if (item && item.price !== undefined) total += item.price * qty;
-    }
-    return { count, total };
-  }, [cart]);
+  const increaseQty = (id: string) =>
+    setCart((c) => ({ ...c, [id]: (c[id] ?? 0) + 1 }));
+
+  const decreaseQty = (id: string) =>
+    setCart((c) => {
+      const next = { ...c };
+      if ((next[id] ?? 0) <= 1) delete next[id];
+      else next[id] -= 1;
+      return next;
+    });
+
+  const clearCart = () => setCart({});
+
+  const cartItems = useMemo(() =>
+    Object.entries(cart).flatMap(([id, qty]) => {
+      const item = MENU.find((i) => i.id === id);
+      if (!item || item.price === undefined) return [];
+      return [{ id, name: item.nameEn, qty, subtotal: item.price * qty }];
+    }),
+  [cart]);
+
+  const total = useMemo(() => cartItems.reduce((s, i) => s + i.subtotal, 0), [cartItems]);
 
   const activeCategory = CATEGORIES.find((c) => c.id === active)!;
   const items = itemsByCategory(active);
@@ -114,7 +127,7 @@ function MenuPage() {
         </footer>
       </main>
 
-      <CartBar count={count} total={total} />
+      <CartBar items={cartItems} total={total} onIncrease={increaseQty} onDecrease={decreaseQty} onClear={clearCart} />
     </div>
   );
 }
