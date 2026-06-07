@@ -14,12 +14,27 @@ interface Props {
 }
 
 type OrderType = "dine-in" | "pickup" | "delivery";
+type OrderTypePayload = "dine_in" | "pickup" | "delivery";
 
 const ORDER_TYPE_LABELS: Record<OrderType, string> = {
   "dine-in": "Dine In",
   pickup: "Pickup",
   delivery: "Delivery",
 };
+
+const ORDER_TYPE_PAYLOAD: Record<OrderType, OrderTypePayload> = {
+  "dine-in": "dine_in",
+  pickup: "pickup",
+  delivery: "delivery",
+};
+
+function makeOrderId(): string {
+  const now = new Date();
+  const p = (n: number, len = 2) => String(n).padStart(len, "0");
+  const date = `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}`;
+  const time = `${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
+  return `TP-${date}-${time}`;
+}
 
 function Field({
   error,
@@ -64,20 +79,30 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
       return;
     }
 
-    const order = {
+    const now = new Date();
+    const orderPayload = {
+      orderId: makeOrderId(),
+      createdAt: now.toISOString(),
       customer: {
         name: name.trim(),
         phone: phone.trim(),
-        orderType,
-        ...(orderType === "delivery" ? { address: address.trim() } : {}),
-        ...(notes.trim() ? { notes: notes.trim() } : {}),
       },
-      items,
-      total,
-      createdAt: new Date().toISOString(),
+      orderType: ORDER_TYPE_PAYLOAD[orderType],
+      deliveryAddress: orderType === "delivery" ? address.trim() : null,
+      notes: notes.trim() || null,
+      items: items.map((item) => ({
+        id: item.id,
+        name: item.name,
+        quantity: item.qty,
+        unitPrice: item.subtotal / item.qty,
+        lineTotal: item.subtotal,
+      })),
+      totalItems: items.reduce((s, i) => s + i.qty, 0),
+      totalPrice: total,
+      status: "draft" as const,
     };
 
-    console.log("ORDER DRAFT:", order);
+    console.log("ORDER_DRAFT_PAYLOAD", orderPayload);
     setSuccess(true);
   };
 
