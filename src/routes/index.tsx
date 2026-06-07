@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Hero } from "@/components/menu/Hero";
 import { ServiceTiles } from "@/components/menu/ServiceTiles";
 import { CategoryNav } from "@/components/menu/CategoryNav";
@@ -31,7 +31,27 @@ const CATEGORY_ZH: Record<MenuCategoryId, string> = {
 
 function MenuPage() {
   const [active, setActive] = useState<MenuCategoryId>("signature");
-  const [cart, setCart] = useState<Record<string, number>>({});
+  const [cart, setCart] = useState<Record<string, number>>(() => {
+    try {
+      const raw = localStorage.getItem("tp_cart");
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      if (typeof parsed !== "object" || Array.isArray(parsed) || parsed === null) return {};
+      return Object.fromEntries(
+        Object.entries(parsed).filter(([, v]) => typeof v === "number" && v > 0)
+      ) as Record<string, number>;
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    if (Object.keys(cart).length === 0) {
+      localStorage.removeItem("tp_cart");
+    } else {
+      localStorage.setItem("tp_cart", JSON.stringify(cart));
+    }
+  }, [cart]);
 
   const addToCart = (item: MenuItem) => {
     if (!item.available || item.price === undefined) return;
