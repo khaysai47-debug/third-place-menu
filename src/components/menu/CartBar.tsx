@@ -11,6 +11,7 @@ interface Props {
   onIncrease: (id: string) => void;
   onDecrease: (id: string) => void;
   onClear: () => void;
+  onCheckout: () => void;
 }
 
 function QtyButton({ onClick, children, label }: { onClick: () => void; children: React.ReactNode; label: string }) {
@@ -25,7 +26,7 @@ function QtyButton({ onClick, children, label }: { onClick: () => void; children
   );
 }
 
-export function CartBar({ items, total, onIncrease, onDecrease, onClear }: Props) {
+export function CartBar({ items, total, onIncrease, onDecrease, onClear, onCheckout }: Props) {
   const count = items.reduce((s, i) => s + i.qty, 0);
 
   if (count === 0) return null;
@@ -57,7 +58,7 @@ export function CartBar({ items, total, onIncrease, onDecrease, onClear }: Props
           </div>
         </div>
 
-        <button className="pointer-events-auto w-full flex items-center justify-between gap-3 rounded-2xl bg-[var(--color-vermillion)] text-[var(--color-cream)] px-5 py-3.5 shadow-[0_20px_40px_-18px_oklch(0.45_0.18_27/0.7)] border border-[var(--color-vermillion-deep)] active:scale-[0.99] transition">
+        <button onClick={onCheckout} className="pointer-events-auto w-full flex items-center justify-between gap-3 rounded-2xl bg-[var(--color-vermillion)] text-[var(--color-cream)] px-5 py-3.5 shadow-[0_20px_40px_-18px_oklch(0.45_0.18_27/0.7)] border border-[var(--color-vermillion-deep)] active:scale-[0.99] transition">
           <span className="flex items-center gap-3">
             <span className="h-9 w-9 rounded-full bg-[var(--color-cream)]/15 flex items-center justify-center font-display text-[15px]">
               {count}

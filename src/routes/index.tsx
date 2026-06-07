@@ -6,6 +6,7 @@ import { CategoryNav } from "@/components/menu/CategoryNav";
 import { SectionHeading } from "@/components/menu/SectionHeading";
 import { MenuItemCard } from "@/components/menu/MenuItemCard";
 import { CartBar } from "@/components/menu/CartBar";
+import { CheckoutDrawer } from "@/components/menu/CheckoutDrawer";
 import { CATEGORIES, MENU, itemsByCategory, type MenuCategoryId, type MenuItem } from "@/data/menu";
 
 export const Route = createFileRoute("/")({
@@ -31,6 +32,7 @@ const CATEGORY_ZH: Record<MenuCategoryId, string> = {
 
 function MenuPage() {
   const [active, setActive] = useState<MenuCategoryId>("signature");
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [cart, setCart] = useState<Record<string, number>>(() => {
     try {
       const raw = localStorage.getItem("tp_cart");
@@ -147,7 +149,8 @@ function MenuPage() {
         </footer>
       </main>
 
-      <CartBar items={cartItems} total={total} onIncrease={increaseQty} onDecrease={decreaseQty} onClear={clearCart} />
+      <CartBar items={cartItems} total={total} onIncrease={increaseQty} onDecrease={decreaseQty} onClear={clearCart} onCheckout={() => setCheckoutOpen(true)} />
+      {checkoutOpen && <CheckoutDrawer items={cartItems} total={total} onClose={() => setCheckoutOpen(false)} />}
     </div>
   );
 }
