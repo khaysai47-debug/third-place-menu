@@ -59,8 +59,11 @@ const inputClass =
 export function CheckoutDrawer({ items, total, onClose }: Props) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
+  const [tableNumber, setTableNumber] = useState(
+    // Pre-fill from ?table= so QR codes per table set this automatically
+    () => new URLSearchParams(window.location.search).get("table") ?? ""
+  );
   const [orderType, setOrderType] = useState<OrderType>("dine-in");
-  const [tableNumber, setTableNumber] = useState("");
   const [address, setAddress] = useState("");
   const [notes, setNotes] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
