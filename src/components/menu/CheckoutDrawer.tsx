@@ -60,6 +60,7 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [orderType, setOrderType] = useState<OrderType>("dine-in");
+  const [tableNumber, setTableNumber] = useState("");
   const [address, setAddress] = useState("");
   const [notes, setNotes] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -70,8 +71,13 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
 
   const handlePlaceOrder = () => {
     const e: Record<string, string> = {};
-    if (!name.trim()) e.name = "Name is required";
-    if (!phone.trim()) e.phone = "Phone is required";
+
+    if (orderType === "dine-in") {
+      if (!tableNumber.trim()) e.tableNumber = "Table number is required";
+    } else {
+      if (!name.trim()) e.name = "Name is required";
+      if (!phone.trim()) e.phone = "Phone is required";
+    }
     if (orderType === "delivery" && !address.trim()) e.address = "Delivery address is required";
 
     if (Object.keys(e).length > 0) {
@@ -84,10 +90,11 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
       orderId: makeOrderId(),
       createdAt: now.toISOString(),
       customer: {
-        name: name.trim(),
-        phone: phone.trim(),
+        name: name.trim() || null,
+        phone: phone.trim() || null,
       },
       orderType: ORDER_TYPE_PAYLOAD[orderType],
+      tableNumber: orderType === "dine-in" ? tableNumber.trim() : null,
       deliveryAddress: orderType === "delivery" ? address.trim() : null,
       notes: notes.trim() || null,
       items: items.map((item) => ({
@@ -188,32 +195,12 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
                   Your Details
                 </h3>
 
-                <Field error={errors.name}>
-                  <input
-                    type="text"
-                    placeholder="Name"
-                    value={name}
-                    onChange={(e) => { setName(e.target.value); clearError("name"); }}
-                    className={inputClass}
-                  />
-                </Field>
-
-                <Field error={errors.phone}>
-                  <input
-                    type="tel"
-                    placeholder="Phone number"
-                    value={phone}
-                    onChange={(e) => { setPhone(e.target.value); clearError("phone"); }}
-                    className={inputClass}
-                  />
-                </Field>
-
-                {/* Order type */}
+                {/* Order type — first so fields below react immediately */}
                 <div className="flex gap-2">
                   {(["dine-in", "pickup", "delivery"] as OrderType[]).map((type) => (
                     <button
                       key={type}
-                      onClick={() => { setOrderType(type); clearError("address"); }}
+                      onClick={() => { setOrderType(type); setErrors({}); }}
                       className={`flex-1 py-2.5 rounded-xl text-[12px] uppercase tracking-[0.14em] border transition ${
                         orderType === type
                           ? "bg-[var(--color-vermillion)] border-[var(--color-vermillion)] text-[var(--color-cream)]"
@@ -225,7 +212,42 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
                   ))}
                 </div>
 
-                {/* Delivery address — only when delivery selected */}
+                {/* Table number — Dine In only */}
+                {orderType === "dine-in" && (
+                  <Field error={errors.tableNumber}>
+                    <input
+                      type="text"
+                      placeholder="Table number"
+                      value={tableNumber}
+                      onChange={(e) => { setTableNumber(e.target.value); clearError("tableNumber"); }}
+                      className={inputClass}
+                    />
+                  </Field>
+                )}
+
+                {/* Name */}
+                <Field error={errors.name}>
+                  <input
+                    type="text"
+                    placeholder={orderType === "dine-in" ? "Name (optional)" : "Name"}
+                    value={name}
+                    onChange={(e) => { setName(e.target.value); clearError("name"); }}
+                    className={inputClass}
+                  />
+                </Field>
+
+                {/* Phone */}
+                <Field error={errors.phone}>
+                  <input
+                    type="tel"
+                    placeholder={orderType === "dine-in" ? "Phone (optional)" : "Phone number"}
+                    value={phone}
+                    onChange={(e) => { setPhone(e.target.value); clearError("phone"); }}
+                    className={inputClass}
+                  />
+                </Field>
+
+                {/* Delivery address — Delivery only */}
                 {orderType === "delivery" && (
                   <Field error={errors.address}>
                     <input
