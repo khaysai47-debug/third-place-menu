@@ -70,6 +70,7 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [success, setSuccess] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const clearError = (key: string) =>
     setErrors((e) => { const next = { ...e }; delete next[key]; return next; });
@@ -114,12 +115,14 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
       status: "draft",
     };
 
+    setIsSubmitting(true);
     const result = await submitOrder(orderPayload);
     if (result.success) {
       setSubmitError(null);
       setSuccess(true);
     } else {
       setSubmitError(result.error);
+      setIsSubmitting(false);
     }
   };
 
@@ -293,9 +296,10 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
             )}
             <button
               onClick={handlePlaceOrder}
-              className="w-full rounded-2xl bg-[var(--color-vermillion)] text-[var(--color-cream)] py-4 font-display text-[18px] shadow-[0_20px_40px_-18px_oklch(0.45_0.18_27/0.7)] border border-[var(--color-vermillion-deep)] active:scale-[0.99] transition"
+              disabled={isSubmitting}
+              className="w-full rounded-2xl bg-[var(--color-vermillion)] text-[var(--color-cream)] py-4 font-display text-[18px] shadow-[0_20px_40px_-18px_oklch(0.45_0.18_27/0.7)] border border-[var(--color-vermillion-deep)] active:scale-[0.99] transition disabled:opacity-60 disabled:cursor-not-allowed disabled:active:scale-100"
             >
-              Place Order · ฿{total.toLocaleString()}
+              {isSubmitting ? "Sending Order…" : `Place Order · ฿${total.toLocaleString()}`}
             </button>
           </div>
         )}
