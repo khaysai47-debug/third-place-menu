@@ -34,20 +34,22 @@ export function CartBar({ items, total, onIncrease, onDecrease, onClear, onCheck
   return (
     <div className="fixed inset-x-0 bottom-0 z-40 pointer-events-none">
       <div className="mx-auto max-w-[680px] px-4 pb-4">
-        <div className="pointer-events-auto mb-2 rounded-2xl bg-[var(--color-ink)] border border-[var(--color-gold)]/20 px-4 py-3 space-y-2">
-          {items.map((item) => (
-            <div key={item.id} className="flex items-center gap-2">
-              <span className="font-display text-[14px] text-[var(--color-cream)] flex-1 truncate">{item.name}</span>
-              <div className="flex items-center gap-1.5 shrink-0">
-                <QtyButton onClick={() => onDecrease(item.id)} label="Decrease quantity">−</QtyButton>
-                <span className="font-display text-[13px] text-[var(--color-cream)] w-4 text-center">{item.qty}</span>
-                <QtyButton onClick={() => onIncrease(item.id)} label="Increase quantity">+</QtyButton>
+        <div className="pointer-events-auto mb-2 rounded-2xl bg-[var(--color-ink)] border border-[var(--color-gold)]/20 px-4 pt-3 pb-2">
+          <div className="overflow-y-auto max-h-[130px] space-y-2 pr-1">
+            {items.map((item) => (
+              <div key={item.id} className="flex items-center gap-2">
+                <span className="font-display text-[14px] text-[var(--color-cream)] flex-1 truncate">{item.name}</span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <QtyButton onClick={() => onDecrease(item.id)} label="Decrease quantity">−</QtyButton>
+                  <span className="font-display text-[13px] text-[var(--color-cream)] w-4 text-center">{item.qty}</span>
+                  <QtyButton onClick={() => onIncrease(item.id)} label="Increase quantity">+</QtyButton>
+                </div>
+                <span className="font-display text-[14px] text-[var(--color-gold-soft)] w-12 text-right shrink-0">
+                  ฿{item.subtotal}
+                </span>
               </div>
-              <span className="font-display text-[14px] text-[var(--color-gold-soft)] w-12 text-right shrink-0">
-                ฿{item.subtotal}
-              </span>
-            </div>
-          ))}
+            ))}
+          </div>
           <div className="pt-1.5 border-t border-[var(--color-gold)]/15 flex justify-end">
             <button
               onClick={onClear}
