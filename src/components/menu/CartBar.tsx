@@ -35,7 +35,7 @@ export function CartBar({ items, total, onIncrease, onDecrease, onClear, onCheck
     <div className="fixed inset-x-0 bottom-0 z-40 pointer-events-none">
       <div className="mx-auto max-w-[680px] px-4 pb-4">
         <div className="pointer-events-auto mb-2 rounded-2xl bg-[var(--color-ink)] border border-[var(--color-gold)]/20 px-4 pt-3 pb-2">
-          <div className="overflow-y-auto max-h-[130px] space-y-2 pr-1">
+          <div className="overflow-y-auto max-h-[100px] space-y-2 pr-1">
             {items.map((item) => (
               <div key={item.id} className="flex items-center gap-2">
                 <span className="font-display text-[14px] text-[var(--color-cream)] flex-1 truncate">{item.name}</span>
