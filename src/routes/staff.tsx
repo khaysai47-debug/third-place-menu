@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
+import { OrderDetailDrawer } from "@/components/staff/OrderDetailDrawer";
 import { StaffOrderCard } from "@/components/staff/StaffOrderCard";
 import { NEXT_ACTION, STATUS_META, STATUS_ORDER } from "@/components/staff/orderStatus";
 import { MOCK_ORDERS, type StaffOrder, type StaffOrderStatus } from "@/data/staffOrders";
@@ -19,6 +20,7 @@ const SUMMARY_STATUSES: StaffOrderStatus[] = ["new", "preparing", "ready", "done
 function StaffPage() {
   const [orders, setOrders] = useState<StaffOrder[]>(MOCK_ORDERS);
   const [activeTab, setActiveTab] = useState<StaffOrderStatus>("new");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const counts = useMemo(() => {
     const c: Record<StaffOrderStatus, number> = {
@@ -33,6 +35,7 @@ function StaffPage() {
   }, [orders]);
 
   const visible = orders.filter((o) => o.status === activeTab);
+  const selectedOrder = orders.find((o) => o.orderId === selectedId);
 
   const advanceOrder = (orderId: string) =>
     setOrders((prev) =>
@@ -135,7 +138,12 @@ function StaffPage() {
         {visible.length > 0 ? (
           <div className="mt-5 px-5 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 auto-rows-fr gap-4">
             {visible.map((order) => (
-              <StaffOrderCard key={order.orderId} order={order} onAdvance={advanceOrder} />
+              <StaffOrderCard
+                key={order.orderId}
+                order={order}
+                onAdvance={advanceOrder}
+                onOpen={setSelectedId}
+              />
             ))}
           </div>
         ) : (
@@ -151,6 +159,14 @@ function StaffPage() {
           </div>
         )}
       </main>
+
+      {selectedOrder && (
+        <OrderDetailDrawer
+          order={selectedOrder}
+          onAdvance={advanceOrder}
+          onClose={() => setSelectedId(null)}
+        />
+      )}
     </div>
   );
 }

@@ -4,9 +4,10 @@ import { NEXT_ACTION, STATUS_META } from "./orderStatus";
 interface Props {
   order: StaffOrder;
   onAdvance: (orderId: string) => void;
+  onOpen: (orderId: string) => void;
 }
 
-function orderLocation(order: StaffOrder) {
+export function orderLocation(order: StaffOrder) {
   if (order.orderType === "dine_in") {
     return { big: `Table ${order.tableNumber ?? "?"}`, zh: "堂食" };
   }
@@ -16,7 +17,7 @@ function orderLocation(order: StaffOrder) {
   return { big: "Delivery", zh: "外送" };
 }
 
-export function StaffOrderCard({ order, onAdvance }: Props) {
+export function StaffOrderCard({ order, onAdvance, onOpen }: Props) {
   const meta = STATUS_META[order.status];
   const action = NEXT_ACTION[order.status];
   const location = orderLocation(order);
@@ -25,7 +26,8 @@ export function StaffOrderCard({ order, onAdvance }: Props) {
 
   return (
     <article
-      className={`paper-grain h-full rounded-2xl border border-[var(--color-gold)]/30 overflow-hidden flex flex-col shadow-[0_20px_40px_-25px_oklch(0_0_0/0.8)] ${cancelled ? "opacity-60" : ""}`}
+      onClick={() => onOpen(order.orderId)}
+      className={`paper-grain h-full rounded-2xl border border-[var(--color-gold)]/30 overflow-hidden flex flex-col shadow-[0_20px_40px_-25px_oklch(0_0_0/0.8)] cursor-pointer transition hover:border-[var(--color-gold)]/60 active:scale-[0.995] ${cancelled ? "opacity-60" : ""}`}
     >
       <div className="p-4 pb-3">
         <div className="flex items-start justify-between gap-3">
@@ -76,7 +78,10 @@ export function StaffOrderCard({ order, onAdvance }: Props) {
         </div>
         {action ? (
           <button
-            onClick={() => onAdvance(order.orderId)}
+            onClick={(e) => {
+              e.stopPropagation();
+              onAdvance(order.orderId);
+            }}
             className={`w-full h-14 rounded-xl text-[16px] font-semibold tracking-[0.02em] active:scale-[0.98] transition shadow-[0_10px_20px_-12px_oklch(0_0_0/0.7)] ${action.buttonClass}`}
           >
             {action.labelZh} · {action.labelEn}

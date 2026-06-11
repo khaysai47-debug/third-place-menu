@@ -8,6 +8,7 @@ export type StaffOrderType = "dine_in" | "pickup" | "delivery";
 export interface StaffOrderItem {
   name: string;
   quantity: number;
+  unitPrice: number;
 }
 
 export interface StaffOrder {
@@ -17,6 +18,7 @@ export interface StaffOrder {
   /** Display time only (mock data) — avoids SSR/client clock mismatch. */
   time: string;
   items: StaffOrderItem[];
+  notes: string | null;
   totalPrice: number;
   status: StaffOrderStatus;
 }
@@ -28,10 +30,11 @@ export const MOCK_ORDERS: StaffOrder[] = [
     tableNumber: "5",
     time: "19:42",
     items: [
-      { name: "Lamb Skewer", quantity: 6 },
-      { name: "Chicken Wing", quantity: 4 },
-      { name: "Garlic Eggplant", quantity: 1 },
+      { name: "Lamb Skewer", quantity: 6, unitPrice: 50 },
+      { name: "Chicken Wing", quantity: 4, unitPrice: 40 },
+      { name: "Garlic Eggplant", quantity: 1, unitPrice: 60 },
     ],
+    notes: "Chicken wings not spicy 雞翅不要辣",
     totalPrice: 520,
     status: "new",
   },
@@ -41,9 +44,10 @@ export const MOCK_ORDERS: StaffOrder[] = [
     tableNumber: null,
     time: "19:38",
     items: [
-      { name: "Mala Beef Skewer", quantity: 8 },
-      { name: "Egg Fried Rice", quantity: 2 },
+      { name: "Mala Beef Skewer", quantity: 8, unitPrice: 45 },
+      { name: "Egg Fried Rice", quantity: 2, unitPrice: 50 },
     ],
+    notes: null,
     totalPrice: 460,
     status: "new",
   },
@@ -53,10 +57,11 @@ export const MOCK_ORDERS: StaffOrder[] = [
     tableNumber: "12",
     time: "19:31",
     items: [
-      { name: "Signature BBQ Platter", quantity: 1 },
-      { name: "Hot & Sour Soup", quantity: 2 },
-      { name: "Tsingtao Beer", quantity: 4 },
+      { name: "Signature BBQ Platter", quantity: 1, unitPrice: 680 },
+      { name: "Hot & Sour Soup", quantity: 2, unitPrice: 90 },
+      { name: "Tsingtao Beer", quantity: 4, unitPrice: 80 },
     ],
+    notes: null,
     totalPrice: 1180,
     status: "new",
   },
@@ -66,10 +71,11 @@ export const MOCK_ORDERS: StaffOrder[] = [
     tableNumber: "3",
     time: "19:24",
     items: [
-      { name: "Pork Belly Skewer", quantity: 5 },
-      { name: "Grilled Enoki", quantity: 2 },
-      { name: "Stir-fried Morning Glory", quantity: 1 },
+      { name: "Pork Belly Skewer", quantity: 5, unitPrice: 45 },
+      { name: "Grilled Enoki", quantity: 2, unitPrice: 40 },
+      { name: "Stir-fried Morning Glory", quantity: 1, unitPrice: 90 },
     ],
+    notes: null,
     totalPrice: 395,
     status: "preparing",
   },
@@ -79,9 +85,10 @@ export const MOCK_ORDERS: StaffOrder[] = [
     tableNumber: null,
     time: "19:18",
     items: [
-      { name: "Chicken Skewer", quantity: 10 },
-      { name: "Fried Noodles", quantity: 1 },
+      { name: "Chicken Skewer", quantity: 10, unitPrice: 40 },
+      { name: "Fried Noodles", quantity: 1, unitPrice: 140 },
     ],
+    notes: "Leave at condo lobby, call on arrival",
     totalPrice: 540,
     status: "preparing",
   },
@@ -91,9 +98,10 @@ export const MOCK_ORDERS: StaffOrder[] = [
     tableNumber: "8",
     time: "19:05",
     items: [
-      { name: "Mala Chicken Wing", quantity: 6 },
-      { name: "Steamed Rice", quantity: 2 },
+      { name: "Mala Chicken Wing", quantity: 6, unitPrice: 40 },
+      { name: "Steamed Rice", quantity: 2, unitPrice: 35 },
     ],
+    notes: null,
     totalPrice: 310,
     status: "ready",
   },
@@ -103,9 +111,10 @@ export const MOCK_ORDERS: StaffOrder[] = [
     tableNumber: null,
     time: "18:51",
     items: [
-      { name: "Beef Skewer", quantity: 4 },
-      { name: "Hot & Sour Soup", quantity: 1 },
+      { name: "Beef Skewer", quantity: 4, unitPrice: 45 },
+      { name: "Hot & Sour Soup", quantity: 1, unitPrice: 100 },
     ],
+    notes: null,
     totalPrice: 280,
     status: "done",
   },
@@ -114,7 +123,8 @@ export const MOCK_ORDERS: StaffOrder[] = [
     orderType: "dine_in",
     tableNumber: "9",
     time: "18:40",
-    items: [{ name: "Grilled Squid", quantity: 2 }],
+    items: [{ name: "Grilled Squid", quantity: 2, unitPrice: 120 }],
+    notes: "Customer left before ordering drinks",
     totalPrice: 240,
     status: "cancelled",
   },
