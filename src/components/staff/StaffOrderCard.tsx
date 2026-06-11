@@ -1,0 +1,93 @@
+import type { StaffOrder } from "@/data/staffOrders";
+import { NEXT_ACTION, STATUS_META } from "./orderStatus";
+
+interface Props {
+  order: StaffOrder;
+  onAdvance: (orderId: string) => void;
+}
+
+function orderLocation(order: StaffOrder) {
+  if (order.orderType === "dine_in") {
+    return { big: `Table ${order.tableNumber ?? "?"}`, zh: "堂食" };
+  }
+  if (order.orderType === "pickup") {
+    return { big: "Pickup", zh: "自取" };
+  }
+  return { big: "Delivery", zh: "外送" };
+}
+
+export function StaffOrderCard({ order, onAdvance }: Props) {
+  const meta = STATUS_META[order.status];
+  const action = NEXT_ACTION[order.status];
+  const location = orderLocation(order);
+  const totalQty = order.items.reduce((s, i) => s + i.quantity, 0);
+  const cancelled = order.status === "cancelled";
+
+  return (
+    <article
+      className={`paper-grain h-full rounded-2xl border border-[var(--color-gold)]/30 overflow-hidden flex flex-col shadow-[0_20px_40px_-25px_oklch(0_0_0/0.8)] ${cancelled ? "opacity-60" : ""}`}
+    >
+      <div className="p-4 pb-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[11px] uppercase tracking-[0.18em] font-medium text-[var(--color-ink)]/50 tabular-nums">
+              {order.orderId} · {order.time} · {totalQty} items
+            </p>
+            <h3 className="mt-1.5 font-display text-[28px] leading-none text-[var(--color-ink)]">
+              {location.big}
+              <span className="ml-2 font-sans text-[13px] tracking-[0.08em] text-[var(--color-ink)]/55">
+                {location.zh}
+              </span>
+            </h3>
+          </div>
+          <span
+            className={`shrink-0 mt-0.5 pl-2 pr-2.5 py-1 rounded-full border flex items-center gap-1.5 text-[11px] font-medium tracking-[0.06em] ${meta.badgeClass}`}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${meta.dotClass}`} />
+            {meta.labelZh} {meta.labelEn}
+          </span>
+        </div>
+      </div>
+
+      <ul className="px-4 py-3 border-t border-dotted border-[var(--color-ink)]/25 space-y-2 flex-1 min-h-[5.5rem] max-h-[7.5rem] overflow-y-auto [scrollbar-width:thin]">
+        {order.items.map((item) => (
+          <li
+            key={item.name}
+            className="flex items-baseline gap-2.5 text-[15px] leading-snug text-[var(--color-ink)]/90"
+          >
+            <span className="w-8 shrink-0 text-right font-semibold tabular-nums text-[var(--color-vermillion)]">
+              {item.quantity}
+              <span className="ml-0.5 text-[11px] font-normal text-[var(--color-ink)]/40">×</span>
+            </span>
+            <span className="truncate">{item.name}</span>
+          </li>
+        ))}
+      </ul>
+
+      <div className="mt-auto px-4 pb-4 pt-1 border-t border-dotted border-[var(--color-ink)]/25">
+        <div className="flex items-baseline justify-between mb-3 pt-2.5">
+          <span className="text-[11px] uppercase tracking-[0.18em] font-medium text-[var(--color-ink)]/50">
+            Total · 合計
+          </span>
+          <span className="font-display text-[22px] leading-none text-[var(--color-vermillion)] tabular-nums">
+            <span className="mr-0.5 text-[14px]">฿</span>
+            {order.totalPrice.toLocaleString("en-US")}
+          </span>
+        </div>
+        {action ? (
+          <button
+            onClick={() => onAdvance(order.orderId)}
+            className={`w-full h-14 rounded-xl text-[16px] font-semibold tracking-[0.02em] active:scale-[0.98] transition shadow-[0_10px_20px_-12px_oklch(0_0_0/0.7)] ${action.buttonClass}`}
+          >
+            {action.labelZh} · {action.labelEn}
+          </button>
+        ) : (
+          <p className="w-full h-14 rounded-xl bg-[var(--color-ink)]/5 border border-[var(--color-ink)]/10 flex items-center justify-center gap-2 text-[14px] tracking-[0.06em] text-[var(--color-ink)]/50">
+            <span className={`h-1.5 w-1.5 rounded-full ${meta.dotClass}`} />
+            {meta.labelZh} · {meta.labelEn}
+          </p>
+        )}
+      </div>
+    </article>
+  );
+}
