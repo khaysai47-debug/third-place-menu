@@ -69,6 +69,16 @@ interface ApiOrder {
 const STATUSES: StaffOrderStatus[] = ["new", "preparing", "ready", "done", "cancelled"];
 const ORDER_TYPES: StaffOrderType[] = ["dine_in", "pickup", "delivery"];
 
+// Airtable's Status field calls it "completed"; the staff UI calls it "done".
+// Translate in both directions at this API boundary only — everything else
+// (components, transition map, tabs) keeps using "done".
+const API_STATUS_BY_UI: Partial<Record<StaffOrderStatus, string>> = {
+  done: "completed",
+};
+const UI_STATUS_BY_API: Record<string, StaffOrderStatus> = {
+  completed: "done",
+};
+
 const asString = (v: unknown): string => (typeof v === "string" ? v : "");
 const asNumber = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
 
@@ -79,7 +89,8 @@ function formatTime(iso: string): string {
 }
 
 function mapApiOrder(raw: ApiOrder): StaffOrder {
-  const status = asString(raw.status).toLowerCase() as StaffOrderStatus;
+  const rawStatus = asString(raw.status).toLowerCase();
+  const status = UI_STATUS_BY_API[rawStatus] ?? (rawStatus as StaffOrderStatus);
   const orderType = asString(raw.orderType) as StaffOrderType;
   const createdAt = asString(raw.createdAt);
   return {
@@ -131,7 +142,7 @@ export async function updateStaffOrderStatus(
     const response = await fetch(UPDATE_STATUS_API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ airtableRecordId, status }),
+      body: JSON.stringify({ airtableRecordId, status: API_STATUS_BY_UI[status] ?? status }),
     });
     const data = (await response.json().catch(() => null)) as { success?: boolean } | null;
     if (!response.ok || data?.success !== true) {
