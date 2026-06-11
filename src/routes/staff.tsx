@@ -30,6 +30,8 @@ function StaffPage() {
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [activeTab, setActiveTab] = useState<StaffOrderStatus>("new");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [updatingIds, setUpdatingIds] = useState<ReadonlySet<string>>(new Set());
+  const [updateError, setUpdateError] = useState<string | null>(null);
 
   const loadOrders = useCallback(async () => {
     setLoadState("loading");
@@ -46,6 +48,15 @@ function StaffPage() {
     void loadOrders();
   }, [loadOrders]);
 
+  // Background re-sync after a successful update; keeps local state on failure.
+  const refreshOrders = useCallback(async () => {
+    try {
+      setOrders(await getStaffOrders());
+    } catch (error) {
+      console.error("Background refresh failed", error);
+    }
+  }, []);
+
   const counts = useMemo(() => {
     const c: Record<StaffOrderStatus, number> = {
       new: 0,
@@ -61,14 +72,30 @@ function StaffPage() {
   const visible = orders.filter((o) => o.status === activeTab);
   const selectedOrder = orders.find((o) => o.orderId === selectedId);
 
-  const advanceOrder = (orderId: string) => {
+  const advanceOrder = async (orderId: string) => {
     const current = orders.find((o) => o.orderId === orderId);
     const next = current ? nextStaffOrderStatus(current.status) : null;
-    if (!next) return;
-    setOrders((prev) => prev.map((o) => (o.orderId === orderId ? { ...o, status: next } : o)));
-    // Mock persistence for now; becomes the real backend call (with rollback
-    // on failure) in the integration phase.
-    void updateStaffOrderStatus(orderId, next);
+    if (!current || !next || updatingIds.has(orderId)) return;
+    if (!current.airtableRecordId) {
+      setUpdateError("此訂單無法更新 · This order can't be updated.");
+      return;
+    }
+
+    setUpdateError(null);
+    setUpdatingIds((prev) => new Set(prev).add(orderId));
+    const result = await updateStaffOrderStatus(current.airtableRecordId, next);
+    setUpdatingIds((prev) => {
+      const nextSet = new Set(prev);
+      nextSet.delete(orderId);
+      return nextSet;
+    });
+
+    if (result.success) {
+      setOrders((prev) => prev.map((o) => (o.orderId === orderId ? { ...o, status: next } : o)));
+      void refreshOrders();
+    } else {
+      setUpdateError(result.error);
+    }
   };
 
   return (
@@ -159,6 +186,20 @@ function StaffPage() {
           </div>
         </nav>
 
+        {/* Status update error */}
+        {updateError && loadState === "ready" && (
+          <div className="mt-4 mx-5 rounded-xl border border-[var(--color-vermillion)]/40 bg-[var(--color-vermillion)]/10 px-4 py-3 flex items-center justify-between gap-3">
+            <p className="text-[14px] text-[var(--color-cream)]/90">{updateError}</p>
+            <button
+              onClick={() => setUpdateError(null)}
+              aria-label="Dismiss 關閉"
+              className="h-9 w-9 shrink-0 rounded-full bg-[var(--color-cream)]/10 text-[var(--color-cream)]/60 flex items-center justify-center hover:bg-[var(--color-cream)]/20 transition"
+            >
+              ✕
+            </button>
+          </div>
+        )}
+
         {/* Order cards */}
         {loadState === "loading" ? (
           <div className="mt-12 px-5 text-center">
@@ -209,6 +250,7 @@ function StaffPage() {
               <StaffOrderCard
                 key={order.orderId}
                 order={order}
+                updating={updatingIds.has(order.orderId)}
                 onAdvance={advanceOrder}
                 onOpen={setSelectedId}
               />
@@ -231,6 +273,8 @@ function StaffPage() {
       {selectedOrder && (
         <OrderDetailDrawer
           order={selectedOrder}
+          updating={updatingIds.has(selectedOrder.orderId)}
+          updateError={updateError}
           onAdvance={advanceOrder}
           onClose={() => setSelectedId(null)}
         />

@@ -3,6 +3,7 @@ import { NEXT_ACTION, STATUS_META } from "./orderStatus";
 
 interface Props {
   order: StaffOrder;
+  updating?: boolean;
   onAdvance: (orderId: string) => void;
   onOpen: (orderId: string) => void;
 }
@@ -17,7 +18,7 @@ export function orderLocation(order: StaffOrder) {
   return { big: "Delivery", zh: "外送" };
 }
 
-export function StaffOrderCard({ order, onAdvance, onOpen }: Props) {
+export function StaffOrderCard({ order, updating = false, onAdvance, onOpen }: Props) {
   const meta = STATUS_META[order.status];
   const action = NEXT_ACTION[order.status];
   const location = orderLocation(order);
@@ -82,9 +83,10 @@ export function StaffOrderCard({ order, onAdvance, onOpen }: Props) {
               e.stopPropagation();
               onAdvance(order.orderId);
             }}
-            className={`w-full h-14 rounded-xl text-[16px] font-semibold tracking-[0.02em] active:scale-[0.98] transition shadow-[0_10px_20px_-12px_oklch(0_0_0/0.7)] ${action.buttonClass}`}
+            disabled={updating}
+            className={`w-full h-14 rounded-xl text-[16px] font-semibold tracking-[0.02em] active:scale-[0.98] transition shadow-[0_10px_20px_-12px_oklch(0_0_0/0.7)] disabled:opacity-60 disabled:cursor-wait disabled:active:scale-100 ${action.buttonClass}`}
           >
-            {action.labelZh} · {action.labelEn}
+            {updating ? "更新中 · Updating…" : `${action.labelZh} · ${action.labelEn}`}
           </button>
         ) : (
           <p className="w-full h-14 rounded-xl bg-[var(--color-ink)]/5 border border-[var(--color-ink)]/10 flex items-center justify-center gap-2 text-[14px] tracking-[0.06em] text-[var(--color-ink)]/50">

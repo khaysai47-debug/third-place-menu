@@ -1,9 +1,9 @@
 // Staff order domain: types, status flow, and data access.
-// Reads live orders from the n8n Staff Orders API (which talks to Airtable —
-// Airtable credentials live in n8n, never here). Status updates are still
-// local/mock until the write-back workflow exists.
+// Reads and writes orders through the n8n APIs (which talk to Airtable —
+// Airtable credentials live in n8n, never here).
 
 const STAFF_ORDERS_API_URL = "http://192.168.1.103:5678/webhook/third-place-staff-orders";
+const UPDATE_STATUS_API_URL = "http://192.168.1.103:5678/webhook/third-place-update-order-status";
 
 export type StaffOrderStatus = "new" | "preparing" | "ready" | "done" | "cancelled";
 
@@ -18,6 +18,8 @@ export interface StaffOrderItem {
 }
 
 export interface StaffOrder {
+  /** Airtable record id — required for status updates; mock fixtures omit it. */
+  airtableRecordId?: string;
   orderId: string;
   orderType: StaffOrderType;
   tableNumber: string | null;
@@ -48,6 +50,7 @@ export type UpdateStaffOrderResult =
 
 /** Shape of one order as returned by the n8n Staff Orders API. */
 interface ApiOrder {
+  airtableRecordId?: unknown;
   orderId?: unknown;
   orderType?: unknown;
   tableNumber?: unknown;
@@ -80,6 +83,7 @@ function mapApiOrder(raw: ApiOrder): StaffOrder {
   const orderType = asString(raw.orderType) as StaffOrderType;
   const createdAt = asString(raw.createdAt);
   return {
+    airtableRecordId: asString(raw.airtableRecordId) || undefined,
     orderId: asString(raw.orderId),
     orderType: ORDER_TYPES.includes(orderType) ? orderType : "dine_in",
     tableNumber: asString(raw.tableNumber) || null,
@@ -116,15 +120,25 @@ export async function getStaffOrders(): Promise<StaffOrder[]> {
 }
 
 /**
- * Persist a status change for one order.
- * Mock implementation: logs and reports success; the UI keeps its own local state.
- * Integration phase: POST to the n8n webhook / Airtable update, then return
- * the real outcome so the UI can roll back on failure.
+ * Persist a status change for one order via the n8n Update Order Status API,
+ * which writes to the Airtable Status field.
  */
 export async function updateStaffOrderStatus(
-  orderId: string,
+  airtableRecordId: string,
   status: StaffOrderStatus
 ): Promise<UpdateStaffOrderResult> {
-  console.log("STAFF_ORDER_STATUS_UPDATE (mock)", { orderId, status });
-  return { success: true };
+  try {
+    const response = await fetch(UPDATE_STATUS_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ airtableRecordId, status }),
+    });
+    const data = (await response.json().catch(() => null)) as { success?: boolean } | null;
+    if (!response.ok || data?.success !== true) {
+      return { success: false, error: "更新失敗 · Update failed. Try again." };
+    }
+    return { success: true };
+  } catch {
+    return { success: false, error: "無法連接伺服器 · Can't reach order server." };
+  }
 }
