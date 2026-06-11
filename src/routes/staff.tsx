@@ -2,8 +2,14 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { OrderDetailDrawer } from "@/components/staff/OrderDetailDrawer";
 import { StaffOrderCard } from "@/components/staff/StaffOrderCard";
-import { NEXT_ACTION, STATUS_META, STATUS_ORDER } from "@/components/staff/orderStatus";
-import { MOCK_ORDERS, type StaffOrder, type StaffOrderStatus } from "@/data/staffOrders";
+import { STATUS_META, STATUS_ORDER } from "@/components/staff/orderStatus";
+import {
+  getStaffOrders,
+  nextStaffOrderStatus,
+  updateStaffOrderStatus,
+  type StaffOrder,
+  type StaffOrderStatus,
+} from "@/lib/staffOrders";
 
 export const Route = createFileRoute("/staff")({
   head: () => ({
@@ -12,13 +18,17 @@ export const Route = createFileRoute("/staff")({
       { name: "robots", content: "noindex" },
     ],
   }),
+  // Runs server-side on first load — when this hits Airtable later,
+  // credentials stay on the server.
+  loader: () => getStaffOrders(),
   component: StaffPage,
 });
 
 const SUMMARY_STATUSES: StaffOrderStatus[] = ["new", "preparing", "ready", "done"];
 
 function StaffPage() {
-  const [orders, setOrders] = useState<StaffOrder[]>(MOCK_ORDERS);
+  const initialOrders = Route.useLoaderData();
+  const [orders, setOrders] = useState<StaffOrder[]>(initialOrders);
   const [activeTab, setActiveTab] = useState<StaffOrderStatus>("new");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -37,14 +47,15 @@ function StaffPage() {
   const visible = orders.filter((o) => o.status === activeTab);
   const selectedOrder = orders.find((o) => o.orderId === selectedId);
 
-  const advanceOrder = (orderId: string) =>
-    setOrders((prev) =>
-      prev.map((o) => {
-        if (o.orderId !== orderId) return o;
-        const action = NEXT_ACTION[o.status];
-        return action ? { ...o, status: action.next } : o;
-      })
-    );
+  const advanceOrder = (orderId: string) => {
+    const current = orders.find((o) => o.orderId === orderId);
+    const next = current ? nextStaffOrderStatus(current.status) : null;
+    if (!next) return;
+    setOrders((prev) => prev.map((o) => (o.orderId === orderId ? { ...o, status: next } : o)));
+    // Mock persistence for now; becomes the real backend call (with rollback
+    // on failure) in the integration phase.
+    void updateStaffOrderStatus(orderId, next);
+  };
 
   return (
     <div className="min-h-screen ink-grain">

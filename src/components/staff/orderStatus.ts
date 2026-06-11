@@ -1,4 +1,6 @@
-import type { StaffOrderStatus } from "@/data/staffOrders";
+// UI presentation for staff order statuses (labels, colors). The status
+// flow itself lives in src/lib/staffOrders.ts.
+import type { StaffOrderStatus } from "@/lib/staffOrders";
 
 export const STATUS_ORDER: StaffOrderStatus[] = [
   "new",
@@ -52,7 +54,6 @@ export const STATUS_META: Record<StaffOrderStatus, StatusMeta> = {
 };
 
 interface NextAction {
-  next: StaffOrderStatus;
   labelEn: string;
   labelZh: string;
   buttonClass: string;
@@ -60,20 +61,17 @@ interface NextAction {
 
 export const NEXT_ACTION: Partial<Record<StaffOrderStatus, NextAction>> = {
   new: {
-    next: "preparing",
     labelEn: "Start Preparing",
     labelZh: "開始製作",
     buttonClass:
       "bg-[var(--color-vermillion)] text-[var(--color-cream)] hover:bg-[var(--color-vermillion-deep)]",
   },
   preparing: {
-    next: "ready",
     labelEn: "Mark Ready",
     labelZh: "出餐",
     buttonClass: "bg-amber-600 text-white hover:bg-amber-700",
   },
   ready: {
-    next: "done",
     labelEn: "Mark Done",
     labelZh: "完成",
     buttonClass: "bg-emerald-700 text-white hover:bg-emerald-800",

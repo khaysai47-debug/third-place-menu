@@ -1,27 +1,7 @@
-// Mock orders for the staff board (Phase 3A — UI foundation only).
-// Not wired to Airtable/n8n; replaced by live data in a later phase.
+// Mock staff order fixtures. Served through src/lib/staffOrders.ts —
+// import data via that service, not from here. Deleted once Airtable lands.
 
-export type StaffOrderStatus = "new" | "preparing" | "ready" | "done" | "cancelled";
-
-export type StaffOrderType = "dine_in" | "pickup" | "delivery";
-
-export interface StaffOrderItem {
-  name: string;
-  quantity: number;
-  unitPrice: number;
-}
-
-export interface StaffOrder {
-  orderId: string;
-  orderType: StaffOrderType;
-  tableNumber: string | null;
-  /** Display time only (mock data) — avoids SSR/client clock mismatch. */
-  time: string;
-  items: StaffOrderItem[];
-  notes: string | null;
-  totalPrice: number;
-  status: StaffOrderStatus;
-}
+import type { StaffOrder } from "@/lib/staffOrders";
 
 export const MOCK_ORDERS: StaffOrder[] = [
   {

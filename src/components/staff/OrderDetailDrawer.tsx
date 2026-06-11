@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import type { StaffOrder } from "@/data/staffOrders";
+import type { StaffOrder } from "@/lib/staffOrders";
 import { NEXT_ACTION, STATUS_META } from "./orderStatus";
 import { orderLocation } from "./StaffOrderCard";
 
