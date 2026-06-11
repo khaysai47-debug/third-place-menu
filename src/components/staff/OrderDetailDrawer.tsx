@@ -67,7 +67,7 @@ export function OrderDetailDrawer({ order, onAdvance, onClose }: Props) {
             </h3>
             <ul className="space-y-3">
               {order.items.map((item) => (
-                <li key={item.name} className="flex items-baseline gap-3">
+                <li key={item.id ?? item.name} className="flex items-baseline gap-3">
                   <span className="w-9 shrink-0 text-right font-semibold tabular-nums text-[16px] text-[var(--color-vermillion)]">
                     {item.quantity}
                     <span className="ml-0.5 text-[11px] font-normal text-[var(--color-cream)]/35">

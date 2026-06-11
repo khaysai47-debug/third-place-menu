@@ -54,7 +54,7 @@ export function StaffOrderCard({ order, onAdvance, onOpen }: Props) {
       <ul className="px-4 py-3 border-t border-dotted border-[var(--color-ink)]/25 space-y-2 flex-1 min-h-[5.5rem] max-h-[7.5rem] overflow-y-auto [scrollbar-width:thin]">
         {order.items.map((item) => (
           <li
-            key={item.name}
+            key={item.id ?? item.name}
             className="flex items-baseline gap-2.5 text-[15px] leading-snug text-[var(--color-ink)]/90"
           >
             <span className="w-8 shrink-0 text-right font-semibold tabular-nums text-[var(--color-vermillion)]">

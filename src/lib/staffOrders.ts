@@ -1,17 +1,17 @@
 // Staff order domain: types, status flow, and data access.
-// Currently mock-backed. The integration phase swaps the internals of
-// getStaffOrders/updateStaffOrderStatus for real n8n/Airtable calls —
-// callers and UI components should not need to change.
-// No secrets or endpoints belong in this file while it is client-shared;
-// real credentials go in server-only code when the backend lands.
+// Reads live orders from the n8n Staff Orders API (which talks to Airtable —
+// Airtable credentials live in n8n, never here). Status updates are still
+// local/mock until the write-back workflow exists.
 
-import { MOCK_ORDERS } from "@/data/staffOrders";
+const STAFF_ORDERS_API_URL = "http://192.168.1.103:5678/webhook/third-place-staff-orders";
 
 export type StaffOrderStatus = "new" | "preparing" | "ready" | "done" | "cancelled";
 
 export type StaffOrderType = "dine_in" | "pickup" | "delivery";
 
 export interface StaffOrderItem {
+  /** Menu item id from the API; mock fixtures omit it. */
+  id?: string;
   name: string;
   quantity: number;
   unitPrice: number;
@@ -21,8 +21,10 @@ export interface StaffOrder {
   orderId: string;
   orderType: StaffOrderType;
   tableNumber: string | null;
-  /** Display time only (mock data) — real data will carry a createdAt timestamp. */
+  /** Wall-clock display time (HH:MM), derived from createdAt for live orders. */
   time: string;
+  /** ISO timestamp from the API; mock fixtures omit it. */
+  createdAt?: string;
   items: StaffOrderItem[];
   notes: string | null;
   totalPrice: number;
@@ -44,13 +46,73 @@ export type UpdateStaffOrderResult =
   | { success: true }
   | { success: false; error: string };
 
+/** Shape of one order as returned by the n8n Staff Orders API. */
+interface ApiOrder {
+  orderId?: unknown;
+  orderType?: unknown;
+  tableNumber?: unknown;
+  notes?: unknown;
+  createdAt?: unknown;
+  totalPrice?: unknown;
+  status?: unknown;
+  items?: {
+    id?: unknown;
+    name?: unknown;
+    quantity?: unknown;
+    unitPrice?: unknown;
+  }[];
+}
+
+const STATUSES: StaffOrderStatus[] = ["new", "preparing", "ready", "done", "cancelled"];
+const ORDER_TYPES: StaffOrderType[] = ["dine_in", "pickup", "delivery"];
+
+const asString = (v: unknown): string => (typeof v === "string" ? v : "");
+const asNumber = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+
+function formatTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+}
+
+function mapApiOrder(raw: ApiOrder): StaffOrder {
+  const status = asString(raw.status).toLowerCase() as StaffOrderStatus;
+  const orderType = asString(raw.orderType) as StaffOrderType;
+  const createdAt = asString(raw.createdAt);
+  return {
+    orderId: asString(raw.orderId),
+    orderType: ORDER_TYPES.includes(orderType) ? orderType : "dine_in",
+    tableNumber: asString(raw.tableNumber) || null,
+    time: formatTime(createdAt),
+    createdAt: createdAt || undefined,
+    items: (raw.items ?? []).map((item) => ({
+      id: asString(item.id) || undefined,
+      name: asString(item.name),
+      quantity: asNumber(item.quantity),
+      unitPrice: asNumber(item.unitPrice),
+    })),
+    notes: asString(raw.notes) || null,
+    totalPrice: asNumber(raw.totalPrice),
+    status: STATUSES.includes(status) ? status : "new",
+  };
+}
+
 /**
- * Fetch the staff order board.
- * Mock implementation: returns a fresh copy of the fixtures.
- * Integration phase: fetch from Airtable (server-side, via the route loader).
+ * Fetch the staff order board from the n8n Staff Orders API.
+ * Throws on network/HTTP/shape errors — the page shows an error state with retry.
  */
 export async function getStaffOrders(): Promise<StaffOrder[]> {
-  return structuredClone(MOCK_ORDERS);
+  const response = await fetch(STAFF_ORDERS_API_URL, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`Staff orders API responded ${response.status}`);
+  }
+  const data: unknown = await response.json();
+  if (!Array.isArray(data)) {
+    throw new Error("Staff orders API returned an unexpected shape");
+  }
+  return (data as ApiOrder[])
+    .map(mapApiOrder)
+    .sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
 }
 
 /**
