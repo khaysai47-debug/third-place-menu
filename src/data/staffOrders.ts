@@ -17,6 +17,7 @@ export const MOCK_ORDERS: StaffOrder[] = [
     notes: "Chicken wings not spicy 雞翅不要辣",
     totalPrice: 520,
     status: "new",
+    paymentStatus: "unpaid",
   },
   {
     orderId: "TP-1040",
@@ -30,6 +31,7 @@ export const MOCK_ORDERS: StaffOrder[] = [
     notes: null,
     totalPrice: 460,
     status: "new",
+    paymentStatus: "unpaid",
   },
   {
     orderId: "TP-1039",
@@ -44,6 +46,7 @@ export const MOCK_ORDERS: StaffOrder[] = [
     notes: null,
     totalPrice: 1180,
     status: "new",
+    paymentStatus: "unpaid",
   },
   {
     orderId: "TP-1038",
@@ -58,6 +61,7 @@ export const MOCK_ORDERS: StaffOrder[] = [
     notes: null,
     totalPrice: 395,
     status: "preparing",
+    paymentStatus: "unpaid",
   },
   {
     orderId: "TP-1037",
@@ -71,6 +75,7 @@ export const MOCK_ORDERS: StaffOrder[] = [
     notes: "Leave at condo lobby, call on arrival",
     totalPrice: 540,
     status: "preparing",
+    paymentStatus: "unpaid",
   },
   {
     orderId: "TP-1036",
@@ -84,6 +89,7 @@ export const MOCK_ORDERS: StaffOrder[] = [
     notes: null,
     totalPrice: 310,
     status: "ready",
+    paymentStatus: "unpaid",
   },
   {
     orderId: "TP-1035",
@@ -97,6 +103,8 @@ export const MOCK_ORDERS: StaffOrder[] = [
     notes: null,
     totalPrice: 280,
     status: "done",
+    paymentStatus: "paid",
+    paymentMethod: "Cash",
   },
   {
     orderId: "TP-1034",
@@ -107,5 +115,6 @@ export const MOCK_ORDERS: StaffOrder[] = [
     notes: "Customer left before ordering drinks",
     totalPrice: 240,
     status: "cancelled",
+    paymentStatus: "unpaid",
   },
 ];

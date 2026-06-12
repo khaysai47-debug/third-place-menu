@@ -4,10 +4,16 @@
 
 const STAFF_ORDERS_API_URL = "http://192.168.1.103:5678/webhook/third-place-staff-orders";
 const UPDATE_STATUS_API_URL = "http://192.168.1.103:5678/webhook/third-place-update-order-status";
+const UPDATE_PAYMENT_API_URL = "http://192.168.1.103:5678/webhook/third-place-update-payment";
 
 export type StaffOrderStatus = "new" | "preparing" | "ready" | "done" | "cancelled";
 
 export type StaffOrderType = "dine_in" | "pickup" | "delivery";
+
+export type StaffPaymentStatus = "unpaid" | "paid";
+
+/** Exact Airtable "Payment Method" select values — sent verbatim to the API. */
+export type StaffPaymentMethod = "Cash" | "Transfer";
 
 export interface StaffOrderItem {
   /** Menu item id from the API; mock fixtures omit it. */
@@ -31,6 +37,11 @@ export interface StaffOrder {
   notes: string | null;
   totalPrice: number;
   status: StaffOrderStatus;
+  /** Defaults to "unpaid" while the Staff Orders API doesn't map Payment Status. */
+  paymentStatus: StaffPaymentStatus;
+  paymentMethod?: StaffPaymentMethod;
+  /** ISO timestamp written by n8n when payment is recorded. */
+  paidAt?: string;
 }
 
 /** The only legal forward transitions. Done/cancelled are terminal. */
@@ -44,9 +55,7 @@ export function nextStaffOrderStatus(status: StaffOrderStatus): StaffOrderStatus
   return NEXT_STATUS[status] ?? null;
 }
 
-export type UpdateStaffOrderResult =
-  | { success: true }
-  | { success: false; error: string };
+export type UpdateStaffOrderResult = { success: true } | { success: false; error: string };
 
 /** Shape of one order as returned by the n8n Staff Orders API. */
 interface ApiOrder {
@@ -58,6 +67,9 @@ interface ApiOrder {
   createdAt?: unknown;
   totalPrice?: unknown;
   status?: unknown;
+  paymentStatus?: unknown;
+  paymentMethod?: unknown;
+  paidAt?: unknown;
   items?: {
     id?: unknown;
     name?: unknown;
@@ -93,6 +105,7 @@ function mapApiOrder(raw: ApiOrder): StaffOrder {
   const status = UI_STATUS_BY_API[rawStatus] ?? (rawStatus as StaffOrderStatus);
   const orderType = asString(raw.orderType) as StaffOrderType;
   const createdAt = asString(raw.createdAt);
+  const rawMethod = asString(raw.paymentMethod);
   return {
     airtableRecordId: asString(raw.airtableRecordId) || undefined,
     orderId: asString(raw.orderId),
@@ -109,6 +122,9 @@ function mapApiOrder(raw: ApiOrder): StaffOrder {
     notes: asString(raw.notes) || null,
     totalPrice: asNumber(raw.totalPrice),
     status: STATUSES.includes(status) ? status : "new",
+    paymentStatus: asString(raw.paymentStatus).toLowerCase() === "paid" ? "paid" : "unpaid",
+    paymentMethod: rawMethod === "Cash" || rawMethod === "Transfer" ? rawMethod : undefined,
+    paidAt: asString(raw.paidAt) || undefined,
   };
 }
 
@@ -136,7 +152,7 @@ export async function getStaffOrders(): Promise<StaffOrder[]> {
  */
 export async function updateStaffOrderStatus(
   airtableRecordId: string,
-  status: StaffOrderStatus
+  status: StaffOrderStatus,
 ): Promise<UpdateStaffOrderResult> {
   try {
     const response = await fetch(UPDATE_STATUS_API_URL, {
@@ -147,6 +163,31 @@ export async function updateStaffOrderStatus(
     const data = (await response.json().catch(() => null)) as { success?: boolean } | null;
     if (!response.ok || data?.success !== true) {
       return { success: false, error: "更新失敗 · Update failed. Try again." };
+    }
+    return { success: true };
+  } catch {
+    return { success: false, error: "無法連接伺服器 · Can't reach order server." };
+  }
+}
+
+/**
+ * Record a payment for one order via the n8n Update Payment API, which writes
+ * Airtable's Payment Status / Payment Method (and Paid At, set by n8n).
+ * Keyed by airtableRecordId — never the human order id.
+ */
+export async function updateOrderPayment(
+  airtableRecordId: string,
+  paymentMethod: StaffPaymentMethod,
+): Promise<UpdateStaffOrderResult> {
+  try {
+    const response = await fetch(UPDATE_PAYMENT_API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ airtableRecordId, paymentStatus: "Paid", paymentMethod }),
+    });
+    const data = (await response.json().catch(() => null)) as { success?: boolean } | null;
+    if (!response.ok || data?.success !== true) {
+      return { success: false, error: "付款更新失敗 · Payment update failed. Try again." };
     }
     return { success: true };
   } catch {

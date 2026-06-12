@@ -8,9 +8,11 @@ import { STATUS_META, STATUS_ORDER } from "@/components/staff/orderStatus";
 import {
   getStaffOrders,
   nextStaffOrderStatus,
+  updateOrderPayment,
   updateStaffOrderStatus,
   type StaffOrder,
   type StaffOrderStatus,
+  type StaffPaymentMethod,
 } from "@/lib/staffOrders";
 
 export const Route = createFileRoute("/staff")({
@@ -45,6 +47,7 @@ function StaffPage() {
   const [activeTab, setActiveTab] = useState<StaffOrderStatus>("new");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [updatingIds, setUpdatingIds] = useState<ReadonlySet<string>>(new Set());
+  const [payingIds, setPayingIds] = useState<ReadonlySet<string>>(new Set());
   const [updateError, setUpdateError] = useState<string | null>(null);
 
   const loadOrders = useCallback(async () => {
@@ -106,6 +109,35 @@ function StaffPage() {
 
     if (result.success) {
       setOrders((prev) => prev.map((o) => (o.orderId === orderId ? { ...o, status: next } : o)));
+      void refreshOrders();
+    } else {
+      setUpdateError(result.error);
+    }
+  };
+
+  const markPaid = async (orderId: string, method: StaffPaymentMethod) => {
+    const current = orders.find((o) => o.orderId === orderId);
+    if (!current || current.paymentStatus === "paid" || payingIds.has(orderId)) return;
+    if (!current.airtableRecordId) {
+      setUpdateError("此訂單無法更新 · This order can't be updated.");
+      return;
+    }
+
+    setUpdateError(null);
+    setPayingIds((prev) => new Set(prev).add(orderId));
+    const result = await updateOrderPayment(current.airtableRecordId, method);
+    setPayingIds((prev) => {
+      const next = new Set(prev);
+      next.delete(orderId);
+      return next;
+    });
+
+    if (result.success) {
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.orderId === orderId ? { ...o, paymentStatus: "paid", paymentMethod: method } : o,
+        ),
+      );
       void refreshOrders();
     } else {
       setUpdateError(result.error);
@@ -316,8 +348,10 @@ function StaffPage() {
         <OrderDetailDrawer
           order={selectedOrder}
           updating={updatingIds.has(selectedOrder.orderId)}
+          paying={payingIds.has(selectedOrder.orderId)}
           updateError={updateError}
           onAdvance={advanceOrder}
+          onMarkPaid={markPaid}
           onClose={() => setSelectedId(null)}
         />
       )}
