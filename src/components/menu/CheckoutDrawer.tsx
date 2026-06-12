@@ -6,6 +6,8 @@ interface CartItem {
   name: string;
   qty: number;
   subtotal: number;
+  /** Item is no longer orderable (sold out / hidden) — blocks placing the order. */
+  soldOut?: boolean;
 }
 
 interface Props {
@@ -37,19 +39,11 @@ function makeOrderId(): string {
   return `TP-${date}-${time}`;
 }
 
-function Field({
-  error,
-  children,
-}: {
-  error?: string;
-  children: ReactElement;
-}) {
+function Field({ error, children }: { error?: string; children: ReactElement }) {
   return (
     <div>
       {children}
-      {error && (
-        <p className="mt-1 text-[11px] text-[var(--color-vermillion)]">{error}</p>
-      )}
+      {error && <p className="mt-1 text-[11px] text-[var(--color-vermillion)]">{error}</p>}
     </div>
   );
 }
@@ -62,7 +56,7 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
   const [phone, setPhone] = useState("");
   const [tableNumber, setTableNumber] = useState(
     // Pre-fill from ?table= so QR codes per table set this automatically
-    () => new URLSearchParams(window.location.search).get("table") ?? ""
+    () => new URLSearchParams(window.location.search).get("table") ?? "",
   );
   const [orderType, setOrderType] = useState<OrderType>("dine-in");
   const [address, setAddress] = useState("");
@@ -73,9 +67,18 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   const clearError = (key: string) =>
-    setErrors((e) => { const next = { ...e }; delete next[key]; return next; });
+    setErrors((e) => {
+      const next = { ...e };
+      delete next[key];
+      return next;
+    });
 
   const handlePlaceOrder = async () => {
+    if (items.some((i) => i.soldOut)) {
+      setSubmitError("Some items just sold out — please remove them from your cart first.");
+      return;
+    }
+
     const e: Record<string, string> = {};
 
     if (orderType === "dine-in") {
@@ -129,19 +132,13 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end">
       {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-      />
+      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
 
       {/* Panel */}
       <div className="relative mx-auto w-full max-w-[680px] bg-[var(--color-charcoal-soft)] rounded-t-3xl border-t border-x border-[var(--color-gold)]/20 max-h-[92vh] flex flex-col overflow-hidden shadow-[0_-20px_60px_-20px_oklch(0_0_0/0.7)]">
-
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-[var(--color-gold)]/15 shrink-0">
-          <h2 className="font-display text-[22px] text-[var(--color-cream)]">
-            Review Order
-          </h2>
+          <h2 className="font-display text-[22px] text-[var(--color-cream)]">Review Order</h2>
           <button
             onClick={onClose}
             aria-label="Close"
@@ -213,7 +210,10 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
                   {(["dine-in", "pickup", "delivery"] as OrderType[]).map((type) => (
                     <button
                       key={type}
-                      onClick={() => { setOrderType(type); setErrors({}); }}
+                      onClick={() => {
+                        setOrderType(type);
+                        setErrors({});
+                      }}
                       className={`flex-1 py-2.5 rounded-xl text-[12px] uppercase tracking-[0.14em] border transition ${
                         orderType === type
                           ? "bg-[var(--color-vermillion)] border-[var(--color-vermillion)] text-[var(--color-cream)]"
@@ -232,7 +232,10 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
                       type="text"
                       placeholder="Table number"
                       value={tableNumber}
-                      onChange={(e) => { setTableNumber(e.target.value); clearError("tableNumber"); }}
+                      onChange={(e) => {
+                        setTableNumber(e.target.value);
+                        clearError("tableNumber");
+                      }}
                       className={inputClass}
                     />
                   </Field>
@@ -244,7 +247,10 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
                     type="text"
                     placeholder={orderType === "dine-in" ? "Name (optional)" : "Name"}
                     value={name}
-                    onChange={(e) => { setName(e.target.value); clearError("name"); }}
+                    onChange={(e) => {
+                      setName(e.target.value);
+                      clearError("name");
+                    }}
                     className={inputClass}
                   />
                 </Field>
@@ -255,7 +261,10 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
                     type="tel"
                     placeholder={orderType === "dine-in" ? "Phone (optional)" : "Phone number"}
                     value={phone}
-                    onChange={(e) => { setPhone(e.target.value); clearError("phone"); }}
+                    onChange={(e) => {
+                      setPhone(e.target.value);
+                      clearError("phone");
+                    }}
                     className={inputClass}
                   />
                 </Field>
@@ -267,7 +276,10 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
                       type="text"
                       placeholder="Delivery address"
                       value={address}
-                      onChange={(e) => { setAddress(e.target.value); clearError("address"); }}
+                      onChange={(e) => {
+                        setAddress(e.target.value);
+                        clearError("address");
+                      }}
                       className={inputClass}
                     />
                   </Field>
