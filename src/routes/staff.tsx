@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { ManualOrderForm } from "@/components/staff/ManualOrderForm";
 import { MenuAvailabilityBoard } from "@/components/staff/MenuAvailabilityBoard";
 import { OrderDetailDrawer } from "@/components/staff/OrderDetailDrawer";
 import { StaffOrderCard } from "@/components/staff/StaffOrderCard";
@@ -21,12 +22,19 @@ export const Route = createFileRoute("/staff")({
 
 type LoadState = "loading" | "error" | "ready";
 
-type StaffView = "orders" | "menu";
+type StaffView = "orders" | "menu" | "manual";
 
 const STAFF_VIEWS: { view: StaffView; labelEn: string; labelZh: string }[] = [
   { view: "orders", labelEn: "Orders", labelZh: "訂單" },
   { view: "menu", labelEn: "Menu", labelZh: "菜單" },
+  { view: "manual", labelEn: "Add Order", labelZh: "加單" },
 ];
+
+const STAFF_VIEW_TITLES: Record<StaffView, string> = {
+  orders: "Staff Orders",
+  menu: "Menu Availability",
+  manual: "Add Order",
+};
 
 const SUMMARY_STATUSES: StaffOrderStatus[] = ["new", "preparing", "ready", "done"];
 
@@ -119,7 +127,7 @@ function StaffPage() {
           <div className="mt-3 flex items-baseline gap-3">
             <h1 className="font-display text-[26px] sm:text-[30px] leading-tight text-[var(--color-cream)]">
               The <span className="text-[var(--color-vermillion)]">Third</span> Place —{" "}
-              {view === "orders" ? "Staff Orders" : "Menu Availability"}
+              {STAFF_VIEW_TITLES[view]}
             </h1>
             <span className="hidden sm:block divider-stamp flex-1 translate-y-[-6px] opacity-60" />
           </div>
@@ -144,6 +152,8 @@ function StaffPage() {
 
         {view === "menu" ? (
           <MenuAvailabilityBoard />
+        ) : view === "manual" ? (
+          <ManualOrderForm onSubmitted={() => void refreshOrders()} />
         ) : (
           <>
             {/* Summary cards */}
