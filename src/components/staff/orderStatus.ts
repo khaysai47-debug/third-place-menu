@@ -1,14 +1,8 @@
 // UI presentation for staff order statuses (labels, colors). The status
 // flow itself lives in src/lib/staffOrders.ts.
-import type { StaffOrderStatus } from "@/lib/staffOrders";
+import type { StaffOrderStatus, StaffPaymentStatus } from "@/lib/staffOrders";
 
-export const STATUS_ORDER: StaffOrderStatus[] = [
-  "new",
-  "preparing",
-  "ready",
-  "done",
-  "cancelled",
-];
+export const STATUS_ORDER: StaffOrderStatus[] = ["new", "preparing", "ready", "done", "cancelled"];
 
 interface StatusMeta {
   labelEn: string;
@@ -50,6 +44,21 @@ export const STATUS_META: Record<StaffOrderStatus, StatusMeta> = {
     labelZh: "已取消",
     badgeClass: "bg-[var(--color-ink)]/5 text-[var(--color-ink)]/50 border-[var(--color-ink)]/15",
     dotClass: "bg-stone-500",
+  },
+};
+
+export const PAYMENT_META: Record<StaffPaymentStatus, StatusMeta> = {
+  unpaid: {
+    labelEn: "Unpaid",
+    labelZh: "未付",
+    badgeClass: "bg-amber-500/10 text-amber-800 border-amber-600/25",
+    dotClass: "bg-amber-400",
+  },
+  paid: {
+    labelEn: "Paid",
+    labelZh: "已付",
+    badgeClass: "bg-emerald-600/10 text-emerald-800 border-emerald-700/25",
+    dotClass: "bg-emerald-400",
   },
 };
 

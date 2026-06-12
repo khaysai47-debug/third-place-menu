@@ -1,5 +1,5 @@
 import type { StaffOrder } from "@/lib/staffOrders";
-import { NEXT_ACTION, STATUS_META } from "./orderStatus";
+import { NEXT_ACTION, PAYMENT_META, STATUS_META } from "./orderStatus";
 
 interface Props {
   order: StaffOrder;
@@ -20,6 +20,7 @@ export function orderLocation(order: StaffOrder) {
 
 export function StaffOrderCard({ order, updating = false, onAdvance, onOpen }: Props) {
   const meta = STATUS_META[order.status];
+  const payMeta = PAYMENT_META[order.paymentStatus];
   const action = NEXT_ACTION[order.status];
   const location = orderLocation(order);
   const totalQty = order.items.reduce((s, i) => s + i.quantity, 0);
@@ -43,12 +44,23 @@ export function StaffOrderCard({ order, updating = false, onAdvance, onOpen }: P
               </span>
             </h3>
           </div>
-          <span
-            className={`shrink-0 mt-0.5 pl-2 pr-2.5 py-1 rounded-full border flex items-center gap-1.5 text-[11px] font-medium tracking-[0.06em] ${meta.badgeClass}`}
-          >
-            <span className={`h-1.5 w-1.5 rounded-full ${meta.dotClass}`} />
-            {meta.labelZh} {meta.labelEn}
-          </span>
+          <div className="shrink-0 mt-0.5 flex flex-col items-end gap-1">
+            <span
+              className={`pl-2 pr-2.5 py-1 rounded-full border flex items-center gap-1.5 text-[11px] font-medium tracking-[0.06em] ${meta.badgeClass}`}
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${meta.dotClass}`} />
+              {meta.labelZh} {meta.labelEn}
+            </span>
+            <span
+              className={`pl-2 pr-2.5 py-1 rounded-full border flex items-center gap-1.5 text-[11px] font-medium tracking-[0.06em] ${payMeta.badgeClass}`}
+            >
+              <span className={`h-1.5 w-1.5 rounded-full ${payMeta.dotClass}`} />
+              {payMeta.labelZh} {payMeta.labelEn}
+              {order.paymentStatus === "paid" && order.paymentMethod
+                ? ` · ${order.paymentMethod}`
+                : ""}
+            </span>
+          </div>
         </div>
       </div>
 

@@ -1,27 +1,46 @@
 import { useEffect } from "react";
-import type { StaffOrder } from "@/lib/staffOrders";
-import { NEXT_ACTION, STATUS_META } from "./orderStatus";
+import type { StaffOrder, StaffPaymentMethod } from "@/lib/staffOrders";
+import { NEXT_ACTION, PAYMENT_META, STATUS_META } from "./orderStatus";
 import { orderLocation } from "./StaffOrderCard";
 
 interface Props {
   order: StaffOrder;
   updating?: boolean;
+  paying?: boolean;
   updateError?: string | null;
   onAdvance: (orderId: string) => void;
+  onMarkPaid: (orderId: string, method: StaffPaymentMethod) => void;
   onClose: () => void;
+}
+
+const METHOD_ZH: Record<StaffPaymentMethod, string> = {
+  Cash: "現金",
+  Transfer: "轉帳",
+};
+
+function formatPaidAt(iso: string): string | null {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 }
 
 export function OrderDetailDrawer({
   order,
   updating = false,
+  paying = false,
   updateError = null,
   onAdvance,
+  onMarkPaid,
   onClose,
 }: Props) {
   const meta = STATUS_META[order.status];
+  const payMeta = PAYMENT_META[order.paymentStatus];
   const action = NEXT_ACTION[order.status];
   const location = orderLocation(order);
   const totalQty = order.items.reduce((s, i) => s + i.quantity, 0);
+  const paid = order.paymentStatus === "paid";
+  const paidAtLabel = order.paidAt ? formatPaidAt(order.paidAt) : null;
+  const canTakePayment = !paid && !!order.airtableRecordId && order.status !== "cancelled";
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -120,12 +139,41 @@ export function OrderDetailDrawer({
               {order.totalPrice.toLocaleString("en-US")}
             </span>
           </div>
+
+          {/* Payment */}
+          <div className="flex justify-between items-center pt-3 border-t border-[var(--color-gold)]/15">
+            <span className="text-[11px] uppercase tracking-[0.18em] font-medium text-[var(--color-cream)]/50">
+              Payment · 付款
+            </span>
+            <span className="pl-2 pr-2.5 py-1 rounded-full border border-[var(--color-gold)]/25 flex items-center gap-1.5 text-[12px] font-medium tracking-[0.06em] text-[var(--color-cream)]/85">
+              <span className={`h-1.5 w-1.5 rounded-full ${payMeta.dotClass}`} />
+              {payMeta.labelZh} {payMeta.labelEn}
+              {paid && order.paymentMethod
+                ? ` · ${METHOD_ZH[order.paymentMethod]} ${order.paymentMethod}`
+                : ""}
+              {paid && paidAtLabel ? ` · ${paidAtLabel}` : ""}
+            </span>
+          </div>
         </div>
 
         {/* Action */}
         <div className="px-5 py-4 border-t border-[var(--color-gold)]/15 shrink-0 space-y-2">
           {updateError && (
             <p className="text-[13px] text-[var(--color-vermillion)] text-center">{updateError}</p>
+          )}
+          {canTakePayment && (
+            <div className="flex gap-2">
+              {(["Cash", "Transfer"] as StaffPaymentMethod[]).map((method) => (
+                <button
+                  key={method}
+                  onClick={() => onMarkPaid(order.orderId, method)}
+                  disabled={paying}
+                  className="flex-1 h-12 rounded-xl border border-emerald-500/35 bg-emerald-500/10 text-emerald-300 text-[15px] font-semibold tracking-[0.02em] active:scale-[0.98] transition hover:bg-emerald-500/20 disabled:opacity-60 disabled:cursor-wait disabled:active:scale-100"
+                >
+                  {paying ? "更新中…" : `${METHOD_ZH[method]}已付 · Paid ${method}`}
+                </button>
+              ))}
+            </div>
           )}
           {action ? (
             <button
