@@ -1,0 +1,16 @@
+// Central base URL for all n8n webhook calls.
+//
+// Defaults to localhost for local Mac testing (n8n running on the same
+// machine). To test from another device on the LAN (e.g. iPhone), set
+// VITE_N8N_BASE_URL in a .env.local file and restart the dev server, e.g.:
+//
+//   VITE_N8N_BASE_URL=http://192.168.1.103:5678
+//
+// This is a PUBLIC URL, not a secret — see the .server.ts note about
+// import.meta.env.VITE_* config that is safe to ship to the browser.
+const N8N_BASE_URL = import.meta.env.VITE_N8N_BASE_URL ?? "http://localhost:5678";
+
+/** Build a full n8n webhook URL from its path slug (without leading slash). */
+export function n8nWebhook(slug: string): string {
+  return `${N8N_BASE_URL}/webhook/${slug}`;
+}

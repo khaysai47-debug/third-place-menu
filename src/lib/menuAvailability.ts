@@ -2,9 +2,10 @@
 // Reads and writes menu availability through the n8n APIs (which talk to
 // Airtable — Airtable credentials live in n8n, never here).
 
-const MENU_AVAILABILITY_API_URL = "http://192.168.1.103:5678/webhook/third-place-menu-availability";
-const UPDATE_AVAILABILITY_API_URL =
-  "http://192.168.1.103:5678/webhook/third-place-update-menu-availability";
+import { n8nWebhook } from "./n8n";
+
+const MENU_AVAILABILITY_API_URL = n8nWebhook("third-place-menu-availability");
+const UPDATE_AVAILABILITY_API_URL = n8nWebhook("third-place-update-menu-availability");
 
 export type MenuAvailabilityStatus = "Available" | "Sold Out" | "Hidden";
 

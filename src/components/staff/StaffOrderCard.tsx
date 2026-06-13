@@ -8,9 +8,9 @@ interface Props {
   onOpen: (orderId: string) => void;
 }
 
-export function orderLocation(order: StaffOrder) {
+export function orderLocation(order: StaffOrder): { big: string; num?: string; zh: string } {
   if (order.orderType === "dine_in") {
-    return { big: `Table ${order.tableNumber ?? "?"}`, zh: "堂食" };
+    return { big: "Table", num: order.tableNumber ?? "?", zh: "堂食" };
   }
   if (order.orderType === "pickup") {
     return { big: "Pickup", zh: "自取" };
@@ -37,8 +37,13 @@ export function StaffOrderCard({ order, updating = false, onAdvance, onOpen }: P
             <p className="text-[11px] uppercase tracking-[0.18em] font-medium text-[var(--color-ink)]/50 tabular-nums">
               {order.orderId} · {order.time} · {totalQty} items
             </p>
-            <h3 className="mt-1.5 font-display text-[28px] leading-none text-[var(--color-ink)]">
-              {location.big}
+            <h3 className="mt-1.5 font-display lining-nums text-[28px] leading-none text-[var(--color-ink)]">
+              <span className="inline-flex items-baseline gap-2 leading-none">
+                <span>{location.big}</span>
+                {location.num !== undefined && (
+                  <span className="relative -top-[1px] tabular-nums">{location.num}</span>
+                )}
+              </span>
               <span className="ml-2 font-sans text-[13px] tracking-[0.08em] text-[var(--color-ink)]/55">
                 {location.zh}
               </span>

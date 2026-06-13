@@ -64,8 +64,13 @@ export function OrderDetailDrawer({
               {order.orderId} · {order.time} · {totalQty} items
             </p>
             <div className="mt-1.5 flex items-center gap-3">
-              <h2 className="font-display text-[28px] leading-none text-[var(--color-cream)]">
-                {location.big}
+              <h2 className="font-display lining-nums text-[28px] leading-none text-[var(--color-cream)]">
+                <span className="inline-flex items-baseline gap-2 leading-none">
+                  <span>{location.big}</span>
+                  {location.num !== undefined && (
+                    <span className="relative -top-[1px] tabular-nums">{location.num}</span>
+                  )}
+                </span>
                 <span className="ml-2 font-sans text-[13px] tracking-[0.08em] text-[var(--color-cream)]/50">
                   {location.zh}
                 </span>
