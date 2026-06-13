@@ -210,7 +210,7 @@ function StaffPage() {
                       <span className={`h-1.5 w-1.5 rounded-full ${meta.dotClass}`} />
                     </div>
                     <div className="mt-2 flex items-baseline justify-between gap-2">
-                      <span className="font-display text-[34px] leading-none text-[var(--color-cream)] tabular-nums">
+                      <span className="staff-num font-display text-[34px] leading-none text-[var(--color-cream)]">
                         {counts[status]}
                       </span>
                       <span className="text-[12px] text-[var(--color-muted-foreground)]">
@@ -242,7 +242,7 @@ function StaffPage() {
                         {meta.labelEn} {meta.labelZh}
                       </span>
                       <span
-                        className={`min-w-6 h-6 px-1.5 rounded-full text-[12px] font-semibold tabular-nums flex items-center justify-center ${
+                        className={`staff-num min-w-6 h-6 px-1.5 rounded-full text-[12px] font-semibold flex items-center justify-center ${
                           active
                             ? "bg-[var(--color-cream)]/20 text-[var(--color-cream)]"
                             : "bg-[var(--color-charcoal-soft)] text-[var(--color-gold-soft)]"

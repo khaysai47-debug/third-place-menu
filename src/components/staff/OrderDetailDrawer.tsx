@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import type { StaffOrder, StaffPaymentMethod } from "@/lib/staffOrders";
 import { NEXT_ACTION, PAYMENT_META, STATUS_META } from "./orderStatus";
-import { orderLocation } from "./StaffOrderCard";
+import { OrderLocationTitle } from "./StaffOrderCard";
 
 interface Props {
   order: StaffOrder;
@@ -36,7 +36,6 @@ export function OrderDetailDrawer({
   const meta = STATUS_META[order.status];
   const payMeta = PAYMENT_META[order.paymentStatus];
   const action = NEXT_ACTION[order.status];
-  const location = orderLocation(order);
   const totalQty = order.items.reduce((s, i) => s + i.quantity, 0);
   const paid = order.paymentStatus === "paid";
   const paidAtLabel = order.paidAt ? formatPaidAt(order.paidAt) : null;
@@ -64,16 +63,8 @@ export function OrderDetailDrawer({
               {order.orderId} · {order.time} · {totalQty} items
             </p>
             <div className="mt-1.5 flex items-center gap-3">
-              <h2 className="font-display lining-nums text-[28px] leading-none text-[var(--color-cream)]">
-                <span className="inline-flex items-baseline gap-2 leading-none">
-                  <span>{location.big}</span>
-                  {location.num !== undefined && (
-                    <span className="relative -top-[1px] tabular-nums">{location.num}</span>
-                  )}
-                </span>
-                <span className="ml-2 font-sans text-[13px] tracking-[0.08em] text-[var(--color-cream)]/50">
-                  {location.zh}
-                </span>
+              <h2>
+                <OrderLocationTitle order={order} tone="cream" />
               </h2>
               <span className="shrink-0 pl-2 pr-2.5 py-1 rounded-full border border-[var(--color-gold)]/25 flex items-center gap-1.5 text-[11px] font-medium tracking-[0.06em] text-[var(--color-cream)]/80">
                 <span className={`h-1.5 w-1.5 rounded-full ${meta.dotClass}`} />
@@ -100,7 +91,7 @@ export function OrderDetailDrawer({
             <ul className="space-y-3">
               {order.items.map((item) => (
                 <li key={item.id ?? item.name} className="flex items-baseline gap-3">
-                  <span className="w-9 shrink-0 text-right font-semibold tabular-nums text-[16px] text-[var(--color-vermillion)]">
+                  <span className="staff-num w-9 shrink-0 text-right font-semibold text-[16px] text-[var(--color-vermillion)]">
                     {item.quantity}
                     <span className="ml-0.5 text-[11px] font-normal text-[var(--color-cream)]/35">
                       ×
@@ -110,11 +101,11 @@ export function OrderDetailDrawer({
                     <p className="text-[16px] leading-snug text-[var(--color-cream)] truncate">
                       {item.name}
                     </p>
-                    <p className="text-[12px] text-[var(--color-cream)]/40 tabular-nums">
+                    <p className="staff-num text-[12px] text-[var(--color-cream)]/40">
                       ฿{item.unitPrice.toLocaleString("en-US")} each
                     </p>
                   </div>
-                  <span className="shrink-0 font-display text-[16px] text-[var(--color-gold-soft)] tabular-nums">
+                  <span className="staff-num shrink-0 font-display text-[16px] text-[var(--color-gold-soft)]">
                     ฿{(item.quantity * item.unitPrice).toLocaleString("en-US")}
                   </span>
                 </li>
@@ -139,7 +130,7 @@ export function OrderDetailDrawer({
             <span className="text-[11px] uppercase tracking-[0.18em] font-medium text-[var(--color-cream)]/50">
               Total · 合計
             </span>
-            <span className="font-display text-[24px] leading-none text-[var(--color-vermillion)] tabular-nums">
+            <span className="staff-num inline-flex items-baseline font-display text-[24px] leading-none text-[var(--color-vermillion)]">
               <span className="mr-0.5 text-[15px]">฿</span>
               {order.totalPrice.toLocaleString("en-US")}
             </span>

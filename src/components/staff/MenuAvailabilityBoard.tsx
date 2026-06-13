@@ -214,7 +214,7 @@ export function MenuAvailabilityBoard() {
                           {meta.labelZh} {item.availability}
                         </span>
                       </div>
-                      <p className="mt-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-ink)]/50 tabular-nums">
+                      <p className="staff-num mt-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-ink)]/50">
                         {item.menuItemId} · ฿{item.price.toLocaleString("en-US")}
                       </p>
                     </div>

@@ -264,7 +264,7 @@ export function ManualOrderForm({ onSubmitted }: Props) {
                     }`}
                   >
                     {qty > 0 && (
-                      <span className="absolute -top-1.5 -right-1.5 min-w-6 h-6 px-1.5 rounded-full bg-[var(--color-vermillion)] text-[var(--color-cream)] text-[12px] font-semibold tabular-nums flex items-center justify-center shadow-[0_4px_10px_-4px_oklch(0_0_0/0.6)]">
+                      <span className="staff-num absolute -top-1.5 -right-1.5 min-w-6 h-6 px-1.5 rounded-full bg-[var(--color-vermillion)] text-[var(--color-cream)] text-[12px] font-semibold flex items-center justify-center shadow-[0_4px_10px_-4px_oklch(0_0_0/0.6)]">
                         {qty}
                       </span>
                     )}
@@ -272,7 +272,7 @@ export function ManualOrderForm({ onSubmitted }: Props) {
                       {item.name}
                     </span>
                     <span className="mt-1.5 flex items-center justify-between gap-2">
-                      <span className="text-[11px] uppercase tracking-[0.1em] text-[var(--color-ink)]/50 tabular-nums">
+                      <span className="staff-num text-[11px] uppercase tracking-[0.1em] text-[var(--color-ink)]/50">
                         {item.menuItemId}
                       </span>
                       {soldOut ? (
@@ -285,7 +285,7 @@ export function ManualOrderForm({ onSubmitted }: Props) {
                         </span>
                       ) : (
                         <span className="flex items-center gap-1.5">
-                          <span className="font-display text-[16px] leading-none text-[var(--color-vermillion)] tabular-nums">
+                          <span className="staff-num text-[16px] leading-none text-[var(--color-vermillion)]">
                             ฿{item.price}
                           </span>
                           <span className="h-7 w-7 rounded-full bg-[var(--color-ink)] text-[var(--color-cream)] flex items-center justify-center text-[15px] leading-none">
@@ -316,7 +316,7 @@ export function ManualOrderForm({ onSubmitted }: Props) {
                     >
                       −
                     </button>
-                    <span className="w-6 text-center font-semibold tabular-nums text-[var(--color-ink)]">
+                    <span className="staff-num w-6 text-center font-semibold text-[var(--color-ink)]">
                       {line.qty}
                     </span>
                     <button
@@ -327,7 +327,7 @@ export function ManualOrderForm({ onSubmitted }: Props) {
                       +
                     </button>
                   </div>
-                  <span className="w-16 text-right font-display text-[15px] text-[var(--color-vermillion)] tabular-nums shrink-0">
+                  <span className="staff-num w-16 text-right text-[15px] text-[var(--color-vermillion)] shrink-0">
                     ฿{(line.unitPrice * line.qty).toLocaleString("en-US")}
                   </span>
                 </li>
@@ -349,7 +349,7 @@ export function ManualOrderForm({ onSubmitted }: Props) {
             <span className="text-[11px] uppercase tracking-[0.18em] font-medium text-[var(--color-ink)]/50">
               Total · 合計{totalItems > 0 ? ` · ${totalItems} items` : ""}
             </span>
-            <span className="font-display text-[24px] leading-none text-[var(--color-vermillion)] tabular-nums">
+            <span className="staff-num text-[24px] leading-none text-[var(--color-vermillion)]">
               <span className="mr-0.5 text-[15px]">฿</span>
               {total.toLocaleString("en-US")}
             </span>

@@ -134,6 +134,16 @@
   .text-balance { text-wrap: balance; }
   .font-display { font-family: var(--font-display); }
 
+  /* Staff dashboard numerals / operational data. The brand serif uses
+     old-style figures that dip below the baseline; the staff dashboard wants
+     fast, evenly-aligned numbers, so this renders them in the sans face
+     (Inter — lining figures by default) with tabular + lining variants on.
+     No vertical nudge needed. Reusable on any number-bearing span. */
+  .staff-num {
+    font-family: var(--font-sans);
+    font-variant-numeric: lining-nums tabular-nums;
+  }
+
   .vertical-cn {
     writing-mode: vertical-rl;
     text-orientation: upright;
