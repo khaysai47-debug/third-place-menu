@@ -153,12 +153,12 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
           {success ? (
             <div className="py-12 text-center space-y-3">
               <div className="font-display text-[30px] text-[var(--color-gold-soft)]">
-                Order drafted
+                Order placed · 訂單已送出
               </div>
               <p className="text-[13px] text-[var(--color-cream)]/55 leading-relaxed">
-                Order saved to console.
+                Sent to the kitchen.
                 <br />
-                Backend connection coming next.
+                Staff will confirm your order shortly.
               </p>
               <button
                 onClick={onClose}
