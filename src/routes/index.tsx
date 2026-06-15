@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Hero } from "@/components/menu/Hero";
 import { ServiceTiles } from "@/components/menu/ServiceTiles";
 import { CategoryNav } from "@/components/menu/CategoryNav";
@@ -70,23 +70,46 @@ function MenuPage() {
   }, [cart]);
 
   // Fail open: if the availability API is unreachable, the menu stays
-  // orderable from local data and we only show a soft notice.
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const live = await getMenuAvailability();
-        if (cancelled) return;
-        setAvailability(new Map(live.map((i) => [i.menuItemId, i.availability])));
-      } catch (error) {
-        console.error("Live availability unavailable; using local menu data", error);
-        if (!cancelled) setAvailabilityWarning(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+  // orderable from local data and we only show a soft notice. The in-flight
+  // guard prevents overlapping fetches from the poll / focus refresh.
+  const refreshingAvailabilityRef = useRef(false);
+  const loadAvailability = useCallback(async (isInitial = false) => {
+    if (refreshingAvailabilityRef.current) return;
+    refreshingAvailabilityRef.current = true;
+    try {
+      const live = await getMenuAvailability();
+      setAvailability(new Map(live.map((i) => [i.menuItemId, i.availability])));
+    } catch (error) {
+      console.error("Live availability unavailable; using local menu data", error);
+      // Only the initial load surfaces the soft warning; background refreshes
+      // stay silent and keep the last-known availability.
+      if (isInitial) setAvailabilityWarning(true);
+    } finally {
+      refreshingAvailabilityRef.current = false;
+    }
   }, []);
+
+  // Initial load.
+  useEffect(() => {
+    void loadAvailability(true);
+  }, [loadAvailability]);
+
+  // Keep availability fresh without a manual refresh: poll every 30s while the
+  // tab is visible, and refresh immediately when it regains focus. Paused when
+  // hidden; overlap-guarded above.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (!document.hidden) void loadAvailability();
+    }, 30000);
+    const onVisible = () => {
+      if (!document.hidden) void loadAvailability();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [loadAvailability]);
 
   // Local menu with live availability overlaid. Hidden items are dropped;
   // items the API doesn't know about keep their local availability.
