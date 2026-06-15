@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ManualOrderForm } from "@/components/staff/ManualOrderForm";
 import { MenuAvailabilityBoard } from "@/components/staff/MenuAvailabilityBoard";
 import { OrderDetailDrawer } from "@/components/staff/OrderDetailDrawer";
@@ -50,6 +50,19 @@ function StaffPage() {
   const [payingIds, setPayingIds] = useState<ReadonlySet<string>>(new Set());
   const [updateError, setUpdateError] = useState<string | null>(null);
 
+  // Skip overlapping background refreshes, and never let a poll clobber an
+  // in-flight optimistic action (it would briefly revert the card).
+  const refreshingRef = useRef(false);
+  const pendingActionsRef = useRef(0);
+  // After a successful action, ignore refreshes for a short window so a poll
+  // (or an in-flight fetch) can't overwrite the optimistic state with a stale
+  // read before the backend reflects the change. Timestamp in ms; 0 = open.
+  const suppressRefreshUntilRef = useRef(0);
+
+  // True while an action is in flight or its quiet window is still open.
+  const refreshBlocked = () =>
+    pendingActionsRef.current > 0 || Date.now() < suppressRefreshUntilRef.current;
+
   const loadOrders = useCallback(async () => {
     setLoadState("loading");
     try {
@@ -65,14 +78,32 @@ function StaffPage() {
     void loadOrders();
   }, [loadOrders]);
 
-  // Background re-sync after a successful update; keeps local state on failure.
+  // Background re-sync; keeps local state on failure. Guarded at both ends:
+  // before fetching, and again after — an action may have started (or its quiet
+  // window opened) while this fetch was in flight, making the result stale.
   const refreshOrders = useCallback(async () => {
+    if (refreshingRef.current || refreshBlocked()) return;
+    refreshingRef.current = true;
     try {
-      setOrders(await getStaffOrders());
+      const data = await getStaffOrders();
+      if (!refreshBlocked()) setOrders(data);
     } catch (error) {
       console.error("Background refresh failed", error);
+    } finally {
+      refreshingRef.current = false;
     }
   }, []);
+
+  // Auto-update the board so new customer orders appear without a manual
+  // reload. Silent (reuses refreshOrders, no loading spinner); paused while
+  // the tab is hidden; overlap-guarded inside refreshOrders.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (document.hidden) return;
+      void refreshOrders();
+    }, 5000);
+    return () => window.clearInterval(id);
+  }, [refreshOrders]);
 
   const counts = useMemo(() => {
     const c: Record<StaffOrderStatus, number> = {
@@ -98,20 +129,38 @@ function StaffPage() {
       return;
     }
 
+    const previousStatus = current.status;
     setUpdateError(null);
     setUpdatingIds((prev) => new Set(prev).add(orderId));
-    const result = await updateStaffOrderStatus(current.airtableRecordId, next);
-    setUpdatingIds((prev) => {
-      const nextSet = new Set(prev);
-      nextSet.delete(orderId);
-      return nextSet;
-    });
+    pendingActionsRef.current += 1;
+    // Optimistic: advance the card immediately, reconcile/revert after the API.
+    setOrders((prev) => prev.map((o) => (o.orderId === orderId ? { ...o, status: next } : o)));
 
-    if (result.success) {
-      setOrders((prev) => prev.map((o) => (o.orderId === orderId ? { ...o, status: next } : o)));
-      void refreshOrders();
-    } else {
-      setUpdateError(result.error);
+    try {
+      const result = await updateStaffOrderStatus(current.airtableRecordId, next);
+      if (result.success) {
+        // Keep the optimistic state; let polling reconcile after a quiet window
+        // so a not-yet-updated backend read can't bounce the card back.
+        suppressRefreshUntilRef.current = Date.now() + 2500;
+      } else {
+        setOrders((prev) =>
+          prev.map((o) => (o.orderId === orderId ? { ...o, status: previousStatus } : o)),
+        );
+        setUpdateError(result.error);
+      }
+    } catch (error) {
+      console.error("Status update threw unexpectedly", error);
+      setOrders((prev) =>
+        prev.map((o) => (o.orderId === orderId ? { ...o, status: previousStatus } : o)),
+      );
+      setUpdateError("Failed to update order. Please try again.");
+    } finally {
+      pendingActionsRef.current -= 1;
+      setUpdatingIds((prev) => {
+        const nextSet = new Set(prev);
+        nextSet.delete(orderId);
+        return nextSet;
+      });
     }
   };
 
@@ -123,24 +172,51 @@ function StaffPage() {
       return;
     }
 
+    const previousPaymentStatus = current.paymentStatus;
+    const previousPaymentMethod = current.paymentMethod;
     setUpdateError(null);
     setPayingIds((prev) => new Set(prev).add(orderId));
-    const result = await updateOrderPayment(current.airtableRecordId, method);
-    setPayingIds((prev) => {
-      const next = new Set(prev);
-      next.delete(orderId);
-      return next;
-    });
+    pendingActionsRef.current += 1;
+    // Optimistic: mark paid immediately, reconcile/revert after the API.
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.orderId === orderId ? { ...o, paymentStatus: "paid", paymentMethod: method } : o,
+      ),
+    );
 
-    if (result.success) {
+    try {
+      const result = await updateOrderPayment(current.airtableRecordId, method);
+      if (result.success) {
+        // Keep the optimistic state; let polling reconcile after a quiet window
+        // so a not-yet-updated backend read can't bounce the card back.
+        suppressRefreshUntilRef.current = Date.now() + 2500;
+      } else {
+        setOrders((prev) =>
+          prev.map((o) =>
+            o.orderId === orderId
+              ? { ...o, paymentStatus: previousPaymentStatus, paymentMethod: previousPaymentMethod }
+              : o,
+          ),
+        );
+        setUpdateError(result.error);
+      }
+    } catch (error) {
+      console.error("Payment update threw unexpectedly", error);
       setOrders((prev) =>
         prev.map((o) =>
-          o.orderId === orderId ? { ...o, paymentStatus: "paid", paymentMethod: method } : o,
+          o.orderId === orderId
+            ? { ...o, paymentStatus: previousPaymentStatus, paymentMethod: previousPaymentMethod }
+            : o,
         ),
       );
-      void refreshOrders();
-    } else {
-      setUpdateError(result.error);
+      setUpdateError("Failed to update payment. Please try again.");
+    } finally {
+      pendingActionsRef.current -= 1;
+      setPayingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(orderId);
+        return next;
+      });
     }
   };
 
