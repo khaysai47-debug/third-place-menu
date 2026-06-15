@@ -99,8 +99,10 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
       orderId: makeOrderId(),
       createdAt: now.toISOString(),
       customer: {
-        name: name.trim() || null,
-        phone: phone.trim() || null,
+        // Dine-in never collects name/phone — always send null regardless of
+        // any value left in state from a prior order-type selection.
+        name: orderType === "dine-in" ? null : name.trim() || null,
+        phone: orderType === "dine-in" ? null : phone.trim() || null,
       },
       orderType: ORDER_TYPE_PAYLOAD[orderType],
       tableNumber: orderType === "dine-in" ? tableNumber.trim() : null,
@@ -241,33 +243,36 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
                   </Field>
                 )}
 
-                {/* Name */}
-                <Field error={errors.name}>
-                  <input
-                    type="text"
-                    placeholder={orderType === "dine-in" ? "Name (optional)" : "Name"}
-                    value={name}
-                    onChange={(e) => {
-                      setName(e.target.value);
-                      clearError("name");
-                    }}
-                    className={inputClass}
-                  />
-                </Field>
+                {/* Name & Phone — not shown for dine-in (table number is enough) */}
+                {orderType !== "dine-in" && (
+                  <>
+                    <Field error={errors.name}>
+                      <input
+                        type="text"
+                        placeholder="Name"
+                        value={name}
+                        onChange={(e) => {
+                          setName(e.target.value);
+                          clearError("name");
+                        }}
+                        className={inputClass}
+                      />
+                    </Field>
 
-                {/* Phone */}
-                <Field error={errors.phone}>
-                  <input
-                    type="tel"
-                    placeholder={orderType === "dine-in" ? "Phone (optional)" : "Phone number"}
-                    value={phone}
-                    onChange={(e) => {
-                      setPhone(e.target.value);
-                      clearError("phone");
-                    }}
-                    className={inputClass}
-                  />
-                </Field>
+                    <Field error={errors.phone}>
+                      <input
+                        type="tel"
+                        placeholder="Phone number"
+                        value={phone}
+                        onChange={(e) => {
+                          setPhone(e.target.value);
+                          clearError("phone");
+                        }}
+                        className={inputClass}
+                      />
+                    </Field>
+                  </>
+                )}
 
                 {/* Delivery address — Delivery only */}
                 {orderType === "delivery" && (
