@@ -51,11 +51,22 @@ const STAFF_ACTIONS: { status: MenuAvailabilityStatus; labelZh: string; activeCl
   },
 ];
 
+/** Quick filter for the availability list. */
+type StatusFilter = "all" | "Available" | "Sold Out";
+
+const STATUS_FILTERS: { value: StatusFilter; labelEn: string; labelZh: string }[] = [
+  { value: "all", labelEn: "All", labelZh: "全部" },
+  { value: "Available", labelEn: "Available", labelZh: "供應" },
+  { value: "Sold Out", labelEn: "Sold Out", labelZh: "售完" },
+];
+
 export function MenuAvailabilityBoard() {
   const [items, setItems] = useState<MenuAvailabilityItem[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
   const [updatingIds, setUpdatingIds] = useState<ReadonlySet<string>>(new Set());
   const [updateError, setUpdateError] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
   const loadItems = useCallback(async () => {
     setLoadState("loading");
@@ -81,14 +92,29 @@ export function MenuAvailabilityBoard() {
     }
   }, []);
 
-  // Categories in the order the API returns them.
+  // Search (item code or English name) + status filter, applied before grouping.
+  const query = search.trim().toLowerCase();
+  const filteredItems = useMemo(
+    () =>
+      items.filter((item) => {
+        const matchesQuery =
+          !query ||
+          item.menuItemId.toLowerCase().includes(query) ||
+          item.name.toLowerCase().includes(query);
+        const matchesStatus = statusFilter === "all" || item.availability === statusFilter;
+        return matchesQuery && matchesStatus;
+      }),
+    [items, query, statusFilter],
+  );
+
+  // Categories in the order the API returns them (only those with matches).
   const categories = useMemo(() => {
     const order: string[] = [];
-    for (const item of items) {
+    for (const item of filteredItems) {
       if (!order.includes(item.category)) order.push(item.category);
     }
     return order;
-  }, [items]);
+  }, [filteredItems]);
 
   const setAvailability = async (menuItemId: string, status: MenuAvailabilityStatus) => {
     const item = items.find((i) => i.menuItemId === menuItemId);
@@ -183,68 +209,106 @@ export function MenuAvailabilityBoard() {
         </div>
       )}
 
-      {categories.map((category) => (
-        <section
-          key={category}
-          className="paper-grain rounded-2xl border border-[var(--color-gold)]/30 overflow-hidden shadow-[0_20px_40px_-25px_oklch(0_0_0/0.8)]"
-        >
-          <h2 className="px-4 pt-4 pb-3 font-display text-[20px] leading-none text-[var(--color-ink)]">
-            {category}
-          </h2>
-          <ul className="divide-y divide-dotted divide-[var(--color-ink)]/25 border-t border-dotted border-[var(--color-ink)]/25">
-            {items
-              .filter((item) => item.category === category)
-              .map((item) => {
-                const meta = AVAILABILITY_META[item.availability];
-                const updating = updatingIds.has(item.menuItemId);
-                return (
-                  <li
-                    key={item.menuItemId}
-                    className="px-4 py-3.5 flex flex-col sm:flex-row sm:items-center gap-3"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2.5">
-                        <h3 className="truncate text-[16px] font-semibold text-[var(--color-ink)]">
-                          {item.name}
-                        </h3>
-                        <span
-                          className={`shrink-0 pl-2 pr-2.5 py-0.5 rounded-full border flex items-center gap-1.5 text-[11px] font-medium tracking-[0.06em] ${meta.badgeClass}`}
-                        >
-                          <span className={`h-1.5 w-1.5 rounded-full ${meta.dotClass}`} />
-                          {meta.labelZh} {item.availability}
-                        </span>
-                      </div>
-                      <p className="staff-num mt-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-ink)]/50">
-                        {item.menuItemId} · ฿{item.price.toLocaleString("en-US")}
-                      </p>
-                    </div>
-                    <div className="flex shrink-0 gap-2">
-                      {STAFF_ACTIONS.map((action) => {
-                        const isCurrent = item.availability === action.status;
-                        return (
-                          <button
-                            key={action.status}
-                            onClick={() => void setAvailability(item.menuItemId, action.status)}
-                            disabled={updating || isCurrent}
-                            className={`h-12 px-5 rounded-xl border text-[14px] font-semibold tracking-[0.02em] transition active:scale-[0.97] disabled:active:scale-100 ${
-                              isCurrent
-                                ? `${action.activeClass} cursor-default`
-                                : "border-[var(--color-ink)]/25 text-[var(--color-ink)]/75 hover:border-[var(--color-ink)]/50 disabled:opacity-50 disabled:cursor-wait"
-                            }`}
+      {/* Search + status filter */}
+      <div className="space-y-3">
+        <input
+          type="text"
+          inputMode="search"
+          placeholder="搜尋 · Search code or name (e.g. A01)"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="w-full rounded-xl border border-[var(--color-gold)]/30 bg-[var(--color-charcoal-soft)]/60 px-4 py-3 text-[15px] text-[var(--color-cream)] placeholder:text-[var(--color-cream)]/35 focus:outline-none focus:border-[var(--color-gold)]/55 transition"
+        />
+        <div className="inline-flex rounded-full border border-[var(--color-gold)]/25 bg-[var(--color-charcoal-soft)]/60 p-1">
+          {STATUS_FILTERS.map((f) => (
+            <button
+              key={f.value}
+              onClick={() => setStatusFilter(f.value)}
+              className={`h-10 px-4 rounded-full text-[13px] font-semibold tracking-[0.02em] transition active:scale-[0.97] ${
+                statusFilter === f.value
+                  ? "bg-[var(--color-vermillion)] text-[var(--color-cream)]"
+                  : "text-[var(--color-gold-soft)]/90 hover:text-[var(--color-cream)]"
+              }`}
+            >
+              {f.labelZh} · {f.labelEn}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {categories.length === 0 ? (
+        <p className="py-8 text-center text-[15px] text-[var(--color-gold-soft)]/70">
+          找不到餐點 · No items match your search or filter.
+        </p>
+      ) : (
+        categories.map((category) => (
+          <section
+            key={category}
+            className="paper-grain rounded-2xl border border-[var(--color-gold)]/30 overflow-hidden shadow-[0_20px_40px_-25px_oklch(0_0_0/0.8)]"
+          >
+            <h2 className="px-4 pt-4 pb-3 font-display text-[20px] leading-none text-[var(--color-ink)]">
+              {category}
+            </h2>
+            <ul className="divide-y divide-dotted divide-[var(--color-ink)]/25 border-t border-dotted border-[var(--color-ink)]/25">
+              {filteredItems
+                .filter((item) => item.category === category)
+                .map((item) => {
+                  const meta = AVAILABILITY_META[item.availability];
+                  const updating = updatingIds.has(item.menuItemId);
+                  return (
+                    <li
+                      key={item.menuItemId}
+                      className="px-4 py-3.5 flex flex-col sm:flex-row sm:items-center gap-3"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2.5">
+                          <h3 className="truncate text-[16px] font-semibold text-[var(--color-ink)]">
+                            {item.name}
+                          </h3>
+                          <span
+                            className={`shrink-0 pl-2 pr-2.5 py-0.5 rounded-full border flex items-center gap-1.5 text-[11px] font-medium tracking-[0.06em] ${meta.badgeClass}`}
                           >
-                            {updating && !isCurrent
-                              ? "更新中…"
-                              : `${action.labelZh} · ${action.status}`}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </li>
-                );
-              })}
-          </ul>
-        </section>
-      ))}
+                            <span className={`h-1.5 w-1.5 rounded-full ${meta.dotClass}`} />
+                            {meta.labelZh} {item.availability}
+                          </span>
+                        </div>
+                        <div className="mt-1.5 flex items-center gap-2">
+                          <span className="staff-num inline-flex items-center rounded-md border border-[var(--color-ink)]/30 bg-[var(--color-ink)]/8 px-1.5 py-0.5 text-[12px] font-bold uppercase tracking-[0.08em] text-[var(--color-ink)]/80">
+                            {item.menuItemId}
+                          </span>
+                          <span className="staff-num text-[12px] text-[var(--color-ink)]/55">
+                            ฿{item.price.toLocaleString("en-US")}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 gap-2">
+                        {STAFF_ACTIONS.map((action) => {
+                          const isCurrent = item.availability === action.status;
+                          return (
+                            <button
+                              key={action.status}
+                              onClick={() => void setAvailability(item.menuItemId, action.status)}
+                              disabled={updating || isCurrent}
+                              className={`h-12 px-5 rounded-xl border text-[14px] font-semibold tracking-[0.02em] transition active:scale-[0.97] disabled:active:scale-100 ${
+                                isCurrent
+                                  ? `${action.activeClass} cursor-default`
+                                  : "border-[var(--color-ink)]/25 text-[var(--color-ink)]/75 hover:border-[var(--color-ink)]/50 disabled:opacity-50 disabled:cursor-wait"
+                              }`}
+                            >
+                              {updating && !isCurrent
+                                ? "更新中…"
+                                : `${action.labelZh} · ${action.status}`}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </li>
+                  );
+                })}
+            </ul>
+          </section>
+        ))
+      )}
     </div>
   );
 }

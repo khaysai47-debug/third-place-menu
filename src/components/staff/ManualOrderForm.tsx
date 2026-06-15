@@ -38,6 +38,7 @@ export function ManualOrderForm({ onSubmitted }: Props) {
 
   const [tableNumber, setTableNumber] = useState("");
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
   const [lines, setLines] = useState<OrderLine[]>([]);
   const [note, setNote] = useState("");
 
@@ -76,7 +77,15 @@ export function ManualOrderForm({ onSubmitted }: Props) {
 
   // First category is the default tab once the menu loads.
   const currentCategory = activeCategory ?? categories[0] ?? "";
-  const visibleItems = pickerItems.filter((i) => i.category === currentCategory);
+  // While searching (by item code or English name), match across all
+  // categories so staff can jump straight to an item; otherwise show the tab.
+  const query = search.trim().toLowerCase();
+  const searching = query.length > 0;
+  const visibleItems = searching
+    ? pickerItems.filter(
+        (i) => i.menuItemId.toLowerCase().includes(query) || i.name.toLowerCase().includes(query),
+      )
+    : pickerItems.filter((i) => i.category === currentCategory);
 
   const total = lines.reduce((s, l) => s + l.unitPrice * l.qty, 0);
   const totalItems = lines.reduce((s, l) => s + l.qty, 0);
@@ -224,26 +233,37 @@ export function ManualOrderForm({ onSubmitted }: Props) {
             className={inputClass}
           />
 
-          {/* Item picker: category chips, then tappable item cards */}
+          {/* Item picker: search, category chips, then tappable item cards */}
           <div className="space-y-2.5">
-            <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-              {categories.map((category) => {
-                const active = category === currentCategory;
-                return (
-                  <button
-                    key={category}
-                    onClick={() => setActiveCategory(category)}
-                    className={`shrink-0 h-11 px-4 rounded-full border text-[13px] font-semibold tracking-[0.02em] transition active:scale-[0.97] ${
-                      active
-                        ? "bg-[var(--color-ink)] border-[var(--color-ink)] text-[var(--color-cream)]"
-                        : "border-[var(--color-ink)]/25 text-[var(--color-ink)]/70 hover:border-[var(--color-ink)]/50"
-                    }`}
-                  >
-                    {category}
-                  </button>
-                );
-              })}
-            </div>
+            <input
+              type="text"
+              inputMode="search"
+              placeholder="搜尋 · Search code or name (e.g. A01)"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className={inputClass}
+            />
+
+            {!searching && (
+              <div className="flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+                {categories.map((category) => {
+                  const active = category === currentCategory;
+                  return (
+                    <button
+                      key={category}
+                      onClick={() => setActiveCategory(category)}
+                      className={`shrink-0 h-11 px-4 rounded-full border text-[13px] font-semibold tracking-[0.02em] transition active:scale-[0.97] ${
+                        active
+                          ? "bg-[var(--color-ink)] border-[var(--color-ink)] text-[var(--color-cream)]"
+                          : "border-[var(--color-ink)]/25 text-[var(--color-ink)]/70 hover:border-[var(--color-ink)]/50"
+                      }`}
+                    >
+                      {category}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
 
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
               {visibleItems.map((item) => {
@@ -272,7 +292,7 @@ export function ManualOrderForm({ onSubmitted }: Props) {
                       {item.name}
                     </span>
                     <span className="mt-1.5 flex items-center justify-between gap-2">
-                      <span className="staff-num text-[11px] uppercase tracking-[0.1em] text-[var(--color-ink)]/50">
+                      <span className="staff-num inline-flex items-center rounded-md border border-[var(--color-ink)]/30 bg-[var(--color-ink)]/8 px-1.5 py-0.5 text-[12px] font-bold uppercase tracking-[0.08em] text-[var(--color-ink)]/80">
                         {item.menuItemId}
                       </span>
                       {soldOut ? (
@@ -298,6 +318,11 @@ export function ManualOrderForm({ onSubmitted }: Props) {
                 );
               })}
             </div>
+            {searching && visibleItems.length === 0 && (
+              <p className="px-1 py-6 text-center text-[14px] text-[var(--color-ink)]/55">
+                找不到餐點 · No items match “{search.trim()}”
+              </p>
+            )}
           </div>
 
           {/* Order lines */}
