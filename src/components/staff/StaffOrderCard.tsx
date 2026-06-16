@@ -18,13 +18,6 @@ export function orderLocation(order: StaffOrder): { big: string; num?: string; z
   return { big: "Delivery", zh: "外送" };
 }
 
-/**
- * Order location heading ("Table 5", "Pickup 自取", …). One reusable pattern
- * for both the card and the detail drawer: the label keeps the display font,
- * while numbers use staff-num for clean lining/tabular figures so single- and
- * multi-digit table numbers stay aligned. Everything sits on one baseline
- * (inline-flex items-baseline).
- */
 export function OrderLocationTitle({
   order,
   tone = "ink",
@@ -37,7 +30,7 @@ export function OrderLocationTitle({
   const zhColor = tone === "cream" ? "text-[var(--color-cream)]/50" : "text-[var(--color-ink)]/55";
   return (
     <span
-      className={`inline-flex items-baseline gap-2 font-display text-[28px] leading-none ${mainColor}`}
+      className={`inline-flex items-baseline gap-2 font-sans font-semibold text-[20px] leading-none ${mainColor}`}
     >
       <span>{loc.big}</span>
       {loc.num !== undefined && <span className="staff-num">{loc.num}</span>}
@@ -110,7 +103,7 @@ export function StaffOrderCard({ order, updating = false, onAdvance, onOpen }: P
           <span className="text-[11px] uppercase tracking-[0.18em] font-medium text-[var(--color-ink)]/50">
             Total · 合計
           </span>
-          <span className="staff-num inline-flex items-baseline font-display text-[22px] leading-none text-[var(--color-vermillion)]">
+          <span className="staff-num inline-flex items-baseline text-[22px] leading-none text-[var(--color-vermillion)]">
             <span className="mr-0.5 text-[14px]">฿</span>
             {order.totalPrice.toLocaleString("en-US")}
           </span>

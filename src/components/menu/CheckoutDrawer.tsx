@@ -185,7 +185,7 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
                           ×{item.qty}
                         </span>
                       </span>
-                      <span className="font-display text-[14px] text-[var(--color-gold-soft)]">
+                      <span className="staff-num text-[14px] text-[var(--color-gold-soft)]">
                         ฿{item.subtotal}
                       </span>
                     </div>
@@ -194,7 +194,7 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
                     <span className="text-[12px] uppercase tracking-wider text-[var(--color-cream)]/50">
                       Total
                     </span>
-                    <span className="font-display text-[20px] text-[var(--color-vermillion)]">
+                    <span className="staff-num text-[20px] text-[var(--color-vermillion)]">
                       ฿{total.toLocaleString()}
                     </span>
                   </div>
@@ -314,7 +314,7 @@ export function CheckoutDrawer({ items, total, onClose }: Props) {
             <button
               onClick={handlePlaceOrder}
               disabled={isSubmitting}
-              className="w-full rounded-2xl bg-[var(--color-vermillion)] text-[var(--color-cream)] py-4 font-display text-[18px] shadow-[0_20px_40px_-18px_oklch(0.45_0.18_27/0.7)] border border-[var(--color-vermillion-deep)] active:scale-[0.99] transition disabled:opacity-60 disabled:cursor-not-allowed disabled:active:scale-100"
+              className="w-full rounded-2xl bg-[var(--color-vermillion)] text-[var(--color-cream)] py-4 text-[18px] font-semibold shadow-[0_20px_40px_-18px_oklch(0.45_0.18_27/0.7)] border border-[var(--color-vermillion-deep)] active:scale-[0.99] transition disabled:opacity-60 disabled:cursor-not-allowed disabled:active:scale-100"
             >
               {isSubmitting ? "Sending Order…" : `Place Order · ฿${total.toLocaleString()}`}
             </button>

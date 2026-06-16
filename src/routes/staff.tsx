@@ -286,7 +286,7 @@ function StaffPage() {
                       <span className={`h-1.5 w-1.5 rounded-full ${meta.dotClass}`} />
                     </div>
                     <div className="mt-2 flex items-baseline justify-between gap-2">
-                      <span className="staff-num font-display text-[34px] leading-none text-[var(--color-cream)]">
+                      <span className="staff-num text-[34px] leading-none text-[var(--color-cream)]">
                         {counts[status]}
                       </span>
                       <span className="text-[12px] text-[var(--color-muted-foreground)]">

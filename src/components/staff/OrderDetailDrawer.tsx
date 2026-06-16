@@ -105,7 +105,7 @@ export function OrderDetailDrawer({
                       ฿{item.unitPrice.toLocaleString("en-US")} each
                     </p>
                   </div>
-                  <span className="staff-num shrink-0 font-display text-[16px] text-[var(--color-gold-soft)]">
+                  <span className="staff-num shrink-0 text-[16px] text-[var(--color-gold-soft)]">
                     ฿{(item.quantity * item.unitPrice).toLocaleString("en-US")}
                   </span>
                 </li>
@@ -130,7 +130,7 @@ export function OrderDetailDrawer({
             <span className="text-[11px] uppercase tracking-[0.18em] font-medium text-[var(--color-cream)]/50">
               Total · 合計
             </span>
-            <span className="staff-num inline-flex items-baseline font-display text-[24px] leading-none text-[var(--color-vermillion)]">
+            <span className="staff-num inline-flex items-baseline text-[24px] leading-none text-[var(--color-vermillion)]">
               <span className="mr-0.5 text-[15px]">฿</span>
               {order.totalPrice.toLocaleString("en-US")}
             </span>

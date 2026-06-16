@@ -44,12 +44,12 @@ export function Hero() {
         </div>
 
         {/* Tagline card */}
-        <div className="relative mt-6 paper-grain rounded-2xl border border-[var(--color-gold)]/30 px-5 py-5 text-[var(--color-ink)] shadow-[0_20px_40px_-25px_oklch(0_0_0/0.8)]">
+        <div className="relative mt-6 paper-grain rounded-2xl border border-[var(--color-gold)]/45 px-5 py-5 text-[var(--color-ink)] shadow-[0_20px_40px_-25px_oklch(0_0_0/0.8)]">
           {/* stamp corners */}
           <span className="absolute -top-2 -left-2 h-4 w-4 rounded-sm bg-[var(--color-vermillion)] rotate-12" aria-hidden />
           <span className="absolute -bottom-2 -right-2 h-4 w-4 rounded-sm bg-[var(--color-vermillion)] -rotate-12" aria-hidden />
 
-          <p className="font-display italic text-[19px] leading-snug text-balance">
+          <p className="font-display font-semibold italic text-[21px] leading-snug text-balance">
             “A warm table after class, work, and everything in between.”
           </p>
           <div className="mt-4 flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-[var(--color-ink)]/70">

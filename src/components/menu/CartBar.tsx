@@ -63,7 +63,7 @@ export function CartBar({ items, total, onIncrease, onDecrease, onClear, onCheck
                   <QtyButton onClick={() => onDecrease(item.id)} label="Decrease quantity">
                     −
                   </QtyButton>
-                  <span className="font-display text-[13px] text-[var(--color-cream)] w-4 text-center">
+                  <span className="staff-num text-[13px] text-[var(--color-cream)] w-4 text-center">
                     {item.qty}
                   </span>
                   {item.soldOut ? (
@@ -74,7 +74,7 @@ export function CartBar({ items, total, onIncrease, onDecrease, onClear, onCheck
                     </QtyButton>
                   )}
                 </div>
-                <span className="font-display text-[14px] text-[var(--color-gold-soft)] w-12 text-right shrink-0">
+                <span className="staff-num text-[14px] text-[var(--color-gold-soft)] w-12 text-right shrink-0">
                   ฿{item.subtotal}
                 </span>
               </div>
@@ -96,12 +96,12 @@ export function CartBar({ items, total, onIncrease, onDecrease, onClear, onCheck
           className="pointer-events-auto w-full flex items-center justify-between gap-3 rounded-2xl bg-[var(--color-vermillion)] text-[var(--color-cream)] px-5 py-3.5 shadow-[0_20px_40px_-18px_oklch(0.45_0.18_27/0.7)] border border-[var(--color-vermillion-deep)] active:scale-[0.99] transition disabled:opacity-70 disabled:cursor-not-allowed disabled:active:scale-100"
         >
           <span className="flex items-center gap-3">
-            <span className="h-9 w-9 rounded-full bg-[var(--color-cream)]/15 flex items-center justify-center font-display text-[15px]">
+            <span className="h-9 w-9 rounded-full bg-[var(--color-cream)]/15 flex items-center justify-center staff-num text-[15px]">
               {count}
             </span>
             <span className="flex flex-col items-start leading-tight">
               <span className="text-[11px] uppercase tracking-[0.2em] opacity-80">Your order</span>
-              <span className="font-display text-[17px]">฿{total.toLocaleString()}</span>
+              <span className="staff-num text-[17px]">฿{total.toLocaleString()}</span>
             </span>
           </span>
           <span className="text-[12px] uppercase tracking-[0.22em] font-medium">

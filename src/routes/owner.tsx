@@ -354,7 +354,7 @@ function Hero({ summary }: { summary: ReturnType<typeof summarizeToday> }) {
           {summary.orderCount} {summary.orderCount === 1 ? "order" : "orders"}
         </span>
       </div>
-      <div className="relative mt-5 staff-num font-display text-[52px] leading-none text-[var(--color-gold)] sm:text-[60px]">
+      <div className="relative mt-5 staff-num text-[52px] leading-none text-[var(--color-gold)] sm:text-[60px]">
         {baht(summary.collected)}
       </div>
       <div className="relative mt-3 text-[13px] text-[var(--color-muted-foreground)]">
@@ -451,7 +451,7 @@ function SupportCard({
         <span className="text-[var(--color-muted-foreground)]">{labelZh}</span>
       </div>
       <div
-        className="mt-3 staff-num font-display text-[28px] leading-none"
+        className="mt-3 staff-num text-[28px] leading-none"
         style={{ color: tone === "muted" ? "var(--color-cream)" : accent }}
       >
         {value}
@@ -548,7 +548,7 @@ function PaymentMix({
               Collected
             </span>
             <span
-              className={`mt-1.5 staff-num font-display text-[26px] leading-none ${
+              className={`mt-1.5 staff-num text-[26px] leading-none ${
                 collected > 0 ? "text-[var(--color-gold)]" : "text-[var(--color-gold)]/70"
               }`}
             >
@@ -713,7 +713,7 @@ function RecentOrders({ recent }: { recent: StaffOrder[] }) {
                       )}
                     </td>
                     <td
-                      className={`staff-num py-4 text-right font-display text-[16px] ${cancelled ? "text-[var(--color-muted-foreground)]" : "text-[var(--color-gold)]"}`}
+                      className={`staff-num py-4 text-right text-[16px] ${cancelled ? "text-[var(--color-muted-foreground)]" : "text-[var(--color-gold)]"}`}
                     >
                       {baht(o.totalPrice)}
                     </td>
@@ -835,7 +835,7 @@ function AttnGroup({
                 {o.orderId} · {o.time}
               </div>
             </div>
-            <div className="staff-num whitespace-nowrap font-display text-[15px] text-[var(--color-gold)]">
+            <div className="staff-num whitespace-nowrap text-[15px] text-[var(--color-gold)]">
               {baht(o.totalPrice)}
             </div>
           </li>
