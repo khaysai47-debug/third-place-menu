@@ -311,9 +311,12 @@ function OwnerHeader({
         <button
           type="button"
           onClick={onRefresh}
-          className="hidden items-center gap-2 rounded-md border border-[var(--color-gold)]/20 bg-[var(--color-charcoal-soft)]/60 px-3.5 py-2.5 text-[13px] text-[var(--color-gold-soft)]/90 transition-colors hover:text-[var(--color-cream)] sm:flex"
+          className="group hidden items-center gap-2 rounded-md border border-[var(--color-gold)]/20 bg-[var(--color-charcoal-soft)]/60 px-3.5 py-2.5 text-[13px] text-[var(--color-gold-soft)]/90 transition-colors hover:text-[var(--color-cream)] sm:flex"
         >
-          <RefreshCw className="h-3.5 w-3.5" strokeWidth={1.5} />
+          <RefreshCw
+            className="h-3.5 w-3.5 transition-transform duration-500 group-hover:rotate-180"
+            strokeWidth={1.5}
+          />
           <span className="staff-num">Updated {hhmm(now)}</span>
         </button>
       </div>
@@ -332,6 +335,7 @@ function Hero({ summary }: { summary: ReturnType<typeof summarizeToday> }) {
           "linear-gradient(155deg, oklch(0.21 0.012 50) 0%, oklch(0.17 0.007 55) 55%, oklch(0.15 0.005 60) 100%)",
         borderColor: "oklch(0.72 0.11 75 / 0.32)",
         boxShadow: "0 24px 50px -30px oklch(0 0 0 / 0.9)",
+        animation: "owner-fade-up 0.65s cubic-bezier(0.22, 1, 0.36, 1) both",
       }}
     >
       <div
@@ -376,6 +380,7 @@ function MetricsGrid({ summary }: { summary: ReturnType<typeof summarizeToday> }
         value={baht(summary.cash)}
         sub="collected"
         tone="money"
+        animDelay={80}
       />
       <SupportCard
         icon={ArrowLeftRight}
@@ -384,6 +389,7 @@ function MetricsGrid({ summary }: { summary: ReturnType<typeof summarizeToday> }
         value={baht(summary.transfer)}
         sub="collected"
         tone="money"
+        animDelay={150}
       />
       <SupportCard
         icon={AlertTriangle}
@@ -392,6 +398,7 @@ function MetricsGrid({ summary }: { summary: ReturnType<typeof summarizeToday> }
         value={baht(summary.unpaidTotal)}
         sub={`${summary.unpaidCount} ${summary.unpaidCount === 1 ? "order" : "orders"}`}
         tone={summary.unpaidTotal > 0 ? "warn" : "muted"}
+        animDelay={220}
       />
       <SupportCard
         icon={Receipt}
@@ -400,6 +407,7 @@ function MetricsGrid({ summary }: { summary: ReturnType<typeof summarizeToday> }
         value={String(summary.doneUnpaidCount)}
         sub="food out, not paid"
         tone={summary.doneUnpaidCount > 0 ? "alert" : "muted"}
+        animDelay={290}
       />
     </div>
   );
@@ -427,6 +435,7 @@ function SupportCard({
   value,
   sub,
   tone,
+  animDelay = 0,
 }: {
   icon: LucideIcon;
   label: string;
@@ -434,13 +443,17 @@ function SupportCard({
   value: string;
   sub: string;
   tone: Tone;
+  animDelay?: number;
 }) {
   const accent = toneColor(tone);
   return (
-    <div className="relative overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 px-5 py-5">
+    <div
+      className="group relative overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 px-5 py-5 transition-colors hover:border-[var(--color-gold)]/28"
+      style={{ animation: `owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) ${animDelay}ms both` }}
+    >
       <span
         aria-hidden
-        className="absolute bottom-5 left-0 top-5 w-[2px] rounded-r-full opacity-70"
+        className="absolute bottom-5 left-0 top-5 w-[2px] rounded-r-full opacity-60 transition-opacity group-hover:opacity-100"
         style={{ background: accent }}
       />
       <div className="flex items-center justify-between gap-2 text-[12px] text-[var(--color-gold-soft)]/90">
@@ -482,6 +495,14 @@ function PaymentMix({
   unpaid: number;
   unpaidCount: number;
 }) {
+  const [drawn, setDrawn] = useState(false);
+  useEffect(() => {
+    let id = requestAnimationFrame(() => {
+      id = requestAnimationFrame(() => setDrawn(true));
+    });
+    return () => cancelAnimationFrame(id);
+  }, []);
+
   const segments = [
     { key: "cash", value: cash, stroke: "var(--color-gold)" },
     { key: "transfer", value: transfer, stroke: "var(--color-gold-soft)" },
@@ -500,7 +521,10 @@ function PaymentMix({
   const pct = (v: number) => (collected > 0 ? Math.round((v / collected) * 100) : 0);
 
   return (
-    <section className="rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 px-7 py-7">
+    <section
+      className="rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 px-7 py-7"
+      style={{ animation: "owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 120ms both" }}
+    >
       <div className="text-[11px] uppercase tracking-[0.25em] text-[var(--color-gold-soft)]/90">
         Collection Breakdown · 收款組成
       </div>
@@ -527,7 +551,7 @@ function PaymentMix({
               strokeWidth="14"
             />
             <g transform="rotate(-90 72 72)">
-              {arcs.map((a) => (
+              {arcs.map((a, i) => (
                 <circle
                   key={a.key}
                   cx="72"
@@ -537,8 +561,13 @@ function PaymentMix({
                   stroke={a.stroke}
                   strokeWidth="14"
                   strokeLinecap="butt"
-                  strokeDasharray={`${a.len} ${RING_C - a.len}`}
-                  strokeDashoffset={a.offset}
+                  style={{
+                    strokeDasharray: drawn
+                      ? `${a.len} ${RING_C - a.len}`
+                      : `0 ${RING_C}`,
+                    strokeDashoffset: a.offset,
+                    transition: `stroke-dasharray 0.9s cubic-bezier(0.22, 1, 0.36, 1) ${i * 0.15}s`,
+                  }}
                 />
               ))}
             </g>
@@ -641,7 +670,10 @@ function MixRow({
 
 function RecentOrders({ recent }: { recent: StaffOrder[] }) {
   return (
-    <section className="overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60">
+    <section
+      className="overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60"
+      style={{ animation: "owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 180ms both" }}
+    >
       <div className="flex items-center justify-between border-b border-[var(--color-gold)]/15 px-6 py-5">
         <div>
           <div className="text-[11px] uppercase tracking-[0.25em] text-[var(--color-gold-soft)]/90">
@@ -676,7 +708,7 @@ function RecentOrders({ recent }: { recent: StaffOrder[] }) {
                 const alert = o.status === "done" && o.paymentStatus === "unpaid";
                 const paid = o.paymentStatus === "paid";
                 return (
-                  <tr key={o.orderId} className="border-t border-[var(--color-gold)]/10">
+                  <tr key={o.orderId} className="border-t border-[var(--color-gold)]/10 transition-colors hover:bg-[var(--color-gold)]/[0.04]">
                     <td
                       className={`border-l-2 px-6 py-4 ${alert ? "border-[var(--color-vermillion)]" : "border-transparent"}`}
                     >
@@ -753,7 +785,10 @@ function NeedsAttention({
   const openCount = doneUnpaid.length + unpaidOpen.length;
 
   return (
-    <div className="overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 xl:sticky xl:top-6">
+    <div
+      className="overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 xl:sticky xl:top-6"
+      style={{ animation: "owner-fade-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) 240ms both" }}
+    >
       <div className="border-b border-[var(--color-gold)]/15 px-6 py-5">
         <div className="flex items-baseline justify-between">
           <div>
@@ -828,7 +863,7 @@ function AttnGroup({
       </div>
       <ul className="space-y-1">
         {orders.map((o) => (
-          <li key={o.orderId} className="flex items-start gap-3 rounded-md px-3 py-2 -mx-3">
+          <li key={o.orderId} className="flex items-start gap-3 rounded-md px-3 py-2 -mx-3 transition-colors hover:bg-[var(--color-gold)]/[0.08]">
             <div className="min-w-0 flex-1">
               <div className="truncate text-[13px] text-[var(--color-cream)]/95">{locText(o)}</div>
               <div className="staff-num truncate text-[11.5px] text-[var(--color-muted-foreground)]">
