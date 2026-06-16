@@ -40,6 +40,27 @@ const STAFF_VIEW_TITLES: Record<StaffView, string> = {
 
 const SUMMARY_STATUSES: StaffOrderStatus[] = ["new", "preparing", "ready", "done"];
 
+const SUMMARY_CARD_STYLE: Partial<Record<StaffOrderStatus, { inactive: string; active: string }>> =
+  {
+    new: {
+      inactive:
+        "bg-[var(--color-vermillion)]/10 border-[var(--color-vermillion)]/25 hover:bg-[var(--color-vermillion)]/15",
+      active: "bg-[var(--color-vermillion)]/18 border-[var(--color-vermillion)]/55",
+    },
+    preparing: {
+      inactive: "bg-amber-500/10 border-amber-500/25 hover:bg-amber-500/15",
+      active: "bg-amber-500/18 border-amber-500/55",
+    },
+    ready: {
+      inactive: "bg-emerald-500/10 border-emerald-500/25 hover:bg-emerald-500/15",
+      active: "bg-emerald-500/18 border-emerald-500/55",
+    },
+    done: {
+      inactive: "bg-stone-500/8 border-stone-400/18 hover:bg-stone-500/12",
+      active: "bg-stone-500/14 border-stone-400/35",
+    },
+  };
+
 function StaffPage() {
   const [view, setView] = useState<StaffView>("orders");
   const [orders, setOrders] = useState<StaffOrder[]>([]);
@@ -275,8 +296,8 @@ function StaffPage() {
                     onClick={() => setActiveTab(status)}
                     className={`rounded-2xl border px-4 py-3.5 text-left transition active:scale-[0.98] ${
                       active
-                        ? "border-[var(--color-gold)]/60 bg-[var(--color-charcoal-soft)]"
-                        : "border-[var(--color-gold)]/20 bg-[var(--color-charcoal-soft)]/50 hover:border-[var(--color-gold)]/40"
+                        ? (SUMMARY_CARD_STYLE[status]?.active ?? "bg-[var(--color-charcoal-soft)] border-[var(--color-gold)]/60")
+                        : (SUMMARY_CARD_STYLE[status]?.inactive ?? "bg-[var(--color-charcoal-soft)]/50 border-[var(--color-gold)]/20")
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
