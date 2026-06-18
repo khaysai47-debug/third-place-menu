@@ -222,15 +222,24 @@ function OwnerPage() {
 /* ---------- Sidebar (static, desktop only) ---------- */
 
 const NAV: { label: string; icon: LucideIcon; active?: boolean }[] = [
-  { label: "Overview", icon: LayoutGrid, active: true },
-  { label: "Orders", icon: ClipboardList },
-  { label: "Menu", icon: UtensilsCrossed },
-  { label: "Payments", icon: Banknote },
-  { label: "Reports", icon: LineChartIcon },
-  { label: "Settings", icon: Settings },
+  { label: "Overview",  icon: LayoutGrid,  active: true },
+  { label: "Orders",    icon: ClipboardList },
+  { label: "Menu",      icon: UtensilsCrossed },
+  { label: "Payments",  icon: Banknote },
+  { label: "Reports",   icon: LineChartIcon },
+  { label: "Settings",  icon: Settings },
 ];
 
 function OwnerSidebar() {
+  const [hintLabel, setHintLabel] = useState<string | null>(null);
+  const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function showHint(label: string) {
+    if (hintTimer.current) clearTimeout(hintTimer.current);
+    setHintLabel(label);
+    hintTimer.current = setTimeout(() => setHintLabel(null), 2500);
+  }
+
   return (
     <aside className="sticky top-0 hidden h-screen w-[240px] shrink-0 flex-col border-r border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/40 lg:flex">
       <div className="border-b border-[var(--color-gold)]/15 px-6 pb-6 pt-7">
@@ -255,21 +264,44 @@ function OwnerSidebar() {
             type="button"
             aria-current={active ? "page" : undefined}
             aria-disabled={!active}
+            onClick={active ? undefined : () => showHint(label)}
             className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-[14px] transition-colors ${
               active
                 ? "bg-[var(--color-charcoal-soft)] text-[var(--color-cream)] shadow-[inset_2px_0_0_var(--color-gold)]"
-                : "cursor-default text-[var(--color-gold-soft)]/55"
+                : "cursor-default text-[var(--color-gold-soft)]/45 hover:bg-[var(--color-gold)]/[0.04] hover:text-[var(--color-gold-soft)]/65"
             }`}
           >
-            <Icon className="h-[15px] w-[15px] opacity-80" strokeWidth={1.5} />
+            <Icon
+              className="h-[15px] w-[15px]"
+              strokeWidth={1.5}
+              style={{ opacity: active ? 0.85 : 0.45 }}
+            />
             <span className="flex-1 text-left">{label}</span>
+            {!active && (
+              <span
+                className="shrink-0 rounded-sm px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] text-[var(--color-muted-foreground)]"
+                style={{ border: "1px solid oklch(0.72 0.11 75 / 0.18)" }}
+              >
+                Soon
+              </span>
+            )}
           </button>
         ))}
       </nav>
 
-      <p className="border-t border-[var(--color-gold)]/15 px-6 py-4 text-[10.5px] leading-relaxed text-[var(--color-muted-foreground)]">
-        Overview is live. Other sections arrive in a later release.
-      </p>
+      {/* Footer — flashes section name on click, otherwise shows release note */}
+      <div className="border-t border-[var(--color-gold)]/15 px-6 py-4">
+        {hintLabel ? (
+          <p className="text-[10.5px] leading-relaxed text-[var(--color-gold-soft)]/75 transition-opacity">
+            <span className="font-medium text-[var(--color-gold-soft)]">{hintLabel}</span>
+            {" "}— arriving in a later release.
+          </p>
+        ) : (
+          <p className="text-[10.5px] leading-relaxed text-[var(--color-muted-foreground)]">
+            Overview is live. More sections arriving soon.
+          </p>
+        )}
+      </div>
     </aside>
   );
 }
