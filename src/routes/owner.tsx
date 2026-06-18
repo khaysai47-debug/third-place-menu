@@ -156,6 +156,21 @@ function OwnerPage() {
     return () => window.clearInterval(id);
   }, [refreshOrders]);
 
+  // Auto-refresh expenses every 30 s and whenever the tab becomes visible again.
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      if (!document.hidden) void silentRefreshExpenses();
+    }, 30000);
+    const onVisible = () => {
+      if (!document.hidden) void silentRefreshExpenses();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [silentRefreshExpenses]);
+
   const summary = useMemo(() => summarizeToday(orders, now), [orders, now]);
   const today = useMemo(() => todaysOrders(orders, now), [orders, now]);
   // Done but unpaid — food handed out, money not collected (top audit signal).
