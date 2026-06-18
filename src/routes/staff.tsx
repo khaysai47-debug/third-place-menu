@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ExpenseView } from "@/components/staff/ExpenseView";
 import { ManualOrderForm } from "@/components/staff/ManualOrderForm";
 import { MenuAvailabilityBoard } from "@/components/staff/MenuAvailabilityBoard";
 import { OrderDetailDrawer } from "@/components/staff/OrderDetailDrawer";
@@ -24,18 +25,20 @@ export const Route = createFileRoute("/staff")({
 
 type LoadState = "loading" | "error" | "ready";
 
-type StaffView = "orders" | "menu" | "manual";
+type StaffView = "orders" | "menu" | "manual" | "expenses";
 
 const STAFF_VIEWS: { view: StaffView; labelEn: string; labelZh: string }[] = [
   { view: "orders", labelEn: "Orders", labelZh: "訂單" },
   { view: "menu", labelEn: "Menu", labelZh: "菜單" },
   { view: "manual", labelEn: "Add Order", labelZh: "加單" },
+  { view: "expenses", labelEn: "Expenses", labelZh: "支出" },
 ];
 
 const STAFF_VIEW_TITLES: Record<StaffView, string> = {
   orders: "Staff Orders",
   menu: "Menu Availability",
   manual: "Add Order",
+  expenses: "Expense Log",
 };
 
 const SUMMARY_STATUSES: StaffOrderStatus[] = ["new", "preparing", "ready", "done"];
@@ -261,25 +264,29 @@ function StaffPage() {
             <span className="hidden sm:block divider-stamp flex-1 translate-y-[-6px] opacity-60" />
           </div>
 
-          {/* Orders / Menu view switcher */}
-          <div className="mt-4 inline-flex rounded-full border border-[var(--color-gold)]/25 bg-[var(--color-charcoal-soft)]/60 p-1">
-            {STAFF_VIEWS.map(({ view: v, labelEn, labelZh }) => (
-              <button
-                key={v}
-                onClick={() => setView(v)}
-                className={`h-11 px-5 rounded-full text-[14px] font-medium tracking-[0.02em] transition active:scale-[0.97] ${
-                  view === v
-                    ? "bg-[var(--color-vermillion)] text-[var(--color-cream)]"
-                    : "text-[var(--color-gold-soft)]/90 hover:text-[var(--color-cream)]"
-                }`}
-              >
-                {labelEn} {labelZh}
-              </button>
-            ))}
+          {/* View switcher — scrollable on small screens, comfortable on iPad */}
+          <div className="mt-4 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <div className="inline-flex rounded-full border border-[var(--color-gold)]/25 bg-[var(--color-charcoal-soft)]/60 p-1 min-w-max">
+              {STAFF_VIEWS.map(({ view: v, labelEn, labelZh }) => (
+                <button
+                  key={v}
+                  onClick={() => setView(v)}
+                  className={`h-11 px-4 rounded-full text-[14px] font-medium tracking-[0.02em] transition active:scale-[0.97] ${
+                    view === v
+                      ? "bg-[var(--color-vermillion)] text-[var(--color-cream)]"
+                      : "text-[var(--color-gold-soft)]/90 hover:text-[var(--color-cream)]"
+                  }`}
+                >
+                  {labelEn} <span className="opacity-70">{labelZh}</span>
+                </button>
+              ))}
+            </div>
           </div>
         </header>
 
-        {view === "menu" ? (
+        {view === "expenses" ? (
+          <ExpenseView />
+        ) : view === "menu" ? (
           <MenuAvailabilityBoard />
         ) : view === "manual" ? (
           <ManualOrderForm onSubmitted={() => void refreshOrders()} />
