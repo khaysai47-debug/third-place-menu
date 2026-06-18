@@ -35,6 +35,7 @@ import { orderLocation } from "@/components/staff/StaffOrderCard";
 import { STATUS_META } from "@/components/staff/orderStatus";
 import { getStaffOrders, type StaffOrder } from "@/lib/staffOrders";
 import { summarizeToday, todaysOrders } from "@/lib/ownerSummary";
+import { getExpenses, type Expense } from "@/lib/expenses";
 
 export const Route = createFileRoute("/owner")({
   head: () => ({
@@ -88,6 +89,10 @@ function OwnerPage() {
 
   const refreshingRef = useRef(false);
 
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [expLoadState, setExpLoadState] = useState<LoadState>("loading");
+  const expRefreshingRef = useRef(false);
+
   const loadOrders = useCallback(async () => {
     setLoadState("loading");
     try {
@@ -104,6 +109,21 @@ function OwnerPage() {
     void loadOrders();
   }, [loadOrders]);
 
+  const loadExpenses = useCallback(async () => {
+    setExpLoadState("loading");
+    try {
+      setExpenses(await getExpenses());
+      setExpLoadState("ready");
+    } catch (err) {
+      console.error("Owner expense fetch failed", err);
+      setExpLoadState("error");
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadExpenses();
+  }, [loadExpenses]);
+
   // Silent background re-sync (read-only, no optimistic state to protect).
   // Paused while the tab is hidden; overlap-guarded.
   const refreshOrders = useCallback(async () => {
@@ -117,6 +137,16 @@ function OwnerPage() {
     } finally {
       refreshingRef.current = false;
     }
+  }, []);
+
+  const silentRefreshExpenses = useCallback(async () => {
+    if (expRefreshingRef.current) return;
+    expRefreshingRef.current = true;
+    try {
+      setExpenses(await getExpenses());
+      setExpLoadState("ready");
+    } catch { /* silent — order data is still live */ }
+    finally { expRefreshingRef.current = false; }
   }, []);
 
   useEffect(() => {
@@ -151,7 +181,7 @@ function OwnerPage() {
         <OwnerHeader
           now={now}
           live={loadState === "ready"}
-          onRefresh={() => void refreshOrders()}
+          onRefresh={() => { void refreshOrders(); void silentRefreshExpenses(); }}
         />
 
         {loadState === "loading" ? (
@@ -175,6 +205,11 @@ function OwnerPage() {
                 transfer={summary.transfer}
                 unpaid={summary.unpaidTotal}
                 unpaidCount={summary.unpaidCount}
+              />
+              <ExpenseSummary
+                expenses={expenses}
+                loadState={expLoadState}
+                onRetry={() => void loadExpenses()}
               />
             </aside>
           </main>
@@ -1121,6 +1156,173 @@ function RevenueTrend({
         <p className="mt-2 text-[11px] text-[var(--color-muted-foreground)]/70">
           Yesterday data not available — showing today only.
         </p>
+      )}
+    </section>
+  );
+}
+
+/* ---------- Expenses Today (owner-side read-only view) ---------- */
+// Shows today's purchase log from the same getExpenses() the staff form writes to.
+// Amounts are displayed in vermillion (cost out) to visually contrast with gold revenue.
+// Gross sales figures are never touched here — expenses are always a separate section.
+
+const EXPENSE_CATEGORY_COLOR: Record<string, string> = {
+  Drinks:        "bg-sky-500/15 text-sky-300",
+  Ingredient:    "bg-emerald-500/15 text-emerald-300",
+  "Stock Refill":"bg-amber-500/15 text-amber-300",
+  Utility:       "bg-violet-500/15 text-violet-300",
+  Delivery:      "bg-orange-500/15 text-orange-300",
+  Other:         "bg-stone-500/15 text-stone-300",
+};
+
+const PAID_FROM_ROWS: { key: string; label: string; zh: string }[] = [
+  { key: "Cash",       label: "Cash",        zh: "現金" },
+  { key: "Transfer",   label: "Transfer",    zh: "轉帳" },
+  { key: "Owner Paid", label: "Owner Paid",  zh: "老闆付" },
+  { key: "Other",      label: "Other",       zh: "其他" },
+];
+
+function fmtExpTime(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : hhmm(d);
+}
+
+function ExpenseSummary({
+  expenses,
+  loadState,
+  onRetry,
+}: {
+  expenses: Expense[];
+  loadState: LoadState;
+  onRetry: () => void;
+}) {
+  const total = useMemo(() => expenses.reduce((s, e) => s + e.amount, 0), [expenses]);
+
+  const byPaidFrom = useMemo(() => {
+    const acc: Record<string, number> = {};
+    for (const e of expenses) acc[e.paidFrom] = (acc[e.paidFrom] ?? 0) + e.amount;
+    return acc;
+  }, [expenses]);
+
+  const recent = expenses.slice(0, 10);
+
+  return (
+    <section
+      className="owner-float-card overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 hover:border-[var(--color-gold)]/25"
+      style={{ animation: "owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 200ms both" }}
+    >
+      {/* Header */}
+      <div className="border-b border-[var(--color-gold)]/15 px-6 py-5">
+        <div className="text-[11px] uppercase tracking-[0.25em] text-[var(--color-gold-soft)]/90">
+          Purchase Log · 支出記錄
+        </div>
+        <div className="mt-1 flex items-baseline justify-between gap-3">
+          <h2 className="font-display text-[22px] leading-tight text-[var(--color-cream)]">
+            Expenses Today
+          </h2>
+          {loadState === "ready" && expenses.length > 0 && (
+            <span className="staff-num text-[20px] text-[var(--color-vermillion)]">
+              {baht(total)}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* States */}
+      {loadState === "loading" && (
+        <div className="flex items-center justify-center gap-1.5 py-8">
+          {[0, 1, 2].map((i) => (
+            <span
+              key={i}
+              className="h-2 w-2 rounded-full bg-[var(--color-gold)]/50 animate-pulse"
+              style={{ animationDelay: `${i * 150}ms` }}
+            />
+          ))}
+        </div>
+      )}
+
+      {loadState === "error" && (
+        <div className="px-6 py-8 text-center">
+          <p className="text-[13px] text-[var(--color-muted-foreground)]">
+            Could not load expenses.
+          </p>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="mt-3 text-[12px] text-[var(--color-gold-soft)]/80 underline underline-offset-2 transition hover:text-[var(--color-cream)]"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {loadState === "ready" && expenses.length === 0 && (
+        <p className="px-6 py-8 text-center text-[13px] text-[var(--color-muted-foreground)]">
+          沒有支出 · No expenses logged today.
+        </p>
+      )}
+
+      {loadState === "ready" && expenses.length > 0 && (
+        <>
+          {/* Payment-method breakdown */}
+          <div className="space-y-2.5 border-b border-[var(--color-gold)]/10 px-6 py-4">
+            {PAID_FROM_ROWS.map(({ key, label, zh }) => {
+              const amount = byPaidFrom[key] ?? 0;
+              if (amount === 0) return null;
+              return (
+                <div key={key} className="flex items-center justify-between gap-3 text-[13px]">
+                  <span className="text-[var(--color-cream)]/80">
+                    {label}{" "}
+                    <span className="text-[11px] text-[var(--color-muted-foreground)]">{zh}</span>
+                  </span>
+                  <span className="staff-num text-[var(--color-vermillion)]">{baht(amount)}</span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Recent expense rows */}
+          <ul className="divide-y divide-[var(--color-gold)]/10">
+            {recent.map((exp) => (
+              <li
+                key={exp.id}
+                className="flex items-start gap-3 px-5 py-3.5 transition-colors hover:bg-[var(--color-gold)]/[0.04]"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[13px] text-[var(--color-cream)]/95">
+                    {exp.itemName}
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    <span
+                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${EXPENSE_CATEGORY_COLOR[exp.category] ?? "bg-stone-500/15 text-stone-300"}`}
+                    >
+                      {exp.category}
+                    </span>
+                    <span className="text-[11px] text-[var(--color-muted-foreground)]">
+                      {exp.paidFrom}
+                    </span>
+                    {exp.reviewStatus && exp.reviewStatus !== "Pending" && (
+                      <span className="text-[11px] text-emerald-400/80">{exp.reviewStatus}</span>
+                    )}
+                    {exp.note && exp.note.length <= 45 && (
+                      <span className="truncate text-[11px] text-[var(--color-muted-foreground)]/65">
+                        {exp.note}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className="staff-num text-[15px] text-[var(--color-vermillion)]">
+                    {baht(exp.amount)}
+                  </div>
+                  <div className="staff-num mt-0.5 text-[10.5px] text-[var(--color-muted-foreground)]">
+                    {fmtExpTime(exp.createdAt)}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
       )}
     </section>
   );
