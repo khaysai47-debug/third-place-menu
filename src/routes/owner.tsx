@@ -13,7 +13,7 @@ import {
   Banknote,
   ClipboardList,
   LayoutGrid,
-  LineChart,
+  LineChart as LineChartIcon,
   Receipt,
   RefreshCw,
   Settings,
@@ -21,6 +21,16 @@ import {
   Wallet,
   type LucideIcon,
 } from "lucide-react";
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  type TooltipProps,
+  XAxis,
+  YAxis,
+} from "recharts";
 import { orderLocation } from "@/components/staff/StaffOrderCard";
 import { STATUS_META } from "@/components/staff/orderStatus";
 import { getStaffOrders, type StaffOrder } from "@/lib/staffOrders";
@@ -153,6 +163,12 @@ function OwnerPage() {
             <section className="col-span-12 space-y-6 xl:col-span-8">
               <Hero summary={summary} />
               <MetricsGrid summary={summary} />
+              <RevenueTrend orders={orders} now={now} />
+              <RecentOrders recent={recent} />
+            </section>
+
+            <aside className="col-span-12 space-y-6 xl:col-span-4">
+              <NeedsAttention doneUnpaid={doneUnpaid} unpaidOpen={unpaidOpen} />
               <PaymentMix
                 collected={summary.collected}
                 cash={summary.cash}
@@ -160,11 +176,6 @@ function OwnerPage() {
                 unpaid={summary.unpaidTotal}
                 unpaidCount={summary.unpaidCount}
               />
-              <RecentOrders recent={recent} />
-            </section>
-
-            <aside className="col-span-12 xl:col-span-4">
-              <NeedsAttention doneUnpaid={doneUnpaid} unpaidOpen={unpaidOpen} />
             </aside>
           </main>
         )}
@@ -180,7 +191,7 @@ const NAV: { label: string; icon: LucideIcon; active?: boolean }[] = [
   { label: "Orders", icon: ClipboardList },
   { label: "Menu", icon: UtensilsCrossed },
   { label: "Payments", icon: Banknote },
-  { label: "Reports", icon: LineChart },
+  { label: "Reports", icon: LineChartIcon },
   { label: "Settings", icon: Settings },
 ];
 
@@ -329,7 +340,7 @@ function OwnerHeader({
 function Hero({ summary }: { summary: ReturnType<typeof summarizeToday> }) {
   return (
     <section
-      className="relative overflow-hidden rounded-2xl border px-7 py-7"
+      className="owner-float-card relative overflow-hidden rounded-2xl border px-7 py-7"
       style={{
         background:
           "linear-gradient(155deg, oklch(0.21 0.012 50) 0%, oklch(0.17 0.007 55) 55%, oklch(0.15 0.005 60) 100%)",
@@ -448,7 +459,7 @@ function SupportCard({
   const accent = toneColor(tone);
   return (
     <div
-      className="group relative overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 px-5 py-5 transition-colors hover:border-[var(--color-gold)]/28"
+      className="owner-float-card group relative overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 px-5 py-5 hover:border-[var(--color-gold)]/28"
       style={{ animation: `owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) ${animDelay}ms both` }}
     >
       <span
@@ -522,7 +533,7 @@ function PaymentMix({
 
   return (
     <section
-      className="rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 px-7 py-7"
+      className="owner-float-card rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 px-7 py-7 hover:border-[var(--color-gold)]/25"
       style={{ animation: "owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 120ms both" }}
     >
       <div className="text-[11px] uppercase tracking-[0.25em] text-[var(--color-gold-soft)]/90">
@@ -671,7 +682,7 @@ function MixRow({
 function RecentOrders({ recent }: { recent: StaffOrder[] }) {
   return (
     <section
-      className="overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60"
+      className="owner-float-card overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 hover:border-[var(--color-gold)]/25"
       style={{ animation: "owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 180ms both" }}
     >
       <div className="flex items-center justify-between border-b border-[var(--color-gold)]/15 px-6 py-5">
@@ -877,6 +888,241 @@ function AttnGroup({
         ))}
       </ul>
     </div>
+  );
+}
+
+/* ---------- Revenue Trend chart ---------- */
+// Groups paid (cash + transfer, non-cancelled) orders by local hour for `day`.
+// Uses paidAt when present (when payment was recorded), falls back to createdAt
+// (order time). Returns a map of { hour → revenue }.
+function paidRevenueByHour(orders: readonly StaffOrder[], day: Date): Record<number, number> {
+  const map: Record<number, number> = {};
+  for (const o of orders) {
+    if (o.paymentStatus !== "paid" || o.status === "cancelled") continue;
+    const ts = o.paidAt ?? o.createdAt;
+    if (!ts) continue;
+    const d = new Date(ts);
+    if (
+      d.getFullYear() !== day.getFullYear() ||
+      d.getMonth() !== day.getMonth() ||
+      d.getDate() !== day.getDate()
+    )
+      continue;
+    const h = d.getHours();
+    map[h] = (map[h] ?? 0) + o.totalPrice;
+  }
+  return map;
+}
+
+type TrendPoint = { hour: string; today: number; yesterday?: number };
+
+// Builds the hour-indexed data array for the chart. Hours range from the
+// earliest activity (min of OPEN_HOUR and first data hour) to nowHour+1 for
+// today-only, or through 23 when yesterday data is also present.
+function buildTrendData(
+  todayMap: Record<number, number>,
+  yestMap: Record<number, number> | null,
+  nowHour: number,
+): TrendPoint[] {
+  const OPEN_HOUR = 10;
+  const todayKeys = Object.keys(todayMap).map(Number);
+  const yestKeys = yestMap ? Object.keys(yestMap).map(Number) : [];
+  const allKeys = [...todayKeys, ...yestKeys];
+  const startH = allKeys.length > 0 ? Math.min(OPEN_HOUR, Math.min(...allKeys)) : OPEN_HOUR;
+  const endH = yestMap ? 23 : Math.min(nowHour + 1, 23);
+
+  const points: TrendPoint[] = [];
+  for (let h = startH; h <= endH; h++) {
+    const pt: TrendPoint = {
+      hour: `${String(h).padStart(2, "0")}:00`,
+      today: todayMap[h] ?? 0,
+    };
+    if (yestMap) pt.yesterday = yestMap[h] ?? 0;
+    points.push(pt);
+  }
+  return points;
+}
+
+function RevenueTrendTooltip({ active, payload, label }: TooltipProps<number, string>) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div
+      className="rounded-lg border border-[var(--color-gold)]/20 px-3 py-2.5 text-[12px]"
+      style={{ background: "oklch(0.20 0.014 60 / 0.97)" }}
+    >
+      <div className="mb-1.5 text-[10px] uppercase tracking-[0.18em] text-[var(--color-gold-soft)]/80">
+        {label}
+      </div>
+      {payload.map((entry) => (
+        <div key={entry.name} className="flex items-center justify-between gap-4">
+          <span className="flex items-center gap-1.5" style={{ color: entry.color }}>
+            <span
+              className="h-1.5 w-1.5 rounded-full"
+              style={{ background: entry.color as string }}
+            />
+            {entry.name === "today" ? "Today" : "Yesterday"}
+          </span>
+          <span className="staff-num font-medium" style={{ color: entry.color }}>
+            {baht(entry.value ?? 0)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RevenueTrend({
+  orders,
+  now,
+}: {
+  orders: readonly StaffOrder[];
+  now: Date;
+}) {
+  const yesterday = useMemo(() => {
+    const d = new Date(now);
+    d.setDate(d.getDate() - 1);
+    return d;
+  }, [now]);
+
+  const todayMap = useMemo(() => paidRevenueByHour(orders, now), [orders, now]);
+  const yestMap = useMemo(() => paidRevenueByHour(orders, yesterday), [orders, yesterday]);
+
+  const hasYestData = Object.keys(yestMap).length > 0;
+  const hasTodayData = Object.keys(todayMap).length > 0;
+
+  const chartData = useMemo(
+    () => buildTrendData(todayMap, hasYestData ? yestMap : null, now.getHours()),
+    [todayMap, yestMap, hasYestData, now],
+  );
+
+  const GOLD = "var(--color-gold)";
+  const GOLD_SOFT = "var(--color-gold-soft)";
+
+  return (
+    <section
+      className="owner-float-card rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 px-7 py-7 hover:border-[var(--color-gold)]/25"
+      style={{ animation: "owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 95ms both" }}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <div className="text-[11px] uppercase tracking-[0.25em] text-[var(--color-gold-soft)]/90">
+            Sales Movement · 收款趨勢
+          </div>
+          <h2 className="mt-1 font-display text-[22px] leading-tight text-[var(--color-cream)]">
+            Revenue Trend
+          </h2>
+          <p className="mt-0.5 text-[12px] text-[var(--color-muted-foreground)]">
+            Paid cash + transfer only
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-col items-end gap-1.5 pt-1 text-[11px] text-[var(--color-muted-foreground)]">
+          <span className="flex items-center gap-1.5">
+            <span className="h-[2px] w-5 rounded-full bg-[var(--color-gold)]" />
+            Today
+          </span>
+          {hasYestData && (
+            <span className="flex items-center gap-1.5 opacity-60">
+              <span className="h-[2px] w-5 rounded-full bg-[var(--color-gold-soft)]" />
+              Yesterday
+            </span>
+          )}
+        </div>
+      </div>
+
+      {!hasTodayData ? (
+        <div className="relative mt-5 h-[160px] overflow-hidden rounded-lg">
+          {/* Ghost grid — conveys chart structure without fake data */}
+          <svg
+            viewBox="0 0 400 100"
+            className="absolute inset-0 h-full w-full"
+            preserveAspectRatio="none"
+            aria-hidden
+          >
+            <line x1="0" y1="20" x2="400" y2="20" stroke="oklch(0.72 0.11 75 / 0.1)" strokeWidth="1" />
+            <line x1="0" y1="45" x2="400" y2="45" stroke="oklch(0.72 0.11 75 / 0.1)" strokeWidth="1" />
+            <line x1="0" y1="70" x2="400" y2="70" stroke="oklch(0.72 0.11 75 / 0.1)" strokeWidth="1" />
+            <line x1="0" y1="93" x2="400" y2="93" stroke="oklch(0.72 0.11 75 / 0.22)" strokeWidth="1" />
+          </svg>
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5">
+            <p className="text-[13px] text-[var(--color-muted-foreground)]">
+              No paid sales yet today.
+            </p>
+            <p className="text-[11px] text-[var(--color-muted-foreground)]/60">
+              Paid sales will appear here by hour.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <div className="mt-5 h-[160px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={chartData} margin={{ top: 4, right: 6, bottom: 0, left: 0 }}>
+              <CartesianGrid vertical={false} stroke="oklch(0.72 0.11 75 / 0.1)" />
+              <XAxis
+                dataKey="hour"
+                tick={{
+                  fontSize: 10,
+                  fill: "var(--color-muted-foreground)",
+                  fontFamily: "var(--font-sans)",
+                }}
+                tickLine={false}
+                axisLine={false}
+                interval="preserveStartEnd"
+              />
+              <YAxis
+                tickFormatter={(v: number) =>
+                  v === 0 ? "฿0" : `฿${v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v}`
+                }
+                tick={{
+                  fontSize: 10,
+                  fill: "var(--color-muted-foreground)",
+                  fontFamily: "var(--font-sans)",
+                }}
+                tickLine={false}
+                axisLine={false}
+                width={46}
+              />
+              <Tooltip
+                content={<RevenueTrendTooltip />}
+                cursor={{ stroke: "oklch(0.72 0.11 75 / 0.2)", strokeWidth: 1 }}
+              />
+              {hasYestData && (
+                <Line
+                  type="monotone"
+                  dataKey="yesterday"
+                  name="yesterday"
+                  stroke={GOLD_SOFT}
+                  strokeWidth={1.5}
+                  strokeOpacity={0.45}
+                  dot={false}
+                  activeDot={{ r: 3, fill: GOLD_SOFT, strokeWidth: 0 }}
+                  animationDuration={900}
+                  animationBegin={150}
+                  animationEasing="ease-out"
+                />
+              )}
+              <Line
+                type="monotone"
+                dataKey="today"
+                name="today"
+                stroke={GOLD}
+                strokeWidth={2}
+                dot={false}
+                activeDot={{ r: 3.5, fill: GOLD, strokeWidth: 0 }}
+                animationDuration={1000}
+                animationBegin={0}
+                animationEasing="ease-out"
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {!hasYestData && hasTodayData && (
+        <p className="mt-2 text-[11px] text-[var(--color-muted-foreground)]/70">
+          Yesterday data not available — showing today only.
+        </p>
+      )}
+    </section>
   );
 }
 
