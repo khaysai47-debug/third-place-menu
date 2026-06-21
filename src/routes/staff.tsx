@@ -16,6 +16,39 @@ import {
   type StaffPaymentMethod,
 } from "@/lib/staffOrders";
 
+// Plays a two-tone chime via Web Audio. Wrapped in try/catch because
+// AudioContext creation throws before the first user gesture on some browsers.
+// The visual banner and title alert fire independently so a blocked AudioContext
+// does not suppress the notification.
+function playNewOrderChime(): void {
+  try {
+    const Ctx =
+      window.AudioContext ??
+      (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const tone = (freq: number, start: number) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0, start);
+      gain.gain.linearRampToValueAtTime(0.22, start + 0.01);
+      gain.gain.exponentialRampToValueAtTime(0.001, start + 0.45);
+      osc.start(start);
+      osc.stop(start + 0.45);
+    };
+    const t = ctx.currentTime;
+    tone(880, t);         // A5
+    tone(1108.73, t + 0.2); // C#6
+    setTimeout(() => void ctx.close(), 1500);
+  } catch {
+    // AudioContext unavailable or blocked — banner/title still show
+  }
+}
+
 export const Route = createFileRoute("/staff")({
   head: () => ({
     meta: [{ title: "The Third Place — Staff Orders" }, { name: "robots", content: "noindex" }],
@@ -73,6 +106,13 @@ function StaffPage() {
   const [updatingIds, setUpdatingIds] = useState<ReadonlySet<string>>(new Set());
   const [payingIds, setPayingIds] = useState<ReadonlySet<string>>(new Set());
   const [updateError, setUpdateError] = useState<string | null>(null);
+  const [newOrderBanner, setNewOrderBanner] = useState(false);
+
+  // New-order notification bookkeeping
+  const notifyInitializedRef = useRef(false); // true after first successful load
+  const prevNewCountRef = useRef(0);          // baseline for comparison
+  const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const titleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Skip overlapping background refreshes, and never let a poll clobber an
   // in-flight optimistic action (it would briefly revert the card).
@@ -86,6 +126,27 @@ function StaffPage() {
   // True while an action is in flight or its quiet window is still open.
   const refreshBlocked = () =>
     pendingActionsRef.current > 0 || Date.now() < suppressRefreshUntilRef.current;
+
+  const dismissNewOrderBanner = useCallback(() => {
+    setNewOrderBanner(false);
+    if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+    document.title = "The Third Place — Staff Orders";
+    if (titleTimerRef.current) clearTimeout(titleTimerRef.current);
+  }, []);
+
+  const triggerNewOrderNotification = useCallback(() => {
+    playNewOrderChime(); // fails silently if AudioContext is blocked
+    setNewOrderBanner(true);
+    // Title — reset after 10 s
+    if (titleTimerRef.current) clearTimeout(titleTimerRef.current);
+    document.title = "(!) 新訂單 · New Order";
+    titleTimerRef.current = setTimeout(() => {
+      document.title = "The Third Place — Staff Orders";
+    }, 10_000);
+    // Banner auto-dismiss after 7 s
+    if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+    bannerTimerRef.current = setTimeout(() => setNewOrderBanner(false), 7_000);
+  }, []);
 
   const loadOrders = useCallback(async () => {
     setLoadState("loading");
@@ -140,6 +201,31 @@ function StaffPage() {
     for (const o of orders) c[o.status] += 1;
     return c;
   }, [orders]);
+
+  // Detect new orders arriving via background refresh.
+  // On the first "ready" load we record the baseline count (no alert — those
+  // are pre-existing orders). Every subsequent increase triggers the notification.
+  useEffect(() => {
+    if (loadState !== "ready") return;
+    if (!notifyInitializedRef.current) {
+      notifyInitializedRef.current = true;
+      prevNewCountRef.current = counts.new;
+      return;
+    }
+    if (counts.new > prevNewCountRef.current) {
+      triggerNewOrderNotification();
+    }
+    prevNewCountRef.current = counts.new;
+  }, [loadState, counts.new, triggerNewOrderNotification]);
+
+  // Clean up timers and restore the page title when the staff page unmounts.
+  useEffect(() => {
+    return () => {
+      if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+      if (titleTimerRef.current) clearTimeout(titleTimerRef.current);
+      document.title = "The Third Place — Staff Orders";
+    };
+  }, []);
 
   const visible = orders.filter((o) => o.status === activeTab);
   const selectedOrder = orders.find((o) => o.orderId === selectedId);
@@ -458,6 +544,29 @@ function StaffPage() {
           onMarkPaid={markPaid}
           onClose={() => setSelectedId(null)}
         />
+      )}
+
+      {newOrderBanner && (
+        <div
+          role="alert"
+          aria-live="assertive"
+          style={{ animation: "new-order-slide-up 0.3s ease-out" }}
+          className="fixed bottom-6 left-4 right-4 z-50 flex items-center gap-3 rounded-2xl border border-[var(--color-vermillion)]/60 bg-[var(--color-charcoal-soft)] px-5 py-4 shadow-2xl sm:left-auto sm:right-6 sm:w-[360px]"
+        >
+          <span className="h-3 w-3 rounded-full bg-[var(--color-vermillion)] animate-pulse shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="text-[15px] font-semibold text-[var(--color-cream)] leading-snug">
+              新訂單 · New order received
+            </p>
+          </div>
+          <button
+            onClick={dismissNewOrderBanner}
+            aria-label="Dismiss 關閉"
+            className="h-8 w-8 shrink-0 rounded-full bg-[var(--color-cream)]/10 text-[var(--color-cream)]/60 flex items-center justify-center hover:bg-[var(--color-cream)]/20 transition text-[12px]"
+          >
+            ✕
+          </button>
+        </div>
       )}
     </div>
   );
