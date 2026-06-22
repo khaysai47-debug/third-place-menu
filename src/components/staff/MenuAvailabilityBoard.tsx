@@ -60,6 +60,15 @@ const STATUS_FILTERS: { value: StatusFilter; labelEn: string; labelZh: string }[
   { value: "Sold Out", labelEn: "Sold Out", labelZh: "售完" },
 ];
 
+const CATEGORY_LABELS: Record<string, string> = {
+  "signature":    "Signature",
+  "skewers":      "Skewers",
+  "skewers-veg":  "Skewers & Veg",
+  "stir-fried":   "Stir Fried",
+  "rice-noodles": "Rice & Noodles",
+  "soup":         "Soup",
+};
+
 export function MenuAvailabilityBoard() {
   const [items, setItems] = useState<MenuAvailabilityItem[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
@@ -247,7 +256,7 @@ export function MenuAvailabilityBoard() {
             className="paper-grain rounded-2xl border border-[var(--color-gold)]/30 overflow-hidden shadow-[0_20px_40px_-25px_oklch(0_0_0/0.8)]"
           >
             <h2 className="px-4 pt-4 pb-3 font-display text-[20px] leading-none text-[var(--color-ink)]">
-              {category}
+              {CATEGORY_LABELS[category] ?? category}
             </h2>
             <ul className="divide-y divide-dotted divide-[var(--color-ink)]/25 border-t border-dotted border-[var(--color-ink)]/25">
               {filteredItems
