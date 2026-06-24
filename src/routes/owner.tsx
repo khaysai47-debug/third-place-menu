@@ -387,7 +387,7 @@ function OwnerHeader({
   return (
     <header className="mx-auto w-full max-w-[1600px] border-b border-[var(--color-gold)]/15 px-5 pb-5 pt-6 lg:px-8">
       <div className="flex items-end justify-between gap-6">
-        <div>
+        <div className="min-w-0">
           <h1 className="font-display text-[34px] leading-[1.02] text-[var(--color-cream)] sm:text-[42px]">
             {greeting(now)}, <span className="text-[var(--color-gold)]">{OWNER_NAME}</span>.
           </h1>
@@ -439,7 +439,7 @@ function Hero({ summary }: { summary: ReturnType<typeof summarizeToday> }) {
         }}
       />
       <div className="relative flex items-start justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <div className="text-[11px] uppercase tracking-[0.25em] text-[var(--color-gold-soft)]/90">
             Collected Tonight · 今晚收款
           </div>
@@ -451,10 +451,10 @@ function Hero({ summary }: { summary: ReturnType<typeof summarizeToday> }) {
           {summary.orderCount} {summary.orderCount === 1 ? "order" : "orders"}
         </span>
       </div>
-      <div className="relative mt-5 staff-num text-[52px] leading-none text-[var(--color-gold)] sm:text-[60px]">
+      <div className="relative mt-5 staff-num break-all text-[38px] leading-none text-[var(--color-gold)] sm:text-[52px] lg:text-[60px]">
         {baht(summary.collected)}
       </div>
-      <div className="relative mt-3 text-[13px] text-[var(--color-muted-foreground)]">
+      <div className="relative mt-3 break-words text-[13px] text-[var(--color-muted-foreground)]">
         Cash {baht(summary.cash)} · Transfer {baht(summary.transfer)}
       </div>
     </section>
@@ -550,14 +550,14 @@ function SupportCard({
         style={{ background: accent }}
       />
       <div className="flex items-center justify-between gap-2 text-[12px] text-[var(--color-gold-soft)]/90">
-        <span className="flex items-center gap-2">
-          <Icon className="h-4 w-4" strokeWidth={1.5} style={{ color: accent, opacity: 0.85 }} />
-          {label}
+        <span className="flex min-w-0 items-center gap-2">
+          <Icon className="h-4 w-4 shrink-0" strokeWidth={1.5} style={{ color: accent, opacity: 0.85 }} />
+          <span className="truncate">{label}</span>
         </span>
-        <span className="text-[var(--color-muted-foreground)]">{labelZh}</span>
+        <span className="shrink-0 text-[var(--color-muted-foreground)]">{labelZh}</span>
       </div>
       <div
-        className="mt-3 staff-num text-[28px] leading-none"
+        className="mt-3 staff-num break-all text-[24px] leading-none sm:text-[28px]"
         style={{ color: tone === "muted" ? "var(--color-cream)" : accent }}
       >
         {value}
@@ -615,7 +615,7 @@ function PaymentMix({
 
   return (
     <section
-      className="owner-float-card rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 px-7 py-7 hover:border-[var(--color-gold)]/25"
+      className="owner-float-card overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 px-7 py-7 hover:border-[var(--color-gold)]/25"
       style={{ animation: "owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 120ms both" }}
     >
       <div className="text-[11px] uppercase tracking-[0.25em] text-[var(--color-gold-soft)]/90">
@@ -683,7 +683,7 @@ function PaymentMix({
         </div>
 
         {/* Breakdown */}
-        <div className="w-full flex-1">
+        <div className="w-full min-w-0 flex-1">
           {collected > 0 ? (
             <div className="space-y-3.5">
               <MixRow
@@ -745,11 +745,11 @@ function MixRow({
 }) {
   return (
     <div className="flex items-center justify-between gap-3 text-[13px]">
-      <span className="flex items-center gap-2.5 text-[var(--color-cream)]/90">
-        <span className={`h-2.5 w-2.5 rounded-sm ${dot}`} />
-        {label}
+      <span className="flex min-w-0 items-center gap-2.5 text-[var(--color-cream)]/90">
+        <span className={`h-2.5 w-2.5 shrink-0 rounded-sm ${dot}`} />
+        <span className="truncate">{label}</span>
       </span>
-      <span className="flex items-baseline gap-3">
+      <span className="flex shrink-0 items-baseline gap-3">
         <span className="staff-num text-[15px] text-[var(--color-gold)]">{value}</span>
         <span className="staff-num w-9 text-right text-[11px] text-[var(--color-muted-foreground)]">
           {pct}%
@@ -784,7 +784,7 @@ function RecentOrders({ recent }: { recent: StaffOrder[] }) {
 
       {recent.length > 0 ? (
         <div className="overflow-x-auto">
-          <table className="w-full text-[13px]">
+          <table className="w-full min-w-[560px] text-[13px]">
             <thead>
               <tr className="text-[11px] uppercase tracking-[0.12em] text-[var(--color-muted-foreground)]">
                 <th className="px-6 py-3 text-left font-normal">Table · Order</th>
@@ -883,8 +883,8 @@ function NeedsAttention({
       style={{ animation: "owner-fade-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) 240ms both" }}
     >
       <div className="border-b border-[var(--color-gold)]/15 px-6 py-5">
-        <div className="flex items-baseline justify-between">
-          <div>
+        <div className="flex items-baseline justify-between gap-3">
+          <div className="min-w-0">
             <div className="text-[11px] uppercase tracking-[0.25em] text-[var(--color-gold-soft)]/90">
               Control Room · 需注意
             </div>
@@ -892,7 +892,7 @@ function NeedsAttention({
               Needs Attention
             </h2>
           </div>
-          <span className="staff-num rounded-full border border-[var(--color-vermillion)]/40 bg-[var(--color-vermillion)]/15 px-2.5 py-0.5 text-[11px] text-[var(--color-vermillion)]">
+          <span className="shrink-0 staff-num rounded-full border border-[var(--color-vermillion)]/40 bg-[var(--color-vermillion)]/15 px-2.5 py-0.5 text-[11px] text-[var(--color-vermillion)]">
             {openCount} open
           </span>
         </div>
@@ -1268,7 +1268,7 @@ function ExpenseSummary({
             Expenses Today
           </h2>
           {loadState === "ready" && expenses.length > 0 && (
-            <span className="staff-num text-[20px] text-[var(--color-vermillion)]">
+            <span className="shrink-0 staff-num text-[20px] text-[var(--color-vermillion)]">
               {baht(total)}
             </span>
           )}
@@ -1318,11 +1318,11 @@ function ExpenseSummary({
               if (amount === 0) return null;
               return (
                 <div key={key} className="flex items-center justify-between gap-3 text-[13px]">
-                  <span className="text-[var(--color-cream)]/80">
+                  <span className="min-w-0 text-[var(--color-cream)]/80">
                     {label}{" "}
                     <span className="text-[11px] text-[var(--color-muted-foreground)]">{zh}</span>
                   </span>
-                  <span className="staff-num text-[var(--color-vermillion)]">{baht(amount)}</span>
+                  <span className="shrink-0 staff-num text-[var(--color-vermillion)]">{baht(amount)}</span>
                 </div>
               );
             })}
