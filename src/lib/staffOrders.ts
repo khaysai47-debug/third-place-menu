@@ -44,6 +44,10 @@ export interface StaffOrder {
   paymentMethod?: StaffPaymentMethod;
   /** ISO timestamp written by n8n when payment is recorded. */
   paidAt?: string;
+  hasPaymentProof?: boolean;
+  paymentProofUrl?: string;
+  paymentProofStatus?: string;
+  paymentProofReceivedAt?: string;
 }
 
 /** The only legal forward transitions. Done/cancelled are terminal. */
@@ -72,6 +76,10 @@ interface ApiOrder {
   paymentStatus?: unknown;
   paymentMethod?: unknown;
   paidAt?: unknown;
+  hasPaymentProof?: unknown;
+  paymentProofUrl?: unknown;
+  paymentProofStatus?: unknown;
+  paymentProofReceivedAt?: unknown;
   items?: {
     id?: unknown;
     name?: unknown;
@@ -127,6 +135,10 @@ function mapApiOrder(raw: ApiOrder): StaffOrder {
     paymentStatus: asString(raw.paymentStatus).toLowerCase() === "paid" ? "paid" : "unpaid",
     paymentMethod: rawMethod === "Cash" || rawMethod === "Transfer" ? rawMethod : undefined,
     paidAt: asString(raw.paidAt) || undefined,
+    hasPaymentProof: raw.hasPaymentProof === true ? true : undefined,
+    paymentProofUrl: asString(raw.paymentProofUrl) || undefined,
+    paymentProofStatus: asString(raw.paymentProofStatus) || undefined,
+    paymentProofReceivedAt: asString(raw.paymentProofReceivedAt) || undefined,
   };
 }
 

@@ -79,6 +79,12 @@ export function StaffOrderCard({ order, updating = false, onAdvance, onOpen }: P
                 ? ` · ${order.paymentMethod}`
                 : ""}
             </span>
+            {order.hasPaymentProof && (
+              <span className="pl-2 pr-2.5 py-1 rounded-full border border-teal-700/50 bg-teal-600/12 flex items-center gap-1.5 text-[11px] font-medium tracking-[0.06em] text-teal-800">
+                <span className="h-1.5 w-1.5 rounded-full bg-teal-600" />
+                Proof Received
+              </span>
+            )}
           </div>
         </div>
       </div>
@@ -108,6 +114,17 @@ export function StaffOrderCard({ order, updating = false, onAdvance, onOpen }: P
             {order.totalPrice.toLocaleString("en-US")}
           </span>
         </div>
+        {order.hasPaymentProof && order.paymentProofUrl && (
+          <a
+            href={order.paymentProofUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            onClick={(e) => e.stopPropagation()}
+            className="mb-2 w-full h-9 rounded-xl border border-teal-700/50 bg-teal-600/12 text-teal-800 text-[13px] font-medium tracking-[0.04em] flex items-center justify-center gap-1.5 hover:bg-teal-600/20 transition"
+          >
+            View Slip · 查看收據
+          </a>
+        )}
         {action ? (
           <button
             onClick={(e) => {
