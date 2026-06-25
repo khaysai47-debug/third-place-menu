@@ -11,5 +11,8 @@ export default defineConfig({
     // Redirect TanStack Start's bundled server entry to src/server.ts (our SSR error wrapper).
     // nitro/vite builds from this
     server: { entry: "server" },
+    // Prerender the HTML shell so Vercel can serve this as a static SPA.
+    // All data is fetched client-side from n8n, so no SSR is needed at request time.
+    spa: { enabled: true },
   },
 });
