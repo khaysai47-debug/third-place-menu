@@ -6,7 +6,7 @@ import { CategoryNav } from "@/components/menu/CategoryNav";
 import { SectionHeading } from "@/components/menu/SectionHeading";
 import { MenuItemCard } from "@/components/menu/MenuItemCard";
 import { CartBar } from "@/components/menu/CartBar";
-import { CheckoutDrawer } from "@/components/menu/CheckoutDrawer";
+import { CheckoutDrawer, type OrderType } from "@/components/menu/CheckoutDrawer";
 import { CATEGORIES, MENU, type MenuCategoryId, type MenuItem } from "@/data/menu";
 import { getMenuAvailability, type MenuAvailabilityStatus } from "@/lib/menuAvailability";
 
@@ -41,6 +41,13 @@ const CATEGORY_ZH: Record<MenuCategoryId, string> = {
 function MenuPage() {
   const [active, setActive] = useState<MenuCategoryId>("signature");
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  const [orderType, setOrderType] = useState<OrderType>("dine-in");
+  const menuSectionRef = useRef<HTMLDivElement>(null);
+
+  const handlePopularClick = useCallback(() => {
+    setActive("signature");
+    menuSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
   // Live "Availability Status" by menu item id; null until fetched.
   const [availability, setAvailability] = useState<ReadonlyMap<
     string,
@@ -166,7 +173,11 @@ function MenuPage() {
       <main className="mx-auto max-w-[680px] pb-32">
         <Hero />
         <div className="mt-2">
-          <ServiceTiles />
+          <ServiceTiles
+            orderType={orderType}
+            onOrderTypeChange={setOrderType}
+            onPopularClick={handlePopularClick}
+          />
         </div>
 
         {availabilityWarning && (
@@ -176,7 +187,7 @@ function MenuPage() {
           </p>
         )}
 
-        <div className="mt-6">
+        <div className="mt-6" ref={menuSectionRef}>
           <CategoryNav active={active} onChange={setActive} />
         </div>
 
@@ -211,7 +222,7 @@ function MenuPage() {
           active === "stir-fried" ||
           active === "rice-noodles" ||
           active === "soup") && (
-          <div className="px-5 space-y-3">
+          <div className="px-5 space-y-2.5">
             {items.map((item) => (
               <MenuItemCard key={item.id} item={item} variant="compact" onAdd={addToCart} />
             ))}
@@ -247,7 +258,12 @@ function MenuPage() {
         }}
       />
       {checkoutOpen && (
-        <CheckoutDrawer items={cartItems} total={total} onClose={() => setCheckoutOpen(false)} />
+        <CheckoutDrawer
+          items={cartItems}
+          total={total}
+          onClose={() => setCheckoutOpen(false)}
+          initialOrderType={orderType}
+        />
       )}
     </div>
   );

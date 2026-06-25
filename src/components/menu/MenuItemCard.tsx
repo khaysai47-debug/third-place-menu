@@ -1,5 +1,5 @@
 import type { MenuItem } from "@/data/menu";
-import { PlusIcon, SkewerFlameIcon, SmokeMotif } from "./Icons";
+import { PlusIcon, SkewerFlameIcon } from "./Icons";
 
 interface Props {
   item: MenuItem;
@@ -58,18 +58,6 @@ function AddButton({ onClick, disabled }: { onClick: () => void; disabled?: bool
   );
 }
 
-// Decorative placeholder used when no photo is available.
-// Intentional dark-charcoal tile with centered flame icon — not a blank box.
-function Placeholder() {
-  return (
-    <div className="relative h-full w-full overflow-hidden bg-gradient-to-br from-[var(--color-charcoal-soft)] to-[var(--color-ink)]">
-      <SmokeMotif className="absolute inset-x-0 bottom-0 w-full text-[var(--color-gold)]/20 pointer-events-none" />
-      <div className="absolute inset-0 flex items-center justify-center">
-        <SkewerFlameIcon className="h-9 w-9 text-[var(--color-gold-soft)]/55" />
-      </div>
-    </div>
-  );
-}
 
 export function MenuItemCard({ item, variant = "compact", onAdd }: Props) {
   const soldOutClass = item.available ? "" : " opacity-70 saturate-[0.85]";
@@ -164,55 +152,42 @@ export function MenuItemCard({ item, variant = "compact", onAdd }: Props) {
     );
   }
 
-  // compact
+  // compact — flat row layout, no large image block
   return (
     <article
-      className={`paper-grain rounded-xl border border-[var(--color-gold)]/30 overflow-hidden${soldOutClass}`}
+      className={`paper-grain rounded-xl border border-[var(--color-gold)]/25 px-3.5 py-3 flex items-center gap-3${soldOutClass}`}
     >
-      <div className="flex">
-        <div className="relative h-[104px] w-[104px] shrink-0">
-          <Placeholder />
+      {/* Small icon tile, same height family as the row variant */}
+      <div className="h-11 w-11 rounded-xl bg-[var(--color-ink)] text-[var(--color-gold-soft)] flex items-center justify-center shrink-0">
+        <SkewerFlameIcon className="h-6 w-6" />
+      </div>
+
+      {/* Text block */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-start justify-between gap-2">
+          <h4 className="font-display font-semibold text-[16px] leading-tight text-[var(--color-ink)]">
+            {item.nameEn}
+          </h4>
+          {item.popular && (
+            <span className="shrink-0 text-[9px] bg-[var(--color-vermillion)]/10 text-[var(--color-vermillion)] border border-[var(--color-vermillion)]/35 px-1.5 py-0.5 rounded-sm">
+              ★
+            </span>
+          )}
         </div>
-        <div className="flex-1 p-3 flex flex-col">
-          {/* Name + popular badge */}
-          <div className="flex items-start justify-between gap-2">
-            <h4 className="font-display font-semibold text-[17px] leading-tight text-[var(--color-ink)]">
-              {item.nameEn}
-            </h4>
-            {item.popular && (
-              <span className="shrink-0 text-[9px] bg-[var(--color-vermillion)]/10 text-[var(--color-vermillion)] border border-[var(--color-vermillion)]/35 px-1.5 py-0.5 rounded-sm">
-                ★
-              </span>
-            )}
-          </div>
-
-          {/* Description */}
-          <p className="mt-1 text-[12px] leading-snug text-[var(--color-ink)]/60 line-clamp-2">
-            {item.descriptionEn}
-          </p>
-
-          {/* Bottom: price · unit inline on left | tag + add on right */}
-          <div className="mt-auto pt-2 flex items-center justify-between gap-2">
-            <div className="flex items-baseline gap-1.5">
-              <Price value={item.price} />
-              <span className="text-[10px] uppercase tracking-wider text-[var(--color-ink)]/45">
-                {item.unit}
-              </span>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              {item.tags?.slice(0, 1).map((t) => (
-                <span
-                  key={t}
-                  className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-sm border ${tagColor(t)}`}
-                >
-                  {t}
-                </span>
-              ))}
-              <AddButton onClick={() => onAdd(item)} disabled={!item.available} />
-            </div>
-          </div>
+        <p className="mt-0.5 text-[12px] leading-snug text-[var(--color-ink)]/55 line-clamp-1">
+          {item.descriptionEn}
+        </p>
+        <div className="mt-1 flex items-center gap-1.5">
+          <Price value={item.price} />
+          {item.unit && (
+            <span className="text-[10px] uppercase tracking-wider text-[var(--color-ink)]/40">
+              {item.unit}
+            </span>
+          )}
         </div>
       </div>
+
+      <AddButton onClick={() => onAdd(item)} disabled={!item.available} />
     </article>
   );
 }
