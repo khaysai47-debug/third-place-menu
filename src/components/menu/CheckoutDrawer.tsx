@@ -14,9 +14,10 @@ interface Props {
   items: CartItem[];
   total: number;
   onClose: () => void;
+  initialOrderType?: OrderType;
 }
 
-type OrderType = "dine-in" | "pickup" | "delivery";
+export type OrderType = "dine-in" | "pickup" | "delivery";
 type OrderTypePayload = "dine_in" | "pickup" | "delivery";
 
 const ORDER_TYPE_LABELS: Record<OrderType, string> = {
@@ -51,14 +52,14 @@ function Field({ error, children }: { error?: string; children: ReactElement }) 
 const inputClass =
   "w-full bg-[var(--color-ink)] border border-[var(--color-gold)]/20 rounded-xl px-4 py-3 text-[14px] text-[var(--color-cream)] placeholder:text-[var(--color-cream)]/30 focus:outline-none focus:border-[var(--color-gold)]/50 transition";
 
-export function CheckoutDrawer({ items, total, onClose }: Props) {
+export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Props) {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [tableNumber, setTableNumber] = useState(
     // Pre-fill from ?table= so QR codes per table set this automatically
     () => new URLSearchParams(window.location.search).get("table") ?? "",
   );
-  const [orderType, setOrderType] = useState<OrderType>("dine-in");
+  const [orderType, setOrderType] = useState<OrderType>(initialOrderType ?? "dine-in");
   const [address, setAddress] = useState("");
   const [notes, setNotes] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
