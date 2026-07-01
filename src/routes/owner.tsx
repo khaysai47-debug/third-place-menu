@@ -11,14 +11,18 @@ import {
   AlertTriangle,
   ArrowLeftRight,
   Banknote,
+  Bike,
   ClipboardList,
   LayoutGrid,
   LineChart as LineChartIcon,
   Receipt,
   RefreshCw,
+  Scale,
   Settings,
+  TrendingDown,
   UtensilsCrossed,
   Wallet,
+  XCircle,
   type LucideIcon,
 } from "lucide-react";
 import {
@@ -34,7 +38,7 @@ import {
 import { orderLocation } from "@/components/staff/StaffOrderCard";
 import { STATUS_META } from "@/components/staff/orderStatus";
 import { getStaffOrders, type StaffOrder } from "@/lib/staffOrders";
-import { summarizeToday, todaysOrders } from "@/lib/ownerSummary";
+import { isSameLocalDay, summarizeToday, todaysOrders } from "@/lib/ownerSummary";
 import { getExpenses, type Expense } from "@/lib/expenses";
 
 export const Route = createFileRoute("/owner")({
@@ -173,17 +177,73 @@ function OwnerPage() {
 
   const summary = useMemo(() => summarizeToday(orders, now), [orders, now]);
   const today = useMemo(() => todaysOrders(orders, now), [orders, now]);
-  // Done but unpaid — food handed out, money not collected (top audit signal).
+  // Completed (done or delivered) but unpaid — food/delivery out, money not collected.
   const doneUnpaid = useMemo(
-    () => today.filter((o) => o.status === "done" && o.paymentStatus === "unpaid"),
+    () =>
+      today.filter(
+        (o) => (o.status === "done" || o.status === "delivered") && o.paymentStatus === "unpaid",
+      ),
     [today],
   );
-  // Unpaid but still in progress (not yet done) — open tabs to keep an eye on.
+  // Unpaid and still active — exclude completed and cancelled statuses.
   const unpaidOpen = useMemo(
-    () => today.filter((o) => o.status !== "done" && o.paymentStatus === "unpaid"),
+    () =>
+      today.filter(
+        (o) =>
+          o.status !== "done" &&
+          o.status !== "delivered" &&
+          o.status !== "cancelled" &&
+          o.paymentStatus === "unpaid",
+      ),
     [today],
   );
-  const recent = useMemo(() => today.slice(0, 10), [today]);
+  // Delivery pipeline.
+  const activeDeliveries = useMemo(
+    () =>
+      today.filter(
+        (o) =>
+          o.orderType === "delivery" &&
+          (o.status === "new" ||
+            o.status === "preparing" ||
+            o.status === "ready" ||
+            o.status === "out_for_delivery"),
+      ),
+    [today],
+  );
+  const outForDeliveryNow = useMemo(
+    () => orders.filter((o) => o.status === "out_for_delivery"),
+    [orders],
+  );
+  const deliveredToday = useMemo(
+    () => today.filter((o) => o.orderType === "delivery" && o.status === "delivered"),
+    [today],
+  );
+  // Cancelled today — use cancelledAt when available, fall back to createdAt.
+  const cancelledToday = useMemo(
+    () =>
+      orders.filter(
+        (o) => o.status === "cancelled" && isSameLocalDay(o.cancelledAt ?? o.createdAt, now),
+      ),
+    [orders, now],
+  );
+  const cancelledTodayValue = useMemo(
+    () => cancelledToday.reduce((s, o) => s + o.totalPrice, 0),
+    [cancelledToday],
+  );
+  // Recent orders today (including cancelled), newest-first from API sort.
+  const recentAll = useMemo(
+    () => orders.filter((o) => isSameLocalDay(o.createdAt, now)).slice(0, 12),
+    [orders, now],
+  );
+  // Expenses filtered to today by local calendar day (safe even if API returns more).
+  const expensesToday = useMemo(
+    () => expenses.filter((e) => isSameLocalDay(e.createdAt, now)),
+    [expenses, now],
+  );
+  const expensesTotalToday = useMemo(
+    () => expensesToday.reduce((s, e) => s + e.amount, 0),
+    [expensesToday],
+  );
 
   return (
     <div
@@ -208,12 +268,30 @@ function OwnerPage() {
             <section className="col-span-12 space-y-6 xl:col-span-8">
               <Hero summary={summary} />
               <MetricsGrid summary={summary} />
+              <ExpenseNetRow
+                expensesTotal={expensesTotalToday}
+                collected={summary.collected}
+                expLoadState={expLoadState}
+              />
               <RevenueTrend orders={orders} now={now} />
-              <RecentOrders recent={recent} />
+              <RecentOrders recent={recentAll} />
             </section>
 
             <aside className="col-span-12 space-y-6 xl:col-span-4">
-              <NeedsAttention doneUnpaid={doneUnpaid} unpaidOpen={unpaidOpen} />
+              <NeedsAttention
+                doneUnpaid={doneUnpaid}
+                unpaidOpen={unpaidOpen}
+                activeDeliveries={activeDeliveries}
+                cancelledOrders={cancelledToday}
+              />
+              <DeliveryWatch
+                activeCount={activeDeliveries.length}
+                outNowCount={outForDeliveryNow.length}
+                deliveredCount={deliveredToday.length}
+              />
+              {cancelledToday.length > 0 && (
+                <CancelledToday orders={cancelledToday} totalValue={cancelledTodayValue} />
+              )}
               <PaymentMix
                 collected={summary.collected}
                 cash={summary.cash}
@@ -495,10 +573,10 @@ function MetricsGrid({ summary }: { summary: ReturnType<typeof summarizeToday> }
       />
       <SupportCard
         icon={Receipt}
-        label="Done · Unpaid"
+        label="Closed · Unpaid"
         labelZh="已完成未付"
         value={String(summary.doneUnpaidCount)}
-        sub="food out, not paid"
+        sub="done or delivered, not paid"
         tone={summary.doneUnpaidCount > 0 ? "alert" : "muted"}
         animDelay={290}
       />
@@ -506,7 +584,7 @@ function MetricsGrid({ summary }: { summary: ReturnType<typeof summarizeToday> }
   );
 }
 
-type Tone = "money" | "warn" | "alert" | "muted";
+type Tone = "money" | "warn" | "alert" | "muted" | "cost";
 
 function toneColor(tone: Tone): string {
   switch (tone) {
@@ -516,6 +594,8 @@ function toneColor(tone: Tone): string {
       return "var(--color-gold-soft)";
     case "alert":
       return "var(--color-vermillion)";
+    case "cost":
+      return "oklch(0.62 0.155 27 / 0.88)";
     default:
       return "var(--color-cream)";
   }
@@ -563,6 +643,45 @@ function SupportCard({
         {value}
       </div>
       <div className="mt-2 text-[12px] text-[var(--color-muted-foreground)]">{sub}</div>
+    </div>
+  );
+}
+
+/* ---------- Expense + Net row ---------- */
+
+function ExpenseNetRow({
+  expensesTotal,
+  collected,
+  expLoadState,
+}: {
+  expensesTotal: number;
+  collected: number;
+  expLoadState: LoadState;
+}) {
+  const loading = expLoadState === "loading";
+  const net = collected - expensesTotal;
+  const netTone: Tone = loading ? "muted" : net < 0 ? "alert" : "money";
+
+  return (
+    <div className="grid grid-cols-2 gap-4">
+      <SupportCard
+        icon={TrendingDown}
+        label="Expenses Today"
+        labelZh="今日支出"
+        value={loading ? "…" : baht(expensesTotal)}
+        sub="logged outflows"
+        tone={loading ? "muted" : "cost"}
+        animDelay={360}
+      />
+      <SupportCard
+        icon={Scale}
+        label="Net Today"
+        labelZh="今日淨額"
+        value={loading ? "…" : baht(net)}
+        sub="collected minus logged expenses"
+        tone={netTone}
+        animDelay={430}
+      />
     </div>
   );
 }
@@ -850,6 +969,11 @@ function RecentOrders({ recent }: { recent: StaffOrder[] }) {
                       <div className="staff-num mt-0.5 text-[11px] text-[var(--color-muted-foreground)]">
                         {o.time}
                       </div>
+                      {cancelled && o.cancellationReason && (
+                        <div className="mt-0.5 text-[10.5px] italic leading-tight text-[var(--color-muted-foreground)]/60">
+                          {o.cancellationReason}
+                        </div>
+                      )}
                     </td>
                   </tr>
                 );
@@ -871,11 +995,17 @@ function RecentOrders({ recent }: { recent: StaffOrder[] }) {
 function NeedsAttention({
   doneUnpaid,
   unpaidOpen,
+  activeDeliveries,
+  cancelledOrders,
 }: {
   doneUnpaid: StaffOrder[];
   unpaidOpen: StaffOrder[];
+  activeDeliveries: StaffOrder[];
+  cancelledOrders: StaffOrder[];
 }) {
   const openCount = doneUnpaid.length + unpaidOpen.length;
+  const hasContent =
+    openCount > 0 || activeDeliveries.length > 0 || cancelledOrders.length > 0;
 
   return (
     <div
@@ -901,10 +1031,10 @@ function NeedsAttention({
         </p>
       </div>
 
-      {openCount > 0 ? (
+      {hasContent ? (
         <div className="divide-y divide-[var(--color-gold)]/10">
           <AttnGroup
-            title="Done but unpaid · 已完成未付"
+            title="Done / Delivered — unpaid · 已完成未付"
             tone="var(--color-vermillion)"
             orders={doneUnpaid}
             emptyHidden
@@ -915,6 +1045,74 @@ function NeedsAttention({
             orders={unpaidOpen}
             emptyHidden
           />
+          {activeDeliveries.length > 0 && (
+            <div className="px-6 py-5">
+              <div className="mb-3 flex items-center gap-2.5">
+                <Bike className="h-3.5 w-3.5 text-sky-400/80" strokeWidth={1.5} />
+                <span className="text-[13px] text-[var(--color-cream)]">
+                  Active deliveries · 配送
+                </span>
+                <span className="staff-num ml-auto text-[11px] text-[var(--color-muted-foreground)]">
+                  {activeDeliveries.length}
+                </span>
+              </div>
+              <ul className="space-y-1">
+                {activeDeliveries.map((o) => (
+                  <li
+                    key={o.orderId}
+                    className="-mx-3 flex items-start gap-3 rounded-md px-3 py-2 transition-colors hover:bg-[var(--color-gold)]/[0.08]"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[13px] text-[var(--color-cream)]/90">
+                        {o.customerName ?? o.customerPhone ?? "Delivery"}
+                      </div>
+                      <div className="staff-num truncate text-[11.5px] text-[var(--color-muted-foreground)]">
+                        {o.orderId} · {STATUS_META[o.status].labelEn} · {o.time}
+                      </div>
+                    </div>
+                    <div className="staff-num whitespace-nowrap text-[14px] text-[var(--color-gold)]">
+                      {baht(o.totalPrice)}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {cancelledOrders.length > 0 && (
+            <div className="px-6 py-5">
+              <div className="mb-3 flex items-center gap-2.5">
+                <span className="h-4 w-1 shrink-0 rounded-full bg-stone-500/80" />
+                <span className="text-[13px] text-[var(--color-cream)]">
+                  Cancelled today · 今日取消
+                </span>
+                <span className="staff-num ml-auto text-[11px] text-[var(--color-muted-foreground)]">
+                  {cancelledOrders.length}
+                </span>
+              </div>
+              <ul className="space-y-1">
+                {cancelledOrders.slice(0, 3).map((o) => (
+                  <li
+                    key={o.orderId}
+                    className="-mx-3 flex items-start gap-3 rounded-md px-3 py-2 transition-colors hover:bg-[var(--color-gold)]/[0.08]"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-[13px] text-[var(--color-muted-foreground)]/90">
+                        {locText(o)} · {o.orderId} · {o.time}
+                      </div>
+                      {o.cancellationReason && (
+                        <div className="text-[11.5px] italic text-[var(--color-muted-foreground)]/60">
+                          {o.cancellationReason}
+                        </div>
+                      )}
+                    </div>
+                    <div className="staff-num whitespace-nowrap text-[13px] text-[var(--color-muted-foreground)] line-through">
+                      {baht(o.totalPrice)}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
       ) : (
         <div className="px-6 py-10 text-center">
@@ -970,6 +1168,141 @@ function AttnGroup({
         ))}
       </ul>
     </div>
+  );
+}
+
+/* ---------- Delivery Watch ---------- */
+
+function DeliveryWatch({
+  activeCount,
+  outNowCount,
+  deliveredCount,
+}: {
+  activeCount: number;
+  outNowCount: number;
+  deliveredCount: number;
+}) {
+  return (
+    <section
+      className="owner-float-card overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 hover:border-[var(--color-gold)]/25"
+      style={{ animation: "owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 260ms both" }}
+    >
+      <div className="flex items-center gap-2.5 border-b border-[var(--color-gold)]/15 px-6 py-4">
+        <Bike className="h-3.5 w-3.5 text-sky-400/70" strokeWidth={1.5} />
+        <span className="text-[11px] uppercase tracking-[0.25em] text-[var(--color-gold-soft)]/90">
+          Delivery Watch · 配送
+        </span>
+      </div>
+      <div className="grid grid-cols-3 divide-x divide-[var(--color-gold)]/10">
+        <DeliveryStat label="Active" labelZh="進行中" value={activeCount} dim={activeCount === 0} />
+        <DeliveryStat
+          label="Out Now"
+          labelZh="配送中"
+          value={outNowCount}
+          sky={outNowCount > 0}
+          dim={outNowCount === 0}
+        />
+        <DeliveryStat
+          label="Delivered"
+          labelZh="已送達"
+          value={deliveredCount}
+          dim={deliveredCount === 0}
+        />
+      </div>
+    </section>
+  );
+}
+
+function DeliveryStat({
+  label,
+  labelZh,
+  value,
+  sky,
+  dim,
+}: {
+  label: string;
+  labelZh: string;
+  value: number;
+  sky?: boolean;
+  dim?: boolean;
+}) {
+  const valueClass = sky
+    ? "text-sky-400"
+    : dim
+    ? "text-[var(--color-muted-foreground)]"
+    : "text-[var(--color-cream)]";
+  return (
+    <div className="py-5 text-center">
+      <div className={`staff-num text-[28px] leading-none ${valueClass}`}>{value}</div>
+      <div className="mt-1.5 text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted-foreground)]">
+        {label}
+      </div>
+      <div className="text-[10px] text-[var(--color-muted-foreground)]/55">{labelZh}</div>
+    </div>
+  );
+}
+
+/* ---------- Cancelled Today ---------- */
+
+function CancelledToday({
+  orders,
+  totalValue,
+}: {
+  orders: StaffOrder[];
+  totalValue: number;
+}) {
+  return (
+    <section
+      className="owner-float-card overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 hover:border-[var(--color-gold)]/25"
+      style={{ animation: "owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 280ms both" }}
+    >
+      <div className="border-b border-[var(--color-gold)]/15 px-6 py-4">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2.5">
+            <XCircle className="h-3.5 w-3.5 text-[var(--color-muted-foreground)]" strokeWidth={1.5} />
+            <span className="text-[11px] uppercase tracking-[0.25em] text-[var(--color-gold-soft)]/90">
+              Cancelled Today · 今日取消
+            </span>
+          </div>
+          <span className="shrink-0 staff-num text-[13px] text-[var(--color-muted-foreground)]">
+            {orders.length} {orders.length === 1 ? "order" : "orders"}
+          </span>
+        </div>
+        {totalValue > 0 && (
+          <div className="mt-2 staff-num text-[18px] leading-none text-[var(--color-muted-foreground)]">
+            {baht(totalValue)}{" "}
+            <span className="text-[12px] font-normal text-[var(--color-muted-foreground)]/60">
+              cancelled value
+            </span>
+          </div>
+        )}
+      </div>
+      <ul className="divide-y divide-[var(--color-gold)]/10">
+        {orders.slice(0, 5).map((o) => (
+          <li
+            key={o.orderId}
+            className="flex items-start gap-3 px-6 py-3 transition-colors hover:bg-[var(--color-gold)]/[0.04]"
+          >
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline gap-2 text-[12px]">
+                <span className="staff-num text-[var(--color-muted-foreground)]">{o.orderId}</span>
+                <span className="text-[var(--color-muted-foreground)]/55">
+                  · {locText(o)} · {o.time}
+                </span>
+              </div>
+              {o.cancellationReason && (
+                <div className="mt-0.5 text-[11.5px] italic text-[var(--color-muted-foreground)]/70">
+                  {o.cancellationReason}
+                </div>
+              )}
+            </div>
+            <span className="shrink-0 staff-num text-[13px] text-[var(--color-muted-foreground)] line-through">
+              {baht(o.totalPrice)}
+            </span>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 

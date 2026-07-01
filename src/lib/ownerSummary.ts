@@ -58,7 +58,7 @@ export function summarizeToday(orders: readonly StaffOrder[], now: Date): OwnerS
     } else {
       unpaidTotal += o.totalPrice;
       unpaidCount += 1;
-      if (o.status === "done") doneUnpaidCount += 1;
+      if (o.status === "done" || o.status === "delivered") doneUnpaidCount += 1;
     }
   }
 
