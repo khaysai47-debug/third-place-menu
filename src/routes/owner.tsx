@@ -156,7 +156,7 @@ function OwnerPage() {
   useEffect(() => {
     const id = window.setInterval(() => {
       if (!document.hidden) void refreshOrders();
-    }, 10000);
+    }, 60000);
     return () => window.clearInterval(id);
   }, [refreshOrders]);
 
@@ -1027,7 +1027,7 @@ function NeedsAttention({
           </span>
         </div>
         <p className="mt-2 text-[12px] text-[var(--color-muted-foreground)]">
-          Owner-only · refreshes live every 10s
+          Owner-only · refreshes every 60s
         </p>
       </div>
 
