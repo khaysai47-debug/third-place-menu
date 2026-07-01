@@ -13,13 +13,17 @@ import {
   Banknote,
   Bike,
   ClipboardList,
+  ExternalLink,
   LayoutGrid,
   LineChart as LineChartIcon,
+  MapPin,
+  Phone,
   Receipt,
   RefreshCw,
   Scale,
   Settings,
   TrendingDown,
+  User,
   UtensilsCrossed,
   Wallet,
   XCircle,
@@ -36,7 +40,7 @@ import {
   YAxis,
 } from "recharts";
 import { orderLocation } from "@/components/staff/StaffOrderCard";
-import { STATUS_META } from "@/components/staff/orderStatus";
+import { PAYMENT_META, STATUS_META } from "@/components/staff/orderStatus";
 import { getStaffOrders, type StaffOrder } from "@/lib/staffOrders";
 import { isSameLocalDay, summarizeToday, todaysOrders } from "@/lib/ownerSummary";
 import { getExpenses, type Expense } from "@/lib/expenses";
@@ -245,11 +249,16 @@ function OwnerPage() {
     [expensesToday],
   );
 
+  const [selectedOrder, setSelectedOrder] = useState<StaffOrder | null>(null);
+
   return (
     <div
       className="min-h-screen ink-grain lg:flex"
       style={{ backgroundColor: "oklch(0.145 0.005 60)" }}
     >
+      {selectedOrder && (
+        <OwnerOrderModal order={selectedOrder} onClose={() => setSelectedOrder(null)} />
+      )}
       <OwnerSidebar />
 
       <div className="min-w-0 flex-1">
@@ -274,7 +283,7 @@ function OwnerPage() {
                 expLoadState={expLoadState}
               />
               <RevenueTrend orders={orders} now={now} />
-              <RecentOrders recent={recentAll} />
+              <RecentOrders recent={recentAll} onSelectOrder={setSelectedOrder} />
             </section>
 
             <aside className="col-span-12 space-y-6 xl:col-span-4">
@@ -282,7 +291,7 @@ function OwnerPage() {
                 doneUnpaid={doneUnpaid}
                 unpaidOpen={unpaidOpen}
                 activeDeliveries={activeDeliveries}
-                cancelledOrders={cancelledToday}
+                onSelectOrder={setSelectedOrder}
               />
               <DeliveryWatch
                 activeCount={activeDeliveries.length}
@@ -290,7 +299,11 @@ function OwnerPage() {
                 deliveredCount={deliveredToday.length}
               />
               {cancelledToday.length > 0 && (
-                <CancelledToday orders={cancelledToday} totalValue={cancelledTodayValue} />
+                <CancelledToday
+                  orders={cancelledToday}
+                  totalValue={cancelledTodayValue}
+                  onSelectOrder={setSelectedOrder}
+                />
               )}
               <PaymentMix
                 collected={summary.collected}
@@ -880,7 +893,13 @@ function MixRow({
 
 /* ---------- Recent Orders ---------- */
 
-function RecentOrders({ recent }: { recent: StaffOrder[] }) {
+function RecentOrders({
+  recent,
+  onSelectOrder,
+}: {
+  recent: StaffOrder[];
+  onSelectOrder: (o: StaffOrder) => void;
+}) {
   return (
     <section
       className="owner-float-card overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 hover:border-[var(--color-gold)]/25"
@@ -920,7 +939,7 @@ function RecentOrders({ recent }: { recent: StaffOrder[] }) {
                 const alert = o.status === "done" && o.paymentStatus === "unpaid";
                 const paid = o.paymentStatus === "paid";
                 return (
-                  <tr key={o.orderId} className="border-t border-[var(--color-gold)]/10 transition-colors hover:bg-[var(--color-gold)]/[0.04]">
+                  <tr key={o.orderId} onClick={() => onSelectOrder(o)} className="cursor-pointer border-t border-[var(--color-gold)]/10 transition-colors hover:bg-[var(--color-gold)]/[0.07]">
                     <td
                       className={`border-l-2 px-6 py-4 ${alert ? "border-[var(--color-vermillion)]" : "border-transparent"}`}
                     >
@@ -990,26 +1009,286 @@ function RecentOrders({ recent }: { recent: StaffOrder[] }) {
   );
 }
 
+/* ---------- Owner Order Modal (read-only, centered) ---------- */
+
+function ownerFmtTime(iso: string | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : hhmm(d);
+}
+
+function OwnerOrderModal({ order, onClose }: { order: StaffOrder; onClose: () => void }) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const meta = STATUS_META[order.status];
+  const payMeta = PAYMENT_META[order.paymentStatus];
+  const cancelled = order.status === "cancelled";
+  const paid = order.paymentStatus === "paid";
+  const displayDeliveryFee = order.deliveryFee && order.deliveryFee > 0 ? order.deliveryFee : 30;
+  const totalQty = order.items.reduce((s, i) => s + i.quantity, 0);
+  const loc = orderLocation(order);
+  const paidAtLabel = ownerFmtTime(order.paidAt);
+  const cancelledAtLabel = ownerFmtTime(order.cancelledAt);
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
+      {/* Backdrop */}
+      <div
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+      />
+
+      {/* Card — stopPropagation so backdrop click doesn't fire through */}
+      <div
+        className="relative flex w-full max-w-[600px] max-h-[85vh] flex-col overflow-hidden rounded-2xl border border-[var(--color-gold)]/20 bg-[var(--color-charcoal-soft)] shadow-[0_24px_80px_-20px_oklch(0_0_0/0.9)]"
+        onClick={(e) => e.stopPropagation()}
+      >
+
+        {/* Header */}
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-[var(--color-gold)]/15 px-5 pb-4 pt-5">
+          <div className="min-w-0">
+            <p className="staff-num text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--color-gold-soft)]/70 tabular-nums">
+              {order.orderId} · {order.time} · {totalQty} {totalQty === 1 ? "item" : "items"}
+            </p>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              <span className="font-sans text-[20px] font-semibold leading-none text-[var(--color-cream)]">
+                {loc.big}
+                {loc.num !== undefined && <span className="staff-num ml-1.5">{loc.num}</span>}
+                <span className="ml-2 text-[13px] tracking-[0.08em] text-[var(--color-cream)]/50">
+                  {loc.zh}
+                </span>
+              </span>
+              <span
+                className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium tracking-[0.06em] ${meta.badgeClass}`}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${meta.dotClass}`} />
+                {meta.labelZh} {meta.labelEn}
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--color-cream)]/10 text-[var(--color-cream)]/60 text-[18px] transition hover:bg-[var(--color-cream)]/20"
+          >
+            ✕
+          </button>
+        </div>
+
+        {/* Scrollable body */}
+        <div className="flex-1 space-y-6 overflow-y-auto px-5 py-5">
+
+          {/* Items */}
+          <section>
+            <h3 className="mb-3 text-[11px] uppercase tracking-[0.22em] text-[var(--color-cream)]/45">
+              Items · 餐點
+            </h3>
+            <ul className="space-y-3">
+              {order.items.map((item) => (
+                <li
+                  key={item.id ?? item.name}
+                  className={`flex items-baseline gap-3 ${cancelled ? "opacity-50" : ""}`}
+                >
+                  <span className="staff-num w-9 shrink-0 text-right text-[16px] font-semibold text-[var(--color-vermillion)]">
+                    {item.quantity}
+                    <span className="ml-0.5 text-[11px] font-normal text-[var(--color-cream)]/35">×</span>
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className={`truncate text-[16px] leading-snug ${cancelled ? "text-[var(--color-cream)]/60 line-through" : "text-[var(--color-cream)]"}`}>
+                      {item.name}
+                    </p>
+                    {item.unitPrice > 0 && (
+                      <p className="staff-num text-[12px] text-[var(--color-cream)]/40">
+                        ฿{item.unitPrice.toLocaleString("en-US")} each
+                      </p>
+                    )}
+                  </div>
+                  <span className={`staff-num shrink-0 text-[16px] ${cancelled ? "text-[var(--color-muted-foreground)] line-through" : "text-[var(--color-gold-soft)]"}`}>
+                    ฿{(item.quantity * item.unitPrice).toLocaleString("en-US")}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          {/* Notes */}
+          {order.notes && (
+            <section>
+              <h3 className="mb-3 text-[11px] uppercase tracking-[0.22em] text-[var(--color-cream)]/45">
+                Notes · 備註
+              </h3>
+              <p className="rounded-xl border border-[var(--color-gold)]/20 bg-[var(--color-ink)] px-4 py-3 text-[15px] leading-relaxed text-[var(--color-cream)]/85">
+                {order.notes}
+              </p>
+            </section>
+          )}
+
+          {/* Delivery info */}
+          {order.orderType === "delivery" && (
+            <section>
+              <h3 className="mb-3 text-[11px] uppercase tracking-[0.22em] text-[var(--color-cream)]/45">
+                Delivery · 外送
+              </h3>
+              <div className="space-y-2 rounded-xl border border-[var(--color-gold)]/20 bg-[var(--color-ink)] px-4 py-3 text-[14px]">
+                {order.customerName && (
+                  <div className="grid grid-cols-[16px_100px_1fr] items-center gap-2">
+                    <User size={12} className="text-[var(--color-cream)]/40" />
+                    <span className="text-[13px] uppercase tracking-[0.08em] text-[var(--color-cream)]/50">Name</span>
+                    <span className="text-right text-[var(--color-cream)]">{order.customerName}</span>
+                  </div>
+                )}
+                {order.customerPhone && (
+                  <div className="grid grid-cols-[16px_100px_1fr] items-center gap-2">
+                    <Phone size={12} className="text-[var(--color-cream)]/40" />
+                    <span className="text-[13px] uppercase tracking-[0.08em] text-[var(--color-cream)]/50">Phone</span>
+                    <span className="staff-num text-right text-[var(--color-cream)]">{order.customerPhone}</span>
+                  </div>
+                )}
+                {order.deliveryAddress && (
+                  <div className="grid grid-cols-[16px_100px_1fr] items-start gap-2">
+                    <MapPin size={12} className="mt-0.5 text-[var(--color-cream)]/40" />
+                    <span className="text-[13px] uppercase tracking-[0.08em] text-[var(--color-cream)]/50">Address</span>
+                    <span className="text-right text-[var(--color-cream)]">{order.deliveryAddress}</span>
+                  </div>
+                )}
+                <div className="space-y-1.5 border-t border-[var(--color-gold)]/10 pt-2">
+                  {(order.subtotalPrice ?? 0) > 0 && (
+                    <div className="flex justify-between gap-3">
+                      <span className="text-[var(--color-cream)]/50">Subtotal</span>
+                      <span className="staff-num text-[var(--color-cream)]/75">
+                        ฿{(order.subtotalPrice ?? 0).toLocaleString("en-US")}
+                      </span>
+                    </div>
+                  )}
+                  <div className="flex justify-between gap-3">
+                    <span className="flex items-center gap-1.5 text-[var(--color-cream)]/50">
+                      <Bike size={12} className="shrink-0" /> Delivery fee
+                    </span>
+                    <span className="staff-num text-[var(--color-cream)]/75">
+                      ฿{displayDeliveryFee.toLocaleString("en-US")}
+                    </span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-[var(--color-cream)]/50">Total</span>
+                    <span className={`staff-num ${cancelled ? "text-[var(--color-muted-foreground)] line-through" : "text-[var(--color-vermillion)]"}`}>
+                      ฿{order.totalPrice.toLocaleString("en-US")}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
+          {/* Total */}
+          <div className="flex items-baseline justify-between border-t border-[var(--color-gold)]/15 pt-4">
+            <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--color-cream)]/50">
+              Total · 合計
+            </span>
+            <span className={`staff-num inline-flex items-baseline text-[24px] leading-none ${cancelled ? "text-[var(--color-muted-foreground)] line-through" : "text-[var(--color-vermillion)]"}`}>
+              <span className="mr-0.5 text-[15px]">฿</span>
+              {order.totalPrice.toLocaleString("en-US")}
+            </span>
+          </div>
+
+          {/* Payment */}
+          <div className="flex items-center justify-between border-t border-[var(--color-gold)]/15 pt-4">
+            <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--color-cream)]/50">
+              Payment · 付款
+            </span>
+            <span className={`flex items-center gap-1.5 rounded-full border border-[var(--color-gold)]/25 px-2.5 py-1 text-[12px] font-medium tracking-[0.06em] ${payMeta.badgeClass}`}>
+              <span className={`h-1.5 w-1.5 rounded-full ${payMeta.dotClass}`} />
+              {payMeta.labelZh} {payMeta.labelEn}
+              {paid && order.paymentMethod ? ` · ${order.paymentMethod}` : ""}
+              {paid && paidAtLabel ? ` · ${paidAtLabel}` : ""}
+            </span>
+          </div>
+
+          {/* Payment proof */}
+          {order.hasPaymentProof && (
+            <div className="flex items-center justify-between border-t border-[var(--color-gold)]/15 pt-4">
+              <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--color-cream)]/50">
+                Proof · 收據
+              </span>
+              {order.paymentProofUrl ? (
+                <a
+                  href={order.paymentProofUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 rounded-lg border border-teal-700/40 bg-teal-600/10 px-3 py-1.5 text-[12px] font-medium text-teal-300 transition hover:bg-teal-600/20"
+                >
+                  <ExternalLink size={11} strokeWidth={1.5} />
+                  View proof
+                </a>
+              ) : (
+                <span className="text-[12px] text-[var(--color-muted-foreground)]">Received (no URL)</span>
+              )}
+            </div>
+          )}
+
+          {/* Cancellation */}
+          {cancelled && (order.cancellationReason || order.cancelledAt) && (
+            <div className="flex items-start justify-between border-t border-[var(--color-gold)]/15 pt-4">
+              <span className="mr-3 shrink-0 text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--color-cream)]/50">
+                Cancelled · 取消
+              </span>
+              <div className="space-y-0.5 text-right">
+                {order.cancellationReason && (
+                  <p className="text-[13px] text-[var(--color-cream)]/80">{order.cancellationReason}</p>
+                )}
+                {cancelledAtLabel && (
+                  <p className="staff-num text-[11px] tabular-nums text-[var(--color-cream)]/45">
+                    at {cancelledAtLabel}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Placed time */}
+          <div className="flex items-center justify-between border-t border-[var(--color-gold)]/15 pt-4">
+            <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--color-cream)]/50">
+              Placed · 下單時間
+            </span>
+            <span className="staff-num tabular-nums text-[13px] text-[var(--color-cream)]/75">
+              {order.time}
+            </span>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div className="shrink-0 border-t border-[var(--color-gold)]/15 px-5 py-3">
+          <p className="text-center text-[11px] uppercase tracking-[0.2em] text-[var(--color-muted-foreground)]">
+            Read-only · 僅供檢視
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------- Needs Attention (sticky right rail) ---------- */
 
 function NeedsAttention({
   doneUnpaid,
   unpaidOpen,
   activeDeliveries,
-  cancelledOrders,
+  onSelectOrder,
 }: {
   doneUnpaid: StaffOrder[];
   unpaidOpen: StaffOrder[];
   activeDeliveries: StaffOrder[];
-  cancelledOrders: StaffOrder[];
+  onSelectOrder: (o: StaffOrder) => void;
 }) {
   const openCount = doneUnpaid.length + unpaidOpen.length;
-  const hasContent =
-    openCount > 0 || activeDeliveries.length > 0 || cancelledOrders.length > 0;
+  const hasContent = openCount > 0 || activeDeliveries.length > 0;
 
   return (
     <div
-      className="overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 xl:sticky xl:top-6"
+      className="overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60"
       style={{ animation: "owner-fade-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) 240ms both" }}
     >
       <div className="border-b border-[var(--color-gold)]/15 px-6 py-5">
@@ -1038,12 +1317,14 @@ function NeedsAttention({
             tone="var(--color-vermillion)"
             orders={doneUnpaid}
             emptyHidden
+            onSelectOrder={onSelectOrder}
           />
           <AttnGroup
             title="Unpaid — still open · 未付進行中"
             tone="var(--color-gold-soft)"
             orders={unpaidOpen}
             emptyHidden
+            onSelectOrder={onSelectOrder}
           />
           {activeDeliveries.length > 0 && (
             <div className="px-6 py-5">
@@ -1060,7 +1341,8 @@ function NeedsAttention({
                 {activeDeliveries.map((o) => (
                   <li
                     key={o.orderId}
-                    className="-mx-3 flex items-start gap-3 rounded-md px-3 py-2 transition-colors hover:bg-[var(--color-gold)]/[0.08]"
+                    onClick={() => onSelectOrder(o)}
+                    className="cursor-pointer -mx-3 flex items-start gap-3 rounded-md px-3 py-2 transition-colors hover:bg-[var(--color-gold)]/[0.08]"
                   >
                     <div className="min-w-0 flex-1">
                       <div className="truncate text-[13px] text-[var(--color-cream)]/90">
@@ -1071,41 +1353,6 @@ function NeedsAttention({
                       </div>
                     </div>
                     <div className="staff-num whitespace-nowrap text-[14px] text-[var(--color-gold)]">
-                      {baht(o.totalPrice)}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {cancelledOrders.length > 0 && (
-            <div className="px-6 py-5">
-              <div className="mb-3 flex items-center gap-2.5">
-                <span className="h-4 w-1 shrink-0 rounded-full bg-stone-500/80" />
-                <span className="text-[13px] text-[var(--color-cream)]">
-                  Cancelled today · 今日取消
-                </span>
-                <span className="staff-num ml-auto text-[11px] text-[var(--color-muted-foreground)]">
-                  {cancelledOrders.length}
-                </span>
-              </div>
-              <ul className="space-y-1">
-                {cancelledOrders.slice(0, 3).map((o) => (
-                  <li
-                    key={o.orderId}
-                    className="-mx-3 flex items-start gap-3 rounded-md px-3 py-2 transition-colors hover:bg-[var(--color-gold)]/[0.08]"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-[13px] text-[var(--color-muted-foreground)]/90">
-                        {locText(o)} · {o.orderId} · {o.time}
-                      </div>
-                      {o.cancellationReason && (
-                        <div className="text-[11.5px] italic text-[var(--color-muted-foreground)]/60">
-                          {o.cancellationReason}
-                        </div>
-                      )}
-                    </div>
-                    <div className="staff-num whitespace-nowrap text-[13px] text-[var(--color-muted-foreground)] line-through">
                       {baht(o.totalPrice)}
                     </div>
                   </li>
@@ -1136,11 +1383,13 @@ function AttnGroup({
   tone,
   orders,
   emptyHidden,
+  onSelectOrder,
 }: {
   title: string;
   tone: string;
   orders: StaffOrder[];
   emptyHidden?: boolean;
+  onSelectOrder: (o: StaffOrder) => void;
 }) {
   if (orders.length === 0 && emptyHidden) return null;
   return (
@@ -1154,7 +1403,7 @@ function AttnGroup({
       </div>
       <ul className="space-y-1">
         {orders.map((o) => (
-          <li key={o.orderId} className="flex items-start gap-3 rounded-md px-3 py-2 -mx-3 transition-colors hover:bg-[var(--color-gold)]/[0.08]">
+          <li key={o.orderId} onClick={() => onSelectOrder(o)} className="cursor-pointer flex items-start gap-3 rounded-md px-3 py-2 -mx-3 transition-colors hover:bg-[var(--color-gold)]/[0.08]">
             <div className="min-w-0 flex-1">
               <div className="truncate text-[13px] text-[var(--color-cream)]/95">{locText(o)}</div>
               <div className="staff-num truncate text-[11.5px] text-[var(--color-muted-foreground)]">
@@ -1247,9 +1496,11 @@ function DeliveryStat({
 function CancelledToday({
   orders,
   totalValue,
+  onSelectOrder,
 }: {
   orders: StaffOrder[];
   totalValue: number;
+  onSelectOrder: (o: StaffOrder) => void;
 }) {
   return (
     <section
@@ -1281,7 +1532,8 @@ function CancelledToday({
         {orders.slice(0, 5).map((o) => (
           <li
             key={o.orderId}
-            className="flex items-start gap-3 px-6 py-3 transition-colors hover:bg-[var(--color-gold)]/[0.04]"
+            onClick={() => onSelectOrder(o)}
+            className="cursor-pointer flex items-start gap-3 px-6 py-3 transition-colors hover:bg-[var(--color-gold)]/[0.07]"
           >
             <div className="min-w-0 flex-1">
               <div className="flex items-baseline gap-2 text-[12px]">
