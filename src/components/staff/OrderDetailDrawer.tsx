@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import type { StaffOrder, StaffPaymentMethod } from "@/lib/staffOrders";
+import { Bike, MapPin, Phone, User } from "lucide-react";
 import { NEXT_ACTION, PAYMENT_META, STATUS_META } from "./orderStatus";
 import { OrderLocationTitle } from "./StaffOrderCard";
 
@@ -40,6 +41,7 @@ export function OrderDetailDrawer({
   const paid = order.paymentStatus === "paid";
   const paidAtLabel = order.paidAt ? formatPaidAt(order.paidAt) : null;
   const canTakePayment = !paid && !!order.airtableRecordId && order.status !== "cancelled";
+  const displayDeliveryFee = order.deliveryFee && order.deliveryFee > 0 ? order.deliveryFee : 30;
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -133,20 +135,23 @@ export function OrderDetailDrawer({
               </h3>
               <div className="rounded-xl bg-[var(--color-ink)] border border-[var(--color-gold)]/20 px-4 py-3 space-y-2 text-[14px]">
                 {order.customerName && (
-                  <div className="flex justify-between gap-3">
-                    <span className="text-[var(--color-cream)]/50">Name</span>
-                    <span className="text-[var(--color-cream)]">{order.customerName}</span>
+                  <div className="grid grid-cols-[16px_110px_1fr] items-center gap-2">
+                    <User size={12} className="text-[var(--color-cream)]/40" />
+                    <span className="text-[var(--color-cream)]/50 uppercase tracking-[0.08em] text-[13px]">Name</span>
+                    <span className="text-[var(--color-cream)] text-right">{order.customerName}</span>
                   </div>
                 )}
                 {order.customerPhone && (
-                  <div className="flex justify-between gap-3">
-                    <span className="text-[var(--color-cream)]/50">Phone</span>
-                    <span className="staff-num text-[var(--color-cream)]">{order.customerPhone}</span>
+                  <div className="grid grid-cols-[16px_110px_1fr] items-center gap-2">
+                    <Phone size={12} className="text-[var(--color-cream)]/40" />
+                    <span className="text-[var(--color-cream)]/50 uppercase tracking-[0.08em] text-[13px]">Phone</span>
+                    <span className="staff-num text-[var(--color-cream)] text-right">{order.customerPhone}</span>
                   </div>
                 )}
                 {order.deliveryAddress && (
-                  <div className="flex justify-between gap-3">
-                    <span className="text-[var(--color-cream)]/50 shrink-0">Address</span>
+                  <div className="grid grid-cols-[16px_110px_1fr] items-center gap-2">
+                    <MapPin size={12} className="text-[var(--color-cream)]/40" />
+                    <span className="text-[var(--color-cream)]/50 uppercase tracking-[0.08em] text-[13px]">Address</span>
                     <span className="text-[var(--color-cream)] text-right">{order.deliveryAddress}</span>
                   </div>
                 )}
@@ -156,8 +161,8 @@ export function OrderDetailDrawer({
                     <span className="staff-num text-[var(--color-cream)]/75">฿{(order.subtotalPrice ?? 0).toLocaleString("en-US")}</span>
                   </div>
                   <div className="flex justify-between gap-3">
-                    <span className="text-[var(--color-cream)]/50">Delivery fee</span>
-                    <span className="staff-num text-[var(--color-cream)]/75">฿{(order.deliveryFee ?? 0).toLocaleString("en-US")}</span>
+                    <span className="flex items-center gap-1.5 text-[var(--color-cream)]/50"><Bike size={12} className="shrink-0" />Delivery fee</span>
+                    <span className="staff-num text-[var(--color-cream)]/75">฿{displayDeliveryFee.toLocaleString("en-US")}</span>
                   </div>
                   <div className="flex justify-between gap-3">
                     <span className="text-[var(--color-cream)]/50">Total</span>

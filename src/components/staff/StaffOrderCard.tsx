@@ -1,4 +1,5 @@
 import type { StaffOrder } from "@/lib/staffOrders";
+import { Bike, MapPin, Phone, User } from "lucide-react";
 import { NEXT_ACTION, PAYMENT_META, STATUS_META } from "./orderStatus";
 
 interface Props {
@@ -47,6 +48,7 @@ export function StaffOrderCard({ order, updating = false, onAdvance, onOpen }: P
   const action = NEXT_ACTION[order.status];
   const totalQty = order.items.reduce((s, i) => s + i.quantity, 0);
   const cancelled = order.status === "cancelled";
+  const displayDeliveryFee = order.deliveryFee && order.deliveryFee > 0 ? order.deliveryFee : 30;
 
   return (
     <article
@@ -105,31 +107,33 @@ export function StaffOrderCard({ order, updating = false, onAdvance, onOpen }: P
       </ul>
 
       {order.orderType === "delivery" && (
-        <div className="px-4 py-2.5 border-t border-dotted border-[var(--color-ink)]/25 space-y-1">
+        <div className="px-4 py-2.5 border-t border-dotted border-[var(--color-ink)]/25 space-y-1.5 text-[12px]">
           {order.customerName && (
-            <div className="flex gap-2 text-[12px]">
-              <span className="min-w-[5.5rem] shrink-0 text-[var(--color-ink)]/45 uppercase tracking-[0.1em]">Name</span>
+            <div className="grid grid-cols-[14px_88px_1fr] items-center gap-2">
+              <User size={11} className="text-[var(--color-ink)]/40" />
+              <span className="text-[var(--color-ink)]/45 uppercase tracking-[0.1em]">Name</span>
               <span className="text-[var(--color-ink)]/80 truncate">{order.customerName}</span>
             </div>
           )}
           {order.customerPhone && (
-            <div className="flex gap-2 text-[12px]">
-              <span className="min-w-[5.5rem] shrink-0 text-[var(--color-ink)]/45 uppercase tracking-[0.1em]">Phone</span>
+            <div className="grid grid-cols-[14px_88px_1fr] items-center gap-2">
+              <Phone size={11} className="text-[var(--color-ink)]/40" />
+              <span className="text-[var(--color-ink)]/45 uppercase tracking-[0.1em]">Phone</span>
               <span className="staff-num text-[var(--color-ink)]/80">{order.customerPhone}</span>
             </div>
           )}
           {order.deliveryAddress && (
-            <div className="flex gap-2 text-[12px]">
-              <span className="min-w-[5.5rem] shrink-0 text-[var(--color-ink)]/45 uppercase tracking-[0.1em]">Address</span>
+            <div className="grid grid-cols-[14px_88px_1fr] items-center gap-2">
+              <MapPin size={11} className="text-[var(--color-ink)]/40" />
+              <span className="text-[var(--color-ink)]/45 uppercase tracking-[0.1em]">Address</span>
               <span className="text-[var(--color-ink)]/80 truncate">{order.deliveryAddress}</span>
             </div>
           )}
-          {!!order.deliveryFee && (
-            <div className="flex gap-2 text-[12px]">
-              <span className="min-w-[5.5rem] shrink-0 text-[var(--color-ink)]/45 uppercase tracking-[0.1em]">Delivery fee</span>
-              <span className="staff-num text-[var(--color-ink)]/80">฿{order.deliveryFee.toLocaleString("en-US")}</span>
-            </div>
-          )}
+          <div className="grid grid-cols-[14px_88px_1fr] items-center gap-2">
+            <Bike size={11} className="text-[var(--color-ink)]/40" />
+            <span className="text-[var(--color-ink)]/45 uppercase tracking-[0.1em]">Fee</span>
+            <span className="staff-num text-[var(--color-ink)]/80">฿{displayDeliveryFee.toLocaleString("en-US")}</span>
+          </div>
         </div>
       )}
 
