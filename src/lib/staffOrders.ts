@@ -8,7 +8,7 @@ const STAFF_ORDERS_API_URL = n8nWebhook("third-place-staff-orders");
 const UPDATE_STATUS_API_URL = n8nWebhook("third-place-update-order-status");
 const UPDATE_PAYMENT_API_URL = n8nWebhook("third-place-update-payment");
 
-export type StaffOrderStatus = "new" | "preparing" | "ready" | "done" | "cancelled";
+export type StaffOrderStatus = "new" | "preparing" | "ready" | "out_for_delivery" | "delivered" | "done" | "cancelled";
 
 export type StaffOrderType = "dine_in" | "pickup" | "delivery";
 
@@ -55,15 +55,17 @@ export interface StaffOrder {
   paymentProofReceivedAt?: string;
 }
 
-/** The only legal forward transitions. Done/cancelled are terminal. */
-const NEXT_STATUS: Partial<Record<StaffOrderStatus, StaffOrderStatus>> = {
-  new: "preparing",
-  preparing: "ready",
-  ready: "done",
-};
-
-export function nextStaffOrderStatus(status: StaffOrderStatus): StaffOrderStatus | null {
-  return NEXT_STATUS[status] ?? null;
+/** Returns the next status for an order, accounting for delivery's extended flow. */
+export function nextStaffOrderStatus(
+  order: Pick<StaffOrder, "status" | "orderType">,
+): StaffOrderStatus | null {
+  switch (order.status) {
+    case "new": return "preparing";
+    case "preparing": return "ready";
+    case "ready": return order.orderType === "delivery" ? "out_for_delivery" : "done";
+    case "out_for_delivery": return "delivered";
+    default: return null;
+  }
 }
 
 export type UpdateStaffOrderResult = { success: true } | { success: false; error: string };
@@ -98,7 +100,7 @@ interface ApiOrder {
   }[];
 }
 
-const STATUSES: StaffOrderStatus[] = ["new", "preparing", "ready", "done", "cancelled"];
+const STATUSES: StaffOrderStatus[] = ["new", "preparing", "ready", "out_for_delivery", "delivered", "done", "cancelled"];
 const ORDER_TYPES: StaffOrderType[] = ["dine_in", "pickup", "delivery"];
 
 // Airtable's Status field calls it "completed"; the staff UI calls it "done".

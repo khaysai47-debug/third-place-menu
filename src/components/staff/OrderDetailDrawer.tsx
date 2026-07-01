@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 import type { StaffOrder, StaffPaymentMethod } from "@/lib/staffOrders";
 import { Bike, MapPin, Phone, User } from "lucide-react";
-import { NEXT_ACTION, PAYMENT_META, STATUS_META } from "./orderStatus";
+import { getNextAction, PAYMENT_META, STATUS_META } from "./orderStatus";
 import { OrderLocationTitle } from "./StaffOrderCard";
 
 interface Props {
@@ -36,7 +36,7 @@ export function OrderDetailDrawer({
 }: Props) {
   const meta = STATUS_META[order.status];
   const payMeta = PAYMENT_META[order.paymentStatus];
-  const action = NEXT_ACTION[order.status];
+  const action = getNextAction(order);
   const totalQty = order.items.reduce((s, i) => s + i.quantity, 0);
   const paid = order.paymentStatus === "paid";
   const paidAtLabel = order.paidAt ? formatPaidAt(order.paidAt) : null;

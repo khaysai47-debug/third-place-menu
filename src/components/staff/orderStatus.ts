@@ -1,8 +1,8 @@
 // UI presentation for staff order statuses (labels, colors). The status
 // flow itself lives in src/lib/staffOrders.ts.
-import type { StaffOrderStatus, StaffPaymentStatus } from "@/lib/staffOrders";
+import type { StaffOrderStatus, StaffOrderType, StaffPaymentStatus } from "@/lib/staffOrders";
 
-export const STATUS_ORDER: StaffOrderStatus[] = ["new", "preparing", "ready", "done", "cancelled"];
+export const STATUS_ORDER: StaffOrderStatus[] = ["new", "preparing", "ready", "out_for_delivery", "delivered", "done", "cancelled"];
 
 interface StatusMeta {
   labelEn: string;
@@ -45,6 +45,18 @@ export const STATUS_META: Record<StaffOrderStatus, StatusMeta> = {
     badgeClass: "bg-[var(--color-ink)]/5 text-[var(--color-ink)]/50 border-[var(--color-ink)]/15",
     dotClass: "bg-stone-500",
   },
+  out_for_delivery: {
+    labelEn: "Out for Delivery",
+    labelZh: "配送中",
+    badgeClass: "bg-sky-500/10 text-sky-800 border-sky-600/25",
+    dotClass: "bg-sky-400",
+  },
+  delivered: {
+    labelEn: "Delivered",
+    labelZh: "已送達",
+    badgeClass: "bg-[var(--color-ink)]/5 text-[var(--color-ink)]/55 border-[var(--color-ink)]/15",
+    dotClass: "bg-stone-400",
+  },
 };
 
 export const PAYMENT_META: Record<StaffPaymentStatus, StatusMeta> = {
@@ -62,7 +74,7 @@ export const PAYMENT_META: Record<StaffPaymentStatus, StatusMeta> = {
   },
 };
 
-interface NextAction {
+export interface NextAction {
   labelEn: string;
   labelZh: string;
   buttonClass: string;
@@ -86,3 +98,44 @@ export const NEXT_ACTION: Partial<Record<StaffOrderStatus, NextAction>> = {
     buttonClass: "bg-emerald-700 text-white hover:bg-emerald-800",
   },
 };
+
+export function getNextAction(order: {
+  status: StaffOrderStatus;
+  orderType: StaffOrderType;
+}): NextAction | null {
+  switch (order.status) {
+    case "new":
+      return {
+        labelEn: "Start Preparing",
+        labelZh: "開始製作",
+        buttonClass:
+          "bg-[var(--color-vermillion)] text-[var(--color-cream)] hover:bg-[var(--color-vermillion-deep)]",
+      };
+    case "preparing":
+      return {
+        labelEn: "Mark Ready",
+        labelZh: "出餐",
+        buttonClass: "bg-amber-600 text-white hover:bg-amber-700",
+      };
+    case "ready":
+      return order.orderType === "delivery"
+        ? {
+            labelEn: "Mark Out for Delivery",
+            labelZh: "開始配送",
+            buttonClass: "bg-sky-700 text-white hover:bg-sky-800",
+          }
+        : {
+            labelEn: "Mark Done",
+            labelZh: "完成",
+            buttonClass: "bg-emerald-700 text-white hover:bg-emerald-800",
+          };
+    case "out_for_delivery":
+      return {
+        labelEn: "Mark Delivered",
+        labelZh: "已送達",
+        buttonClass: "bg-emerald-700 text-white hover:bg-emerald-800",
+      };
+    default:
+      return null;
+  }
+}

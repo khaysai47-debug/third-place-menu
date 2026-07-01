@@ -1,6 +1,6 @@
 import type { StaffOrder } from "@/lib/staffOrders";
 import { Bike, MapPin, Phone, User } from "lucide-react";
-import { NEXT_ACTION, PAYMENT_META, STATUS_META } from "./orderStatus";
+import { getNextAction, PAYMENT_META, STATUS_META } from "./orderStatus";
 
 interface Props {
   order: StaffOrder;
@@ -45,7 +45,7 @@ export function OrderLocationTitle({
 export function StaffOrderCard({ order, updating = false, onAdvance, onOpen }: Props) {
   const meta = STATUS_META[order.status];
   const payMeta = PAYMENT_META[order.paymentStatus];
-  const action = NEXT_ACTION[order.status];
+  const action = getNextAction(order);
   const totalQty = order.items.reduce((s, i) => s + i.quantity, 0);
   const cancelled = order.status === "cancelled";
   const displayDeliveryFee = order.deliveryFee && order.deliveryFee > 0 ? order.deliveryFee : 30;

@@ -74,7 +74,7 @@ const STAFF_VIEW_TITLES: Record<StaffView, string> = {
   expenses: "Expense Log",
 };
 
-const SUMMARY_STATUSES: StaffOrderStatus[] = ["new", "preparing", "ready", "done"];
+const SUMMARY_STATUSES: StaffOrderStatus[] = ["new", "preparing", "ready", "out_for_delivery", "delivered", "done"];
 
 const SUMMARY_CARD_STYLE: Partial<Record<StaffOrderStatus, { inactive: string; active: string }>> =
   {
@@ -90,6 +90,14 @@ const SUMMARY_CARD_STYLE: Partial<Record<StaffOrderStatus, { inactive: string; a
     ready: {
       inactive: "bg-emerald-500/10 border-emerald-500/25 hover:bg-emerald-500/15",
       active: "bg-emerald-500/18 border-emerald-500/55",
+    },
+    out_for_delivery: {
+      inactive: "bg-sky-500/10 border-sky-600/25 hover:bg-sky-500/15",
+      active: "bg-sky-500/18 border-sky-600/55",
+    },
+    delivered: {
+      inactive: "bg-stone-400/8 border-stone-400/15 hover:bg-stone-400/12",
+      active: "bg-stone-400/14 border-stone-400/30",
     },
     done: {
       inactive: "bg-stone-500/8 border-stone-400/18 hover:bg-stone-500/12",
@@ -195,6 +203,8 @@ function StaffPage() {
       new: 0,
       preparing: 0,
       ready: 0,
+      out_for_delivery: 0,
+      delivered: 0,
       done: 0,
       cancelled: 0,
     };
@@ -232,7 +242,7 @@ function StaffPage() {
 
   const advanceOrder = async (orderId: string) => {
     const current = orders.find((o) => o.orderId === orderId);
-    const next = current ? nextStaffOrderStatus(current.status) : null;
+    const next = current ? nextStaffOrderStatus(current) : null;
     if (!current || !next || updatingIds.has(orderId)) return;
     if (!current.airtableRecordId) {
       setUpdateError("此訂單無法更新 · This order can't be updated.");
@@ -379,7 +389,7 @@ function StaffPage() {
         ) : (
           <>
             {/* Summary cards */}
-            <div className="px-5 grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="px-5 grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-3">
               {SUMMARY_STATUSES.map((status) => {
                 const meta = STATUS_META[status];
                 const active = activeTab === status;
