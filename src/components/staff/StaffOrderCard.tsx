@@ -7,6 +7,7 @@ interface Props {
   updating?: boolean;
   onAdvance: (orderId: string) => void;
   onOpen: (orderId: string) => void;
+  onCancelOrder: (orderId: string) => void;
 }
 
 export function orderLocation(order: StaffOrder): { big: string; num?: string; zh: string } {
@@ -42,7 +43,7 @@ export function OrderLocationTitle({
   );
 }
 
-export function StaffOrderCard({ order, updating = false, onAdvance, onOpen }: Props) {
+export function StaffOrderCard({ order, updating = false, onAdvance, onOpen, onCancelOrder }: Props) {
   const meta = STATUS_META[order.status];
   const payMeta = PAYMENT_META[order.paymentStatus];
   const action = getNextAction(order);
@@ -174,6 +175,18 @@ export function StaffOrderCard({ order, updating = false, onAdvance, onOpen }: P
             <span className={`h-1.5 w-1.5 rounded-full ${meta.dotClass}`} />
             {meta.labelZh} · {meta.labelEn}
           </p>
+        )}
+        {(order.status === "new" || order.status === "preparing") && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onCancelOrder(order.orderId);
+            }}
+            disabled={updating}
+            className="mt-2 w-full h-9 rounded-xl border border-[var(--color-vermillion)]/25 text-[var(--color-vermillion)]/60 text-[13px] font-medium tracking-[0.04em] hover:border-[var(--color-vermillion)]/50 hover:text-[var(--color-vermillion)]/90 transition disabled:opacity-40 disabled:cursor-wait"
+          >
+            取消 · Cancel Order
+          </button>
         )}
       </div>
     </article>

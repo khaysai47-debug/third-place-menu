@@ -53,6 +53,8 @@ export interface StaffOrder {
   paymentProofUrl?: string;
   paymentProofStatus?: string;
   paymentProofReceivedAt?: string;
+  cancellationReason?: string;
+  cancelledAt?: string;
 }
 
 /** Returns the next status for an order, accounting for delivery's extended flow. */
@@ -92,6 +94,8 @@ interface ApiOrder {
   deliveryAddress?: unknown;
   subtotalPrice?: unknown;
   deliveryFee?: unknown;
+  cancellationReason?: unknown;
+  cancelledAt?: unknown;
   items?: {
     id?: unknown;
     name?: unknown;
@@ -156,6 +160,8 @@ function mapApiOrder(raw: ApiOrder): StaffOrder {
     paymentProofUrl: asString(raw.paymentProofUrl) || undefined,
     paymentProofStatus: asString(raw.paymentProofStatus) || undefined,
     paymentProofReceivedAt: asString(raw.paymentProofReceivedAt) || undefined,
+    cancellationReason: asString(raw.cancellationReason) || undefined,
+    cancelledAt: asString(raw.cancelledAt) || undefined,
   };
 }
 
@@ -184,12 +190,17 @@ export async function getStaffOrders(): Promise<StaffOrder[]> {
 export async function updateStaffOrderStatus(
   airtableRecordId: string,
   status: StaffOrderStatus,
+  options?: { cancellationReason?: string },
 ): Promise<UpdateStaffOrderResult> {
   try {
     const response = await fetch(UPDATE_STATUS_API_URL, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ airtableRecordId, status: API_STATUS_BY_UI[status] ?? status }),
+      body: JSON.stringify({
+        airtableRecordId,
+        status: API_STATUS_BY_UI[status] ?? status,
+        cancellationReason: options?.cancellationReason,
+      }),
     });
     const data = (await response.json().catch(() => null)) as { success?: boolean } | null;
     if (!response.ok || data?.success !== true) {

@@ -1,6 +1,6 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { StaffOrder, StaffPaymentMethod } from "@/lib/staffOrders";
-import { Bike, MapPin, Phone, User } from "lucide-react";
+import { AlertCircle, Bike, Copy, CreditCard, MapPin, MoreHorizontal, PackageX, Phone, PhoneOff, User, UserX } from "lucide-react";
 import { getNextAction, PAYMENT_META, STATUS_META } from "./orderStatus";
 import { OrderLocationTitle } from "./StaffOrderCard";
 
@@ -8,11 +8,23 @@ interface Props {
   order: StaffOrder;
   updating?: boolean;
   paying?: boolean;
+  cancelling?: boolean;
   updateError?: string | null;
   onAdvance: (orderId: string) => void;
   onMarkPaid: (orderId: string, method: StaffPaymentMethod) => void;
+  onCancelOrder: (orderId: string, reason: string) => void;
   onClose: () => void;
 }
+
+const CANCEL_REASONS = [
+  { reason: "Customer cancelled",      icon: UserX          },
+  { reason: "No payment received",     icon: CreditCard     },
+  { reason: "Cannot contact customer", icon: PhoneOff       },
+  { reason: "Item unavailable",        icon: PackageX       },
+  { reason: "Duplicate order",         icon: Copy           },
+  { reason: "Wrong order",             icon: AlertCircle    },
+  { reason: "Other",                   icon: MoreHorizontal },
+];
 
 const METHOD_ZH: Record<StaffPaymentMethod, string> = {
   Cash: "現金",
@@ -29,9 +41,11 @@ export function OrderDetailDrawer({
   order,
   updating = false,
   paying = false,
+  cancelling = false,
   updateError = null,
   onAdvance,
   onMarkPaid,
+  onCancelOrder,
   onClose,
 }: Props) {
   const meta = STATUS_META[order.status];
@@ -41,7 +55,11 @@ export function OrderDetailDrawer({
   const paid = order.paymentStatus === "paid";
   const paidAtLabel = order.paidAt ? formatPaidAt(order.paidAt) : null;
   const canTakePayment = !paid && !!order.airtableRecordId && order.status !== "cancelled";
+  const canCancel = (order.status === "new" || order.status === "preparing") && !!order.airtableRecordId;
   const displayDeliveryFee = order.deliveryFee && order.deliveryFee > 0 ? order.deliveryFee : 30;
+
+  const [showCancelForm, setShowCancelForm] = useState(false);
+  const [cancelReason, setCancelReason] = useState("");
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -198,6 +216,25 @@ export function OrderDetailDrawer({
               {paid && paidAtLabel ? ` · ${paidAtLabel}` : ""}
             </span>
           </div>
+
+          {/* Cancellation info */}
+          {order.status === "cancelled" && (order.cancellationReason || order.cancelledAt) && (
+            <div className="flex justify-between items-start pt-3 border-t border-[var(--color-gold)]/15">
+              <span className="text-[11px] uppercase tracking-[0.18em] font-medium text-[var(--color-cream)]/50 shrink-0 mr-3">
+                Cancelled · 取消
+              </span>
+              <div className="text-right space-y-0.5">
+                {order.cancellationReason && (
+                  <p className="text-[13px] text-[var(--color-cream)]/80">{order.cancellationReason}</p>
+                )}
+                {order.cancelledAt && (
+                  <p className="text-[11px] text-[var(--color-cream)]/45 tabular-nums">
+                    {formatPaidAt(order.cancelledAt)}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Action */}
@@ -232,6 +269,56 @@ export function OrderDetailDrawer({
               <span className={`h-1.5 w-1.5 rounded-full ${meta.dotClass}`} />
               {meta.labelZh} · {meta.labelEn}
             </p>
+          )}
+          {canCancel && (
+            showCancelForm ? (
+              <div className="space-y-2 pt-1">
+                <p className="text-[11px] uppercase tracking-[0.14em] font-medium text-[var(--color-cream)]/40">
+                  Select reason · 取消原因
+                </p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {CANCEL_REASONS.map(({ reason, icon: Icon }, i) => (
+                    <button
+                      key={reason}
+                      onClick={() => setCancelReason(reason)}
+                      className={[
+                        "min-h-9 px-3 py-2 rounded-xl text-[12px] font-medium leading-tight text-left transition border flex items-center gap-2",
+                        i === CANCEL_REASONS.length - 1 ? "col-span-2" : "",
+                        cancelReason === reason
+                          ? "bg-[var(--color-vermillion)]/15 border-[var(--color-vermillion)]/55 text-[var(--color-cream)]"
+                          : "bg-[var(--color-ink)]/50 border-[var(--color-gold)]/15 text-[var(--color-cream)]/50 hover:border-[var(--color-gold)]/30 hover:text-[var(--color-cream)]/80",
+                      ].join(" ")}
+                    >
+                      <Icon size={12} className="shrink-0 opacity-75" />
+                      {reason}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2 pt-0.5">
+                  <button
+                    onClick={() => { setShowCancelForm(false); setCancelReason(""); }}
+                    className="flex-1 h-11 rounded-xl border border-[var(--color-gold)]/20 text-[var(--color-cream)]/60 text-[14px] font-medium hover:border-[var(--color-gold)]/40 transition"
+                  >
+                    返回 · Back
+                  </button>
+                  <button
+                    onClick={() => { if (cancelReason) onCancelOrder(order.orderId, cancelReason); }}
+                    disabled={!cancelReason || cancelling}
+                    className="flex-1 h-11 rounded-xl border border-[var(--color-vermillion)]/40 bg-[var(--color-vermillion)]/10 text-[var(--color-vermillion)] text-[14px] font-semibold hover:bg-[var(--color-vermillion)]/20 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                  >
+                    {cancelling ? "取消中…" : "確認取消 · Confirm"}
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setShowCancelForm(true)}
+                disabled={updating || cancelling}
+                className="w-full h-10 rounded-xl border border-[var(--color-vermillion)]/25 text-[var(--color-vermillion)]/65 text-[13px] font-medium tracking-[0.04em] hover:border-[var(--color-vermillion)]/50 hover:text-[var(--color-vermillion)]/90 transition disabled:opacity-40 disabled:cursor-wait"
+              >
+                取消訂單 · Cancel Order
+              </button>
+            )
           )}
         </div>
       </div>

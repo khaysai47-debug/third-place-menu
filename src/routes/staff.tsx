@@ -340,6 +340,64 @@ function StaffPage() {
     }
   };
 
+  const cancelOrder = async (orderId: string, reason: string) => {
+    const current = orders.find((o) => o.orderId === orderId);
+    if (!current || (current.status !== "new" && current.status !== "preparing")) return;
+    if (!current.airtableRecordId) {
+      setUpdateError("此訂單無法更新 · This order can't be updated.");
+      return;
+    }
+    if (!reason.trim()) return;
+
+    const previousStatus = current.status;
+    const previousReason = current.cancellationReason;
+    setUpdateError(null);
+    setUpdatingIds((prev) => new Set(prev).add(orderId));
+    pendingActionsRef.current += 1;
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.orderId === orderId
+          ? { ...o, status: "cancelled" as StaffOrderStatus, cancellationReason: reason }
+          : o,
+      ),
+    );
+
+    try {
+      const result = await updateStaffOrderStatus(current.airtableRecordId, "cancelled", {
+        cancellationReason: reason,
+      });
+      if (result.success) {
+        suppressRefreshUntilRef.current = Date.now() + 2500;
+      } else {
+        setOrders((prev) =>
+          prev.map((o) =>
+            o.orderId === orderId
+              ? { ...o, status: previousStatus, cancellationReason: previousReason }
+              : o,
+          ),
+        );
+        setUpdateError(result.error);
+      }
+    } catch (error) {
+      console.error("Cancel order threw unexpectedly", error);
+      setOrders((prev) =>
+        prev.map((o) =>
+          o.orderId === orderId
+            ? { ...o, status: previousStatus, cancellationReason: previousReason }
+            : o,
+        ),
+      );
+      setUpdateError("Failed to cancel order. Please try again.");
+    } finally {
+      pendingActionsRef.current -= 1;
+      setUpdatingIds((prev) => {
+        const nextSet = new Set(prev);
+        nextSet.delete(orderId);
+        return nextSet;
+      });
+    }
+  };
+
   return (
     <div className="min-h-screen ink-grain">
       <main className="mx-auto max-w-[1100px] pb-16">
@@ -523,6 +581,7 @@ function StaffPage() {
                     updating={updatingIds.has(order.orderId)}
                     onAdvance={advanceOrder}
                     onOpen={setSelectedId}
+                    onCancelOrder={(id) => setSelectedId(id)}
                   />
                 ))}
               </div>
@@ -549,9 +608,11 @@ function StaffPage() {
           order={selectedOrder}
           updating={updatingIds.has(selectedOrder.orderId)}
           paying={payingIds.has(selectedOrder.orderId)}
+          cancelling={updatingIds.has(selectedOrder.orderId)}
           updateError={updateError}
           onAdvance={advanceOrder}
           onMarkPaid={markPaid}
+          onCancelOrder={cancelOrder}
           onClose={() => setSelectedId(null)}
         />
       )}
