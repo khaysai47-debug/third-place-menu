@@ -38,6 +38,11 @@ export interface StaffOrder {
   items: StaffOrderItem[];
   notes: string | null;
   totalPrice: number;
+  customerName?: string;
+  customerPhone?: string;
+  deliveryAddress?: string;
+  subtotalPrice?: number;
+  deliveryFee?: number;
   status: StaffOrderStatus;
   /** Defaults to "unpaid" while the Staff Orders API doesn't map Payment Status. */
   paymentStatus: StaffPaymentStatus;
@@ -80,6 +85,11 @@ interface ApiOrder {
   paymentProofUrl?: unknown;
   paymentProofStatus?: unknown;
   paymentProofReceivedAt?: unknown;
+  customerName?: unknown;
+  customerPhone?: unknown;
+  deliveryAddress?: unknown;
+  subtotalPrice?: unknown;
+  deliveryFee?: unknown;
   items?: {
     id?: unknown;
     name?: unknown;
@@ -131,6 +141,11 @@ function mapApiOrder(raw: ApiOrder): StaffOrder {
     })),
     notes: asString(raw.notes) || null,
     totalPrice: asNumber(raw.totalPrice),
+    customerName: asString(raw.customerName) || undefined,
+    customerPhone: asString(raw.customerPhone) || undefined,
+    deliveryAddress: asString(raw.deliveryAddress) || undefined,
+    subtotalPrice: asNumber(raw.subtotalPrice),
+    deliveryFee: asNumber(raw.deliveryFee),
     status: STATUSES.includes(status) ? status : "new",
     paymentStatus: asString(raw.paymentStatus).toLowerCase() === "paid" ? "paid" : "unpaid",
     paymentMethod: rawMethod === "Cash" || rawMethod === "Transfer" ? rawMethod : undefined,

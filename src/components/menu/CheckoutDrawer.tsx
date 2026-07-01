@@ -32,6 +32,8 @@ const ORDER_TYPE_PAYLOAD: Record<OrderType, OrderTypePayload> = {
   delivery: "delivery",
 };
 
+const DELIVERY_FEE = 30;
+
 function makeOrderId(): string {
   const now = new Date();
   const p = (n: number, len = 2) => String(n).padStart(len, "0");
@@ -66,6 +68,9 @@ export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Prop
   const [success, setSuccess] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const deliveryFee = orderType === "delivery" ? DELIVERY_FEE : 0;
+  const finalTotal = total + deliveryFee;
 
   const clearError = (key: string) =>
     setErrors((e) => {
@@ -117,7 +122,9 @@ export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Prop
         lineTotal: item.subtotal,
       })),
       totalItems: items.reduce((s, i) => s + i.qty, 0),
-      totalPrice: total,
+      subtotalPrice: total,
+      deliveryFee,
+      totalPrice: finalTotal,
       status: "draft",
     };
 
@@ -191,13 +198,33 @@ export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Prop
                       </span>
                     </div>
                   ))}
-                  <div className="flex justify-between items-baseline pt-3 border-t border-[var(--color-gold)]/15">
-                    <span className="text-[12px] uppercase tracking-wider text-[var(--color-cream)]/50">
-                      Total
-                    </span>
-                    <span className="staff-num text-[20px] text-[var(--color-vermillion)]">
-                      ฿{total.toLocaleString()}
-                    </span>
+                  <div className="pt-3 border-t border-[var(--color-gold)]/15 space-y-1.5">
+                    <div className="flex justify-between items-baseline">
+                      <span className="text-[12px] uppercase tracking-wider text-[var(--color-cream)]/50">
+                        Subtotal
+                      </span>
+                      <span className="staff-num text-[14px] text-[var(--color-cream)]/70">
+                        ฿{total.toLocaleString()}
+                      </span>
+                    </div>
+                    {orderType === "delivery" && (
+                      <div className="flex justify-between items-baseline">
+                        <span className="text-[12px] uppercase tracking-wider text-[var(--color-cream)]/50">
+                          Delivery fee
+                        </span>
+                        <span className="staff-num text-[14px] text-[var(--color-cream)]/70">
+                          ฿{deliveryFee.toLocaleString()}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex justify-between items-baseline pt-1.5 border-t border-[var(--color-gold)]/10">
+                      <span className="text-[12px] uppercase tracking-wider text-[var(--color-cream)]/50">
+                        Total
+                      </span>
+                      <span className="staff-num text-[20px] text-[var(--color-vermillion)]">
+                        ฿{finalTotal.toLocaleString()}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </section>
@@ -317,7 +344,7 @@ export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Prop
               disabled={isSubmitting}
               className="w-full rounded-2xl bg-[var(--color-vermillion)] text-[var(--color-cream)] py-4 text-[18px] font-semibold shadow-[0_20px_40px_-18px_oklch(0.45_0.18_27/0.7)] border border-[var(--color-vermillion-deep)] active:scale-[0.99] transition disabled:opacity-60 disabled:cursor-not-allowed disabled:active:scale-100"
             >
-              {isSubmitting ? "Sending Order…" : `Place Order · ฿${total.toLocaleString()}`}
+              {isSubmitting ? "Sending Order…" : `Place Order · ฿${finalTotal.toLocaleString()}`}
             </button>
           </div>
         )}

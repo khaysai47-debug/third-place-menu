@@ -104,6 +104,35 @@ export function StaffOrderCard({ order, updating = false, onAdvance, onOpen }: P
         ))}
       </ul>
 
+      {order.orderType === "delivery" && (
+        <div className="px-4 py-2.5 border-t border-dotted border-[var(--color-ink)]/25 space-y-1">
+          {order.customerName && (
+            <div className="flex gap-2 text-[12px]">
+              <span className="min-w-[5.5rem] shrink-0 text-[var(--color-ink)]/45 uppercase tracking-[0.1em]">Name</span>
+              <span className="text-[var(--color-ink)]/80 truncate">{order.customerName}</span>
+            </div>
+          )}
+          {order.customerPhone && (
+            <div className="flex gap-2 text-[12px]">
+              <span className="min-w-[5.5rem] shrink-0 text-[var(--color-ink)]/45 uppercase tracking-[0.1em]">Phone</span>
+              <span className="staff-num text-[var(--color-ink)]/80">{order.customerPhone}</span>
+            </div>
+          )}
+          {order.deliveryAddress && (
+            <div className="flex gap-2 text-[12px]">
+              <span className="min-w-[5.5rem] shrink-0 text-[var(--color-ink)]/45 uppercase tracking-[0.1em]">Address</span>
+              <span className="text-[var(--color-ink)]/80 truncate">{order.deliveryAddress}</span>
+            </div>
+          )}
+          {!!order.deliveryFee && (
+            <div className="flex gap-2 text-[12px]">
+              <span className="min-w-[5.5rem] shrink-0 text-[var(--color-ink)]/45 uppercase tracking-[0.1em]">Delivery fee</span>
+              <span className="staff-num text-[var(--color-ink)]/80">฿{order.deliveryFee.toLocaleString("en-US")}</span>
+            </div>
+          )}
+        </div>
+      )}
+
       <div className="mt-auto px-4 pb-4 pt-1 border-t border-dotted border-[var(--color-ink)]/25">
         <div className="flex items-baseline justify-between mb-3 pt-2.5">
           <span className="text-[11px] uppercase tracking-[0.18em] font-medium text-[var(--color-ink)]/50">

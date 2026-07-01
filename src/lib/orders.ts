@@ -19,6 +19,8 @@ export interface OrderPayload {
     lineTotal: number;
   }[];
   totalItems: number;
+  subtotalPrice: number;
+  deliveryFee: number;
   totalPrice: number;
   status: "draft";
 }

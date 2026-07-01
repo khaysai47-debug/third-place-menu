@@ -125,6 +125,49 @@ export function OrderDetailDrawer({
             </section>
           )}
 
+          {/* Delivery info */}
+          {order.orderType === "delivery" && (
+            <section>
+              <h3 className="text-[11px] uppercase tracking-[0.22em] text-[var(--color-cream)]/45 mb-3">
+                Delivery · 外送
+              </h3>
+              <div className="rounded-xl bg-[var(--color-ink)] border border-[var(--color-gold)]/20 px-4 py-3 space-y-2 text-[14px]">
+                {order.customerName && (
+                  <div className="flex justify-between gap-3">
+                    <span className="text-[var(--color-cream)]/50">Name</span>
+                    <span className="text-[var(--color-cream)]">{order.customerName}</span>
+                  </div>
+                )}
+                {order.customerPhone && (
+                  <div className="flex justify-between gap-3">
+                    <span className="text-[var(--color-cream)]/50">Phone</span>
+                    <span className="staff-num text-[var(--color-cream)]">{order.customerPhone}</span>
+                  </div>
+                )}
+                {order.deliveryAddress && (
+                  <div className="flex justify-between gap-3">
+                    <span className="text-[var(--color-cream)]/50 shrink-0">Address</span>
+                    <span className="text-[var(--color-cream)] text-right">{order.deliveryAddress}</span>
+                  </div>
+                )}
+                <div className="border-t border-[var(--color-gold)]/10 pt-2 space-y-1.5">
+                  <div className="flex justify-between gap-3">
+                    <span className="text-[var(--color-cream)]/50">Subtotal</span>
+                    <span className="staff-num text-[var(--color-cream)]/75">฿{(order.subtotalPrice ?? 0).toLocaleString("en-US")}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-[var(--color-cream)]/50">Delivery fee</span>
+                    <span className="staff-num text-[var(--color-cream)]/75">฿{(order.deliveryFee ?? 0).toLocaleString("en-US")}</span>
+                  </div>
+                  <div className="flex justify-between gap-3">
+                    <span className="text-[var(--color-cream)]/50">Total</span>
+                    <span className="staff-num text-[var(--color-vermillion)]">฿{order.totalPrice.toLocaleString("en-US")}</span>
+                  </div>
+                </div>
+              </div>
+            </section>
+          )}
+
           {/* Total */}
           <div className="flex justify-between items-baseline pt-3 border-t border-[var(--color-gold)]/15">
             <span className="text-[11px] uppercase tracking-[0.18em] font-medium text-[var(--color-cream)]/50">
