@@ -157,27 +157,9 @@ function OwnerPage() {
     finally { expRefreshingRef.current = false; }
   }, []);
 
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      if (!document.hidden) void refreshOrders();
-    }, 60000);
-    return () => window.clearInterval(id);
-  }, [refreshOrders]);
+  // Auto-polling disabled — use the manual Refresh button to avoid burning n8n executions.
 
-  // Auto-refresh expenses every 30 s and whenever the tab becomes visible again.
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      if (!document.hidden) void silentRefreshExpenses();
-    }, 30000);
-    const onVisible = () => {
-      if (!document.hidden) void silentRefreshExpenses();
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      window.clearInterval(id);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [silentRefreshExpenses]);
+  // Auto-polling disabled — use the manual Refresh button.
 
   const summary = useMemo(() => summarizeToday(orders, now), [orders, now]);
   const today = useMemo(() => todaysOrders(orders, now), [orders, now]);
@@ -250,6 +232,13 @@ function OwnerPage() {
   );
 
   const [selectedOrder, setSelectedOrder] = useState<StaffOrder | null>(null);
+  const [activeSection, setActiveSection] = useState<OwnerSection>("overview");
+
+  // All orders today including cancelled — for the Orders view.
+  const allTodayOrders = useMemo(
+    () => orders.filter((o) => isSameLocalDay(o.createdAt, now)),
+    [orders, now],
+  );
 
   return (
     <div
@@ -259,7 +248,7 @@ function OwnerPage() {
       {selectedOrder && (
         <OwnerOrderModal order={selectedOrder} onClose={() => setSelectedOrder(null)} />
       )}
-      <OwnerSidebar />
+      <OwnerSidebar activeSection={activeSection} onSectionChange={setActiveSection} />
 
       <div className="min-w-0 flex-1">
         <OwnerHeader
@@ -272,6 +261,12 @@ function OwnerPage() {
           <LoadingState />
         ) : loadState === "error" ? (
           <ErrorState onRetry={() => void loadOrders()} />
+        ) : activeSection === "orders" ? (
+          <OwnerOrdersView
+            orders={allTodayOrders}
+            now={now}
+            onSelectOrder={setSelectedOrder}
+          />
         ) : (
           <main className="mx-auto grid w-full max-w-[1600px] grid-cols-12 gap-6 px-5 py-6 lg:px-8">
             <section className="col-span-12 space-y-6 xl:col-span-8">
@@ -325,18 +320,254 @@ function OwnerPage() {
   );
 }
 
-/* ---------- Sidebar (static, desktop only) ---------- */
+/* ---------- Orders view ---------- */
 
-const NAV: { label: string; icon: LucideIcon; active?: boolean }[] = [
-  { label: "Overview",  icon: LayoutGrid,  active: true },
-  { label: "Orders",    icon: ClipboardList },
-  { label: "Menu",      icon: UtensilsCrossed },
-  { label: "Payments",  icon: Banknote },
-  { label: "Reports",   icon: LineChartIcon },
-  { label: "Settings",  icon: Settings },
+type OrderFilter = "all" | "active" | "delivery" | "unpaid" | "cancelled" | "completed";
+
+const ORDER_FILTERS: { id: OrderFilter; label: string; labelZh: string }[] = [
+  { id: "all",       label: "All",       labelZh: "全部"  },
+  { id: "active",    label: "Active",    labelZh: "進行中" },
+  { id: "delivery",  label: "Delivery",  labelZh: "外送"  },
+  { id: "unpaid",    label: "Unpaid",    labelZh: "未付"  },
+  { id: "cancelled", label: "Cancelled", labelZh: "已取消" },
+  { id: "completed", label: "Completed", labelZh: "已完成" },
 ];
 
-function OwnerSidebar() {
+function applyOrderFilter(orders: StaffOrder[], filter: OrderFilter): StaffOrder[] {
+  switch (filter) {
+    case "active":
+      return orders.filter(
+        (o) =>
+          o.status !== "cancelled" &&
+          o.status !== "done" &&
+          o.status !== "delivered",
+      );
+    case "delivery":
+      return orders.filter((o) => o.orderType === "delivery");
+    case "unpaid":
+      return orders.filter((o) => o.paymentStatus === "unpaid" && o.status !== "cancelled");
+    case "cancelled":
+      return orders.filter((o) => o.status === "cancelled");
+    case "completed":
+      return orders.filter((o) => o.status === "done" || o.status === "delivered");
+    default:
+      return orders;
+  }
+}
+
+function OwnerOrdersView({
+  orders,
+  now,
+  onSelectOrder,
+}: {
+  orders: StaffOrder[];
+  now: Date;
+  onSelectOrder: (o: StaffOrder) => void;
+}) {
+  const [filter, setFilter] = useState<OrderFilter>("all");
+  const visible = useMemo(() => applyOrderFilter(orders, filter), [orders, filter]);
+
+  return (
+    <div className="mx-auto w-full max-w-[1400px] px-5 py-6 lg:px-8">
+      {/* Header */}
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="font-display text-[22px] leading-none text-[var(--color-cream)]">
+            Orders · 今日訂單
+          </h2>
+          <p className="mt-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted-foreground)]">
+            {now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+            {" · "}{orders.length} total
+          </p>
+        </div>
+      </div>
+
+      {/* Filter pills */}
+      <div className="mb-5 flex flex-wrap gap-2">
+        {ORDER_FILTERS.map(({ id, label, labelZh }) => {
+          const count = applyOrderFilter(orders, id).length;
+          const isActive = filter === id;
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setFilter(id)}
+              className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-medium tracking-[0.06em] transition-colors ${
+                isActive
+                  ? "border-[var(--color-gold)]/60 bg-[var(--color-gold)]/12 text-[var(--color-gold)]"
+                  : "border-[var(--color-gold)]/15 text-[var(--color-muted-foreground)] hover:border-[var(--color-gold)]/30 hover:text-[var(--color-cream)]/70"
+              }`}
+            >
+              {label} · {labelZh}
+              <span
+                className={`rounded-full px-1.5 py-0.5 text-[10px] tabular-nums ${
+                  isActive
+                    ? "bg-[var(--color-gold)]/20 text-[var(--color-gold)]"
+                    : "bg-[var(--color-gold)]/8 text-[var(--color-muted-foreground)]"
+                }`}
+              >
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Table */}
+      {visible.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <p className="text-[14px] text-[var(--color-muted-foreground)]">No orders match this filter.</p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-[var(--color-gold)]/12 bg-[var(--color-charcoal-soft)]/40">
+          <table className="w-full text-[13px]">
+            <thead>
+              <tr className="border-b border-[var(--color-gold)]/12">
+                {["Order / Location", "Items", "Payment", "Total", "Status", "Time"].map((h) => (
+                  <th
+                    key={h}
+                    className="px-4 py-3 text-left text-[11px] uppercase tracking-[0.14em] font-medium text-[var(--color-muted-foreground)]"
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--color-gold)]/8">
+              {visible.map((order) => (
+                <OwnerOrderRow key={order.orderId} order={order} onClick={() => onSelectOrder(order)} />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Dark-background-appropriate status badge classes for the owner orders table.
+// STATUS_META.badgeClass uses text-[var(--color-ink)] for done/delivered/cancelled
+// which is near-invisible on the dark charcoal owner dashboard.
+const OWNER_STATUS_BADGE: Record<
+  import("@/lib/staffOrders").StaffOrderStatus,
+  { bg: string; text: string; border: string; dot: string }
+> = {
+  new:              { bg: "bg-[var(--color-vermillion)]/12", text: "text-[var(--color-vermillion)]",  border: "border-[var(--color-vermillion)]/28", dot: "bg-[var(--color-vermillion)]"   },
+  preparing:        { bg: "bg-amber-500/12",                 text: "text-amber-300",                  border: "border-amber-400/28",                  dot: "bg-amber-400"                  },
+  ready:            { bg: "bg-emerald-500/12",               text: "text-emerald-300",                border: "border-emerald-400/28",                dot: "bg-emerald-400"               },
+  out_for_delivery: { bg: "bg-sky-500/12",                   text: "text-sky-300",                    border: "border-sky-400/28",                    dot: "bg-sky-400"                    },
+  delivered:        { bg: "bg-emerald-500/8",                text: "text-emerald-300/80",             border: "border-emerald-400/20",                dot: "bg-emerald-400/70"            },
+  done:             { bg: "bg-[var(--color-cream)]/6",       text: "text-[var(--color-cream)]/55",    border: "border-[var(--color-cream)]/12",       dot: "bg-[var(--color-cream)]/45"   },
+  cancelled:        { bg: "bg-[var(--color-vermillion)]/8",  text: "text-[var(--color-vermillion)]/60", border: "border-[var(--color-vermillion)]/18", dot: "bg-[var(--color-vermillion)]/55" },
+};
+
+function OwnerOrderRow({ order, onClick }: { order: StaffOrder; onClick: () => void }) {
+  const statusMeta = STATUS_META[order.status];
+  const payMeta = PAYMENT_META[order.paymentStatus];
+  const statusDark = OWNER_STATUS_BADGE[order.status];
+  const loc = orderLocation(order);
+  const cancelled = order.status === "cancelled";
+  const totalQty = order.items.reduce((s, i) => s + i.quantity, 0);
+  const itemSummary =
+    order.items.length === 1
+      ? `${order.items[0].quantity}× ${order.items[0].name}`
+      : `${totalQty} items (${order.items.length} lines)`;
+
+  return (
+    <tr
+      onClick={onClick}
+      className={`group cursor-pointer transition-colors hover:bg-[var(--color-gold)]/[0.04] ${
+        cancelled ? "opacity-55" : ""
+      }`}
+    >
+      {/* Order / Location */}
+      <td className="px-4 py-3">
+        <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--color-muted-foreground)] tabular-nums">
+          {order.orderId}
+        </p>
+        <p className="mt-0.5 font-medium text-[var(--color-cream)]/85">
+          {loc.big}
+          {loc.num !== undefined && (
+            <span className="ml-1.5 tabular-nums text-[var(--color-gold)]">{loc.num}</span>
+          )}
+          <span className="ml-2 text-[11px] text-[var(--color-muted-foreground)]">{loc.zh}</span>
+        </p>
+        {order.orderType === "delivery" && order.customerName && (
+          <p className="mt-0.5 text-[11px] text-[var(--color-muted-foreground)] truncate max-w-[160px]">
+            {order.customerName}
+            {order.customerPhone && ` · ${order.customerPhone}`}
+          </p>
+        )}
+        {cancelled && order.cancellationReason && (
+          <p className="mt-0.5 text-[11px] text-[var(--color-vermillion)]/70 truncate max-w-[160px]">
+            {order.cancellationReason}
+          </p>
+        )}
+      </td>
+
+      {/* Items */}
+      <td className="px-4 py-3 text-[var(--color-cream)]/70 max-w-[180px]">
+        <p className="truncate">{itemSummary}</p>
+      </td>
+
+      {/* Payment */}
+      <td className="px-4 py-3">
+        <span
+          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium tracking-[0.05em] ${payMeta.badgeClass}`}
+        >
+          <span className={`h-1.5 w-1.5 rounded-full ${payMeta.dotClass}`} />
+          {payMeta.labelEn}
+        </span>
+        {order.paymentStatus === "paid" && order.paymentMethod && (
+          <p className="mt-0.5 text-[10px] text-[var(--color-muted-foreground)] uppercase tracking-[0.1em]">
+            {order.paymentMethod}
+          </p>
+        )}
+      </td>
+
+      {/* Total */}
+      <td className="px-4 py-3 tabular-nums text-[var(--color-cream)]/85 font-medium">
+        ฿{order.totalPrice.toLocaleString("en-US")}
+      </td>
+
+      {/* Status */}
+      <td className="px-4 py-3">
+        <span
+          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium tracking-[0.05em] ${statusDark.bg} ${statusDark.text} ${statusDark.border}`}
+        >
+          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDark.dot}`} />
+          {statusMeta.labelEn} · {statusMeta.labelZh}
+        </span>
+      </td>
+
+      {/* Time */}
+      <td className="px-4 py-3 tabular-nums text-[var(--color-muted-foreground)] text-[12px] whitespace-nowrap">
+        {order.time}
+      </td>
+    </tr>
+  );
+}
+
+/* ---------- Sidebar (static, desktop only) ---------- */
+
+type OwnerSection = "overview" | "orders";
+
+const NAV_ITEMS: { id: OwnerSection | null; label: string; icon: LucideIcon }[] = [
+  { id: "overview", label: "Overview", icon: LayoutGrid     },
+  { id: "orders",   label: "Orders",   icon: ClipboardList  },
+  { id: null,       label: "Menu",     icon: UtensilsCrossed },
+  { id: null,       label: "Payments", icon: Banknote       },
+  { id: null,       label: "Reports",  icon: LineChartIcon  },
+  { id: null,       label: "Settings", icon: Settings       },
+];
+
+function OwnerSidebar({
+  activeSection,
+  onSectionChange,
+}: {
+  activeSection: OwnerSection;
+  onSectionChange: (s: OwnerSection) => void;
+}) {
   const [hintLabel, setHintLabel] = useState<string | null>(null);
   const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -364,35 +595,44 @@ function OwnerSidebar() {
       </div>
 
       <nav className="flex-1 space-y-0.5 px-3 py-5">
-        {NAV.map(({ label, icon: Icon, active }) => (
-          <button
-            key={label}
-            type="button"
-            aria-current={active ? "page" : undefined}
-            aria-disabled={!active}
-            onClick={active ? undefined : () => showHint(label)}
-            className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-[14px] transition-colors ${
-              active
-                ? "bg-[var(--color-charcoal-soft)] text-[var(--color-cream)] shadow-[inset_2px_0_0_var(--color-gold)]"
-                : "cursor-default text-[var(--color-gold-soft)]/45 hover:bg-[var(--color-gold)]/[0.04] hover:text-[var(--color-gold-soft)]/65"
-            }`}
-          >
-            <Icon
-              className="h-[15px] w-[15px]"
-              strokeWidth={1.5}
-              style={{ opacity: active ? 0.85 : 0.45 }}
-            />
-            <span className="flex-1 text-left">{label}</span>
-            {!active && (
-              <span
-                className="shrink-0 rounded-sm px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] text-[var(--color-muted-foreground)]"
-                style={{ border: "1px solid oklch(0.72 0.11 75 / 0.18)" }}
-              >
-                Soon
-              </span>
-            )}
-          </button>
-        ))}
+        {NAV_ITEMS.map(({ id, label, icon: Icon }) => {
+          const isActive = id !== null && id === activeSection;
+          const isLive = id !== null;
+          return (
+            <button
+              key={label}
+              type="button"
+              aria-current={isActive ? "page" : undefined}
+              onClick={
+                isActive ? undefined
+                : isLive ? () => onSectionChange(id)
+                : () => showHint(label)
+              }
+              className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-[14px] transition-colors ${
+                isActive
+                  ? "bg-[var(--color-charcoal-soft)] text-[var(--color-cream)] shadow-[inset_2px_0_0_var(--color-gold)]"
+                  : isLive
+                  ? "text-[var(--color-gold-soft)]/65 hover:bg-[var(--color-gold)]/[0.06] hover:text-[var(--color-cream)]/80"
+                  : "cursor-default text-[var(--color-gold-soft)]/40 hover:bg-[var(--color-gold)]/[0.04] hover:text-[var(--color-gold-soft)]/60"
+              }`}
+            >
+              <Icon
+                className="h-[15px] w-[15px]"
+                strokeWidth={1.5}
+                style={{ opacity: isActive ? 0.85 : isLive ? 0.60 : 0.38 }}
+              />
+              <span className="flex-1 text-left">{label}</span>
+              {!isLive && (
+                <span
+                  className="shrink-0 rounded-sm px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] text-[var(--color-muted-foreground)]"
+                  style={{ border: "1px solid oklch(0.72 0.11 75 / 0.18)" }}
+                >
+                  Soon
+                </span>
+              )}
+            </button>
+          );
+        })}
       </nav>
 
       {/* Footer — flashes section name on click, otherwise shows release note */}
@@ -404,7 +644,7 @@ function OwnerSidebar() {
           </p>
         ) : (
           <p className="text-[10.5px] leading-relaxed text-[var(--color-muted-foreground)]">
-            Overview is live. More sections arriving soon.
+            Overview &amp; Orders are live. More arriving soon.
           </p>
         )}
       </div>
@@ -1306,7 +1546,7 @@ function NeedsAttention({
           </span>
         </div>
         <p className="mt-2 text-[12px] text-[var(--color-muted-foreground)]">
-          Owner-only · refreshes every 60s
+          Owner-only · Manual refresh · 手動更新
         </p>
       </div>
 
