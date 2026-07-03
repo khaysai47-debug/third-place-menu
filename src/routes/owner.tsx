@@ -1372,17 +1372,37 @@ const MENU_CATEGORY_LABEL: Record<MenuCategoryId, string> = Object.fromEntries(
   CATEGORIES.map((c) => [c.id, c.nameEn]),
 ) as Record<MenuCategoryId, string>;
 
+// Status facet for the summary cards. Combines with the category pills (AND):
+// pick a category, then narrow it to available / popular / needs-price.
+type MenuStatusFilter = "all" | "available" | "popular" | "needs_price";
+
+function matchesMenuStatus(item: (typeof MENU)[number], filter: MenuStatusFilter): boolean {
+  switch (filter) {
+    case "available":   return item.available;
+    case "popular":     return item.popular;
+    case "needs_price": return item.price === undefined;
+    default:            return true;
+  }
+}
+
 function OwnerMenuView() {
   const [category, setCategory] = useState<MenuCategoryId | "all">("all");
+  const [statusFilter, setStatusFilter] = useState<MenuStatusFilter>("all");
+
+  // Clicking an already-active card returns to "all items".
+  const toggleStatus = (f: MenuStatusFilter) =>
+    setStatusFilter((prev) => (prev === f && f !== "all" ? "all" : f));
 
   const items = useMemo(() => {
-    const list = category === "all" ? MENU : MENU.filter((i) => i.category === category);
-    return [...list].sort((a, b) =>
+    const list = MENU.filter(
+      (i) => (category === "all" || i.category === category) && matchesMenuStatus(i, statusFilter),
+    );
+    return list.sort((a, b) =>
       a.category === b.category
         ? a.order - b.order
         : MENU_CATEGORY_LABEL[a.category].localeCompare(MENU_CATEGORY_LABEL[b.category]),
     );
-  }, [category]);
+  }, [category, statusFilter]);
 
   const availableCount = MENU.filter((i) => i.available).length;
   const popularCount = MENU.filter((i) => i.popular).length;
@@ -1400,42 +1420,50 @@ function OwnerMenuView() {
         </p>
       </div>
 
-      {/* Summary cards */}
+      {/* Summary cards — click to filter the table below */}
       <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <SupportCard
+        <MenuStatCard
           icon={UtensilsCrossed}
           label="Items"
           labelZh="品項"
           value={String(MENU.length)}
           sub={`${CATEGORIES.length} categories`}
           tone="muted"
+          active={statusFilter === "all"}
+          onClick={() => toggleStatus("all")}
           animDelay={40}
         />
-        <SupportCard
+        <MenuStatCard
           icon={Receipt}
           label="Available"
           labelZh="供應中"
           value={String(availableCount)}
           sub="on the menu snapshot"
           tone="money"
+          active={statusFilter === "available"}
+          onClick={() => toggleStatus("available")}
           animDelay={100}
         />
-        <SupportCard
+        <MenuStatCard
           icon={Star}
           label="Popular"
           labelZh="人氣"
           value={String(popularCount)}
           sub="marked bestsellers"
           tone={popularCount > 0 ? "warn" : "muted"}
+          active={statusFilter === "popular"}
+          onClick={() => toggleStatus("popular")}
           animDelay={160}
         />
-        <SupportCard
+        <MenuStatCard
           icon={AlertTriangle}
           label="Needs Price"
           labelZh="待定價"
           value={String(needsPriceCount)}
           sub="price to confirm"
           tone={needsPriceCount > 0 ? "alert" : "muted"}
+          active={statusFilter === "needs_price"}
+          onClick={() => toggleStatus("needs_price")}
           animDelay={220}
         />
       </div>
@@ -1444,7 +1472,10 @@ function OwnerMenuView() {
       <div className="mb-5 flex flex-wrap gap-2">
         {[{ id: "all" as const, nameEn: "All" }, ...CATEGORIES].map((c) => {
           const isActive = category === c.id;
-          const count = c.id === "all" ? MENU.length : MENU.filter((i) => i.category === c.id).length;
+          const count = MENU.filter(
+            (i) =>
+              (c.id === "all" || i.category === c.id) && matchesMenuStatus(i, statusFilter),
+          ).length;
           return (
             <button
               key={c.id}
@@ -1472,6 +1503,16 @@ function OwnerMenuView() {
       </div>
 
       {/* Menu table */}
+      {items.length === 0 ? (
+        <div className="flex flex-col items-center justify-center rounded-xl border border-[var(--color-gold)]/12 bg-[var(--color-charcoal-soft)]/40 py-20 text-center">
+          <p className="text-[14px] text-[var(--color-muted-foreground)]">
+            沒有符合的品項 · No items match this view.
+          </p>
+          <p className="mt-1.5 text-[12px] text-[var(--color-muted-foreground)]/60">
+            Adjust the category or the summary filter above.
+          </p>
+        </div>
+      ) : (
       <div className="overflow-x-auto rounded-xl border border-[var(--color-gold)]/12 bg-[var(--color-charcoal-soft)]/40">
         <table className="w-full text-[13px]">
           <thead>
@@ -1536,6 +1577,7 @@ function OwnerMenuView() {
           </tbody>
         </table>
       </div>
+      )}
 
       {/* Planned management note */}
       <section
@@ -1566,6 +1608,74 @@ function OwnerMenuView() {
         </ul>
       </section>
     </div>
+  );
+}
+
+// SupportCard's look as a filter toggle — same metrics layout, but a real
+// button with a clear pressed state so the cards read as filters, not decor.
+function MenuStatCard({
+  icon: Icon,
+  label,
+  labelZh,
+  value,
+  sub,
+  tone,
+  active,
+  onClick,
+  animDelay = 0,
+}: {
+  icon: LucideIcon;
+  label: string;
+  labelZh: string;
+  value: string;
+  sub: string;
+  tone: Tone;
+  active: boolean;
+  onClick: () => void;
+  animDelay?: number;
+}) {
+  const accent = toneColor(tone);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={`owner-float-card group relative w-full cursor-pointer overflow-hidden rounded-xl border px-5 py-5 text-left transition-colors ${
+        active
+          ? "border-[var(--color-gold)]/55 bg-[var(--color-gold)]/[0.07]"
+          : "border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 hover:border-[var(--color-gold)]/35"
+      }`}
+      style={{ animation: `owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) ${animDelay}ms both` }}
+    >
+      <span
+        aria-hidden
+        className={`absolute bottom-5 left-0 top-5 w-[2px] rounded-r-full transition-opacity ${
+          active ? "opacity-100" : "opacity-60 group-hover:opacity-100"
+        }`}
+        style={{ background: accent }}
+      />
+      <div className="flex items-center justify-between gap-2 text-[12px] text-[var(--color-gold-soft)]/90">
+        <span className="flex min-w-0 items-center gap-2">
+          <Icon className="h-4 w-4 shrink-0" strokeWidth={1.5} style={{ color: accent, opacity: 0.85 }} />
+          <span className="truncate">{label}</span>
+        </span>
+        <span className="shrink-0 text-[var(--color-muted-foreground)]">{labelZh}</span>
+      </div>
+      <div
+        className="mt-3 staff-num break-all text-[24px] leading-none sm:text-[28px]"
+        style={{ color: tone === "muted" ? "var(--color-cream)" : accent }}
+      >
+        {value}
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-2 text-[12px] text-[var(--color-muted-foreground)]">
+        <span className="truncate">{sub}</span>
+        {active && (
+          <span className="shrink-0 text-[10px] uppercase tracking-[0.14em] text-[var(--color-gold)]/80">
+            filtering
+          </span>
+        )}
+      </div>
+    </button>
   );
 }
 
