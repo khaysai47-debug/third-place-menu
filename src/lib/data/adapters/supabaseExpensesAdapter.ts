@@ -1,12 +1,17 @@
-// ExpenseRepository backed by Supabase / the real backend — PHASE 2 STUB.
-// NOT USED BY THE LIVE APP; methods throw so an accidental switch fails loudly.
+// ExpenseRepository backed by Supabase / the real backend — STILL A STUB after
+// Phase 2A, deliberately. NOT USED BY THE LIVE APP; methods throw loudly.
 //
-// Phase 2 notes:
-// - listExpenses(): map snake_case rows (item_name, paid_from, created_at, …)
-//   to the camelCase Expense type exactly as mapApiExpense does today,
-//   including the "unknown value → Other" fallbacks for paidFrom/category and
-//   reviewStatus defaulting to "Pending". Sort newest-first by createdAt.
-// - addExpense(): keep the never-throw { success, error? } contract.
+// Same verified blockers as supabaseOrdersAdapter: no Supabase client, no env
+// vars, expenses table/column names unknown to the frontend.
+//
+// Phase 2B sketch once those exist:
+//   listExpenses():
+//     const { data, error } = await supabase.from(EXPENSES_TABLE).select("*");
+//     if (error) throw error;                        // reads throw (UI has retry)
+//     return mapSupabaseExpenseRows(data);           // src/lib/data/mappers/expenseMapper.ts
+//   addExpense(): keep the never-throw { success, error? } contract; the n8n
+//   POST payload's snake_case field names (item_name, paid_from, …) very
+//   likely match the column names — verify, don't assume.
 
 import type { ExpenseRepository } from "./types";
 import { AdapterNotImplementedError } from "./types";

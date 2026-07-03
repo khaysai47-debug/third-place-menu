@@ -250,7 +250,79 @@ src/lib/staffOrders.ts · orders.ts · expenses.ts   (unchanged n8n implementati
 
 ---
 
-## 7. Future Menu Management Architecture
+## 7. Phase 2A Supabase Inspection (code-verified findings)
+
+Inspected the whole repo for existing Supabase usage. Findings — all negative,
+which is itself the key result:
+
+| Looked for | Result |
+| --- | --- |
+| Supabase client (`createClient`, `supabase.from(`) | **None** in `src/` |
+| `@supabase/supabase-js` dependency | **Not in package.json** |
+| Supabase env vars (`VITE_SUPABASE*`, `SUPABASE_URL`, …) | **None** — `.env.local` contains only `VITE_N8N_BASE_URL` |
+| Generated DB types / RPC calls / direct reads or writes | **None** |
+| Table names in code | **None** — the frontend has only ever seen n8n webhook response shapes; table knowledge lives inside n8n workflows |
+| Test framework (for mapper tests) | **None** (no vitest/jest, no `test` script) → contract checklist doc instead |
+
+**Consequence:** implementing live Supabase queries in Phase 2A would mean
+guessing table/column names — prohibited. Phase 2A therefore delivered the
+mapping layer (the hard, behavior-critical part) and left transport stubbed.
+
+**Blockers to clear before Phase 2B can implement reads:**
+1. Add `@supabase/supabase-js` + a single client module (public URL + anon key
+   via the existing `import.meta.env.VITE_*` pattern for client-side reads, or
+   a server function using `config.server.ts` if reads should be server-side).
+2. Confirm real table names + column names for orders (incl. how item lines are
+   stored — jsonb vs child table) and expenses.
+3. Confirm whether the DB stores `done` or Airtable's `"completed"` → set
+   `DB_STATUS_USES_COMPLETED` in `orderMapper.ts` accordingly.
+4. RLS/permissions decision for dashboard reads (anon key vs server-side).
+
+## 8. Phase 2A outcome
+
+**Created (none of it used by the live app):**
+- `src/lib/data/mappers/orderMapper.ts` — provisional `SupabaseOrderRow` +
+  `mapSupabaseOrderRow(s)`, `normalizeOrderStatusFromDb/ToDb` (centralizes the
+  done ⇄ "completed" translation for the Supabase path, with the
+  `DB_STATUS_USES_COMPLETED` flag), `normalizePaymentStatus/Method`,
+  `parseOrderItems`. Same defensive defaults + newest-first sort as the live
+  `mapApiOrder`.
+- `src/lib/data/mappers/expenseMapper.ts` — provisional `SupabaseExpenseRow` +
+  `mapSupabaseExpenseRow(s)` mirroring `mapApiExpense` exactly (Other/Other/
+  Pending fallbacks).
+- `docs/adapter-contract-checklist.md` — manual contract verification list
+  (repo has no test framework by design).
+
+**Adapter status after Phase 2A:**
+
+| Method | n8n adapter | Supabase adapter |
+| --- | --- | --- |
+| listOrders | ✅ live | ⛔ stub (transport missing; mapper ready) |
+| updateOrderStatus / updateOrderPayment / cancelOrder / submitOrder | ✅ live | ⛔ stub (by design until reads proven) |
+| listExpenses | ✅ live | ⛔ stub (mapper ready) |
+| addExpense | ✅ live | ⛔ stub |
+
+`ACTIVE_DATA_SOURCE` remains `"n8n"`. The done ⇄ "completed" translation for
+the LIVE path still lives in `staffOrders.ts` (unchanged); `orderMapper.ts`
+owns it for the future path.
+
+## 9. Phase 2B recommended path
+
+1. Clear blockers 1–4 above (client, schema names, status vocabulary, RLS).
+2. Align `SupabaseOrderRow` / `SupabaseExpenseRow` with the real schema; set
+   `DB_STATUS_USES_COMPLETED`.
+3. Implement `listOrders` / `listExpenses` in the Supabase adapters
+   (fetch → mapper; reads throw on failure).
+4. Compare n8n vs Supabase read output side-by-side on the same data using
+   `docs/adapter-contract-checklist.md`.
+5. Flip **reads only** in a controlled commit (split `ACTIVE_DATA_SOURCE`
+   per-domain or per-operation at that point if needed).
+6. Keep all writes on n8n until separately implemented and tested; intake
+   (`submitOrder`) and menu availability migrate last, as before.
+
+---
+
+## 10. Future Menu Management Architecture
 
 Today: customer menu + owner Menu tab render the static bundled snapshot
 (`src/data/menu.ts`); staff Menu board reads/writes live availability through n8n.
