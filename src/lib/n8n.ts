@@ -1,5 +1,12 @@
 // Central base URL for all n8n webhook calls.
 //
+// DATA BOUNDARY (see docs/backend-separation-map.md): n8n is the temporary MVP
+// bridge — every dashboard read/write currently flows through these webhooks.
+// After backend separation, dashboard traffic moves to Supabase/the real
+// backend, and n8n keeps only automation (IG/Messenger bot, payment proof,
+// notifications). UI code must never call n8nWebhook directly; only the
+// src/lib data modules (orders, staffOrders, expenses, menuAvailability) do.
+//
 // Defaults to localhost for local Mac testing (n8n running on the same
 // machine). To test from another device on the LAN (e.g. iPhone), set
 // VITE_N8N_BASE_URL in a .env.local file and restart the dev server, e.g.:

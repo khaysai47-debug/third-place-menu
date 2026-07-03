@@ -129,6 +129,8 @@ export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Prop
     };
 
     setIsSubmitting(true);
+    // submitOrder owns the transport (n8n webhook today, backend later) —
+    // this screen only builds the OrderPayload contract.
     const result = await submitOrder(orderPayload);
     if (result.success) {
       setSubmitError(null);

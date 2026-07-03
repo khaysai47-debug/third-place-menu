@@ -1,6 +1,12 @@
 // Staff order domain: types, status flow, and data access.
 // Reads and writes orders through the n8n APIs (which talk to Airtable —
 // Airtable credentials live in n8n, never here).
+//
+// DATA BOUNDARY: staff.tsx and owner.tsx consume only the exported functions
+// and types below — they never see webhook URLs or API shapes.
+// TODO(separation): replace the fetch implementations in this file with
+// Supabase/backend calls, keeping the exported signatures and StaffOrder
+// types identical so no screen changes.
 
 import { n8nWebhook } from "./n8n";
 

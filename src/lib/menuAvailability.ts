@@ -1,6 +1,9 @@
 // Menu availability domain: types and data access.
 // Reads and writes menu availability through the n8n APIs (which talk to
 // Airtable — Airtable credentials live in n8n, never here).
+//
+// TODO(separation): replace the n8n bridge with Supabase/backend reads/writes;
+// keep getMenuAvailability/updateMenuAvailability signatures identical.
 
 import { n8nWebhook } from "./n8n";
 

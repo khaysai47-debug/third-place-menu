@@ -6,6 +6,7 @@ import { MenuAvailabilityBoard } from "@/components/staff/MenuAvailabilityBoard"
 import { OrderDetailDrawer } from "@/components/staff/OrderDetailDrawer";
 import { StaffOrderCard } from "@/components/staff/StaffOrderCard";
 import { STATUS_META, STATUS_ORDER } from "@/components/staff/orderStatus";
+import { isCancellableStatus } from "@/lib/orderRules";
 import {
   getStaffOrders,
   nextStaffOrderStatus,
@@ -167,6 +168,9 @@ function StaffPage() {
     bannerTimerRef.current = setTimeout(() => setNewOrderBanner(false), 7_000);
   }, []);
 
+  // All data access goes through the src/lib domain functions (n8n bridge
+  // today, Supabase/backend after separation) — swap implementations there,
+  // never in this screen.
   const loadOrders = useCallback(async () => {
     setLoadState("loading");
     try {
@@ -353,7 +357,7 @@ function StaffPage() {
 
   const cancelOrder = async (orderId: string, reason: string) => {
     const current = orders.find((o) => o.orderId === orderId);
-    if (!current || (current.status !== "new" && current.status !== "preparing")) return;
+    if (!current || !isCancellableStatus(current.status)) return;
     if (!current.airtableRecordId) {
       setUpdateError("此訂單無法更新 · This order can't be updated.");
       return;

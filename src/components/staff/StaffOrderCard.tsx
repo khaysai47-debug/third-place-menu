@@ -1,4 +1,5 @@
 import type { StaffOrder } from "@/lib/staffOrders";
+import { isCancellableStatus, isDeliveryOrder } from "@/lib/orderRules";
 import { Bike, MapPin, Phone, User } from "lucide-react";
 import { getNextAction, PAYMENT_META, STATUS_META } from "./orderStatus";
 
@@ -49,9 +50,11 @@ export function StaffOrderCard({ order, updating = false, onAdvance, onOpen, onC
   const action = getNextAction(order);
   const totalQty = order.items.reduce((s, i) => s + i.quantity, 0);
   const cancelled = order.status === "cancelled";
-  const isDelivery = order.orderType === "delivery";
+  const isDelivery = isDeliveryOrder(order);
   // Food is out (or on the road) but money hasn't been collected — worth a
   // visible nudge on pickup/delivery cards without blocking the workflow.
+  // Intentionally broader than orderRules.isPaymentRisk: it already fires at
+  // "ready" so staff collect before handoff, not after.
   const collectPayment =
     order.orderType !== "dine_in" &&
     order.paymentStatus === "unpaid" &&
@@ -197,7 +200,7 @@ export function StaffOrderCard({ order, updating = false, onAdvance, onOpen, onC
             {meta.labelZh} · {meta.labelEn}
           </p>
         )}
-        {(order.status === "new" || order.status === "preparing") && (
+        {isCancellableStatus(order.status) && (
           <button
             onClick={(e) => {
               e.stopPropagation();

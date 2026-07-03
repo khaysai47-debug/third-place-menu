@@ -6,6 +6,7 @@
 // toward any total. "Collected" is realized (paid) revenue only; unpaid is
 // reported separately and is NOT part of Collected.
 
+import { isCompletedStatus } from "./orderRules";
 import type { StaffOrder } from "./staffOrders";
 
 export interface OwnerSummary {
@@ -58,7 +59,7 @@ export function summarizeToday(orders: readonly StaffOrder[], now: Date): OwnerS
     } else {
       unpaidTotal += o.totalPrice;
       unpaidCount += 1;
-      if (o.status === "done" || o.status === "delivered") doneUnpaidCount += 1;
+      if (isCompletedStatus(o.status)) doneUnpaidCount += 1;
     }
   }
 

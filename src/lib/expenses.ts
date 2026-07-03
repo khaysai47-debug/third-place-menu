@@ -8,6 +8,10 @@
 //
 // Business rule: expense totals are never subtracted from revenue here.
 // Gross sales (summarizeToday) and expenses are always separate concerns.
+//
+// TODO(separation): replace the n8n bridge with a Supabase/backend API
+// implementation — keep getExpenses/addExpense signatures and Expense types
+// identical so the staff form and owner dashboard don't change.
 
 import { n8nWebhook } from "./n8n";
 

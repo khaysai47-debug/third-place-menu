@@ -44,6 +44,12 @@ import {
 import { orderLocation } from "@/components/staff/StaffOrderCard";
 import { PAYMENT_META, STATUS_META } from "@/components/staff/orderStatus";
 import { getStaffOrders, type StaffOrder, type StaffOrderStatus } from "@/lib/staffOrders";
+import {
+  formatOrderType,
+  isActiveStatus,
+  isCompletedStatus,
+  isPaymentRisk,
+} from "@/lib/orderRules";
 import { isSameLocalDay, summarizeToday, todaysOrders } from "@/lib/ownerSummary";
 import { getExpenses, type Expense } from "@/lib/expenses";
 import { CATEGORIES, MENU, type MenuCategoryId } from "@/data/menu";
@@ -104,6 +110,9 @@ function OwnerPage() {
   const [expLoadState, setExpLoadState] = useState<LoadState>("loading");
   const expRefreshingRef = useRef(false);
 
+  // All data access goes through the src/lib domain functions (n8n bridge
+  // today, Supabase/backend after separation) — swap implementations there,
+  // never in this screen.
   const loadOrders = useCallback(async () => {
     setLoadState("loading");
     try {
@@ -167,23 +176,10 @@ function OwnerPage() {
   const summary = useMemo(() => summarizeToday(orders, now), [orders, now]);
   const today = useMemo(() => todaysOrders(orders, now), [orders, now]);
   // Completed (done or delivered) but unpaid — food/delivery out, money not collected.
-  const doneUnpaid = useMemo(
-    () =>
-      today.filter(
-        (o) => (o.status === "done" || o.status === "delivered") && o.paymentStatus === "unpaid",
-      ),
-    [today],
-  );
+  const doneUnpaid = useMemo(() => today.filter(isPaymentRisk), [today]);
   // Unpaid and still active — exclude completed and cancelled statuses.
   const unpaidOpen = useMemo(
-    () =>
-      today.filter(
-        (o) =>
-          o.status !== "done" &&
-          o.status !== "delivered" &&
-          o.status !== "cancelled" &&
-          o.paymentStatus === "unpaid",
-      ),
+    () => today.filter((o) => isActiveStatus(o.status) && o.paymentStatus === "unpaid"),
     [today],
   );
   // Delivery pipeline.
@@ -365,12 +361,7 @@ const ORDER_FILTERS: { id: OrderFilter; label: string; labelZh: string }[] = [
 function applyOrderFilter(orders: StaffOrder[], filter: OrderFilter): StaffOrder[] {
   switch (filter) {
     case "active":
-      return orders.filter(
-        (o) =>
-          o.status !== "cancelled" &&
-          o.status !== "done" &&
-          o.status !== "delivered",
-      );
+      return orders.filter((o) => isActiveStatus(o.status));
     case "delivery":
       return orders.filter((o) => o.orderType === "delivery");
     case "unpaid":
@@ -378,7 +369,7 @@ function applyOrderFilter(orders: StaffOrder[], filter: OrderFilter): StaffOrder
     case "cancelled":
       return orders.filter((o) => o.status === "cancelled");
     case "completed":
-      return orders.filter((o) => o.status === "done" || o.status === "delivered");
+      return orders.filter((o) => isCompletedStatus(o.status));
     default:
       return orders;
   }
@@ -593,10 +584,6 @@ const PAYMENT_FILTERS: { id: PaymentFilter; label: string; labelZh: string }[] =
   { id: "transfer", label: "Transfer", labelZh: "轉帳" },
   { id: "risk",     label: "Risk",     labelZh: "風險" },
 ];
-
-function isPaymentRisk(o: StaffOrder): boolean {
-  return (o.status === "done" || o.status === "delivered") && o.paymentStatus === "unpaid";
-}
 
 function applyPaymentFilter(orders: StaffOrder[], filter: PaymentFilter): StaffOrder[] {
   switch (filter) {
@@ -923,6 +910,8 @@ function OwnerPaymentRow({ order, onClick }: { order: StaffOrder; onClick: () =>
 // Daily business report v1 — pure math over the same today-orders/expenses state
 // the other views use. No fetching, no polling, read-only. Cancelled orders are
 // excluded from every money figure (they only appear as counts / audit rows).
+// TODO(separation): use historical Supabase orders for day/week/month analytics
+// (today the loaded order feed only reliably covers recent days).
 
 const REPORT_STATUS_ROWS: { status: StaffOrderStatus; labelEn: string; labelZh: string }[] = [
   { status: "new",              labelEn: "New",              labelZh: "新單"  },
@@ -981,11 +970,9 @@ function OwnerReportsView({
       }
     }
 
-    const doneUnpaid = live.filter(
-      (o) => (o.status === "done" || o.status === "delivered") && o.paymentStatus === "unpaid",
-    );
+    const doneUnpaid = live.filter(isPaymentRisk);
     const unpaidActive = live.filter(
-      (o) => o.status !== "done" && o.status !== "delivered" && o.paymentStatus === "unpaid",
+      (o) => !isCompletedStatus(o.status) && o.paymentStatus === "unpaid",
     );
     const deliveriesPending = live.filter(
       (o) => o.orderType === "delivery" && o.status !== "delivered",
@@ -1367,6 +1354,8 @@ function AuditList({
 // same data the customer menu renders from). No fetching here: live availability
 // is operated on the staff Menu board, and full menu management (editing prices,
 // stock, categories) connects after backend separation.
+// TODO(separation): enable real menu management here (live data + writes)
+// once the Supabase/backend menu API exists.
 
 const MENU_CATEGORY_LABEL: Record<MenuCategoryId, string> = Object.fromEntries(
   CATEGORIES.map((c) => [c.id, c.nameEn]),
@@ -2424,11 +2413,7 @@ function OwnerOrderModal({ order, onClose }: { order: StaffOrder; onClose: () =>
           <div className="min-w-0">
             <p className="staff-num text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--color-gold-soft)]/70 tabular-nums">
               {order.orderId} · {order.time} · {totalQty} {totalQty === 1 ? "item" : "items"} ·{" "}
-              {order.orderType === "dine_in"
-                ? "Dine-in"
-                : order.orderType === "pickup"
-                ? "Pickup"
-                : "Delivery"}
+              {formatOrderType(order.orderType)}
             </p>
             <div className="mt-1.5 flex flex-wrap items-center gap-2">
               <span className="font-sans text-[20px] font-semibold leading-none text-[var(--color-cream)]">

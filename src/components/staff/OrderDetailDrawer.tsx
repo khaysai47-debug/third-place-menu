@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { isCancellableStatus } from "@/lib/orderRules";
 import type { StaffOrder, StaffPaymentMethod } from "@/lib/staffOrders";
 import { AlertCircle, Bike, Copy, CreditCard, MapPin, MoreHorizontal, PackageX, Phone, PhoneOff, User, UserX } from "lucide-react";
 import { getNextAction, PAYMENT_META, STATUS_META } from "./orderStatus";
@@ -55,7 +56,7 @@ export function OrderDetailDrawer({
   const paid = order.paymentStatus === "paid";
   const paidAtLabel = order.paidAt ? formatPaidAt(order.paidAt) : null;
   const canTakePayment = !paid && !!order.airtableRecordId && order.status !== "cancelled";
-  const canCancel = (order.status === "new" || order.status === "preparing") && !!order.airtableRecordId;
+  const canCancel = isCancellableStatus(order.status) && !!order.airtableRecordId;
   const displayDeliveryFee = order.deliveryFee && order.deliveryFee > 0 ? order.deliveryFee : 30;
 
   const [showCancelForm, setShowCancelForm] = useState(false);

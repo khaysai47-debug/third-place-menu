@@ -1,3 +1,11 @@
+// Customer order submission domain: payload contract + submit call.
+// The checkout drawer builds an OrderPayload and calls submitOrder — it never
+// touches transport details.
+//
+// TODO(separation): point submitOrder at the Supabase/backend order intake
+// (or keep this one webhook if order intake stays an n8n automation) — the
+// OrderPayload contract and SubmitResult shape should not change.
+
 import { n8nWebhook } from "./n8n";
 
 export interface OrderPayload {
