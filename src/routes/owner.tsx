@@ -288,9 +288,14 @@ function OwnerPage() {
           <OwnerMenuView />
         ) : (
           <main className="mx-auto w-full max-w-[1600px] px-5 py-6 lg:px-8">
-            <p className="mb-4 text-[11px] uppercase tracking-[0.2em] text-[var(--color-muted-foreground)]">
-              Today&apos;s operations snapshot · 營運快照
-            </p>
+            {/* Page-level eyebrow — spans both columns so the grid below starts
+                on one clean line (hero and right rail share the same top edge). */}
+            <div className="mb-4 flex items-center gap-3">
+              <p className="shrink-0 text-[11px] uppercase tracking-[0.2em] text-[var(--color-muted-foreground)]">
+                Today&apos;s operations snapshot · 營運快照
+              </p>
+              <span aria-hidden className="h-px flex-1 bg-[var(--color-gold)]/15" />
+            </div>
             <div className="grid grid-cols-12 gap-6">
             <section className="col-span-12 space-y-6 xl:col-span-8">
               <Hero summary={summary} />
