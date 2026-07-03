@@ -267,6 +267,12 @@ function OwnerPage() {
             now={now}
             onSelectOrder={setSelectedOrder}
           />
+        ) : activeSection === "payments" ? (
+          <OwnerPaymentsView
+            orders={allTodayOrders}
+            now={now}
+            onSelectOrder={setSelectedOrder}
+          />
         ) : (
           <main className="mx-auto grid w-full max-w-[1600px] grid-cols-12 gap-6 px-5 py-6 lg:px-8">
             <section className="col-span-12 space-y-6 xl:col-span-8">
@@ -548,15 +554,357 @@ function OwnerOrderRow({ order, onClick }: { order: StaffOrder; onClick: () => v
   );
 }
 
+/* ---------- Payments view ---------- */
+// Read-only payment audit over today's orders (same data the Orders view uses).
+// Cancelled orders never count toward money totals; they only appear under "All"
+// so the audit trail stays complete. "Risk" = food handed out (done/delivered)
+// but payment_status still unpaid — money should exist but doesn't.
+
+type PaymentFilter = "all" | "paid" | "unpaid" | "cash" | "transfer" | "risk";
+
+const PAYMENT_FILTERS: { id: PaymentFilter; label: string; labelZh: string }[] = [
+  { id: "all",      label: "All",      labelZh: "全部" },
+  { id: "paid",     label: "Paid",     labelZh: "已付" },
+  { id: "unpaid",   label: "Unpaid",   labelZh: "未付" },
+  { id: "cash",     label: "Cash",     labelZh: "現金" },
+  { id: "transfer", label: "Transfer", labelZh: "轉帳" },
+  { id: "risk",     label: "Risk",     labelZh: "風險" },
+];
+
+function isPaymentRisk(o: StaffOrder): boolean {
+  return (o.status === "done" || o.status === "delivered") && o.paymentStatus === "unpaid";
+}
+
+function applyPaymentFilter(orders: StaffOrder[], filter: PaymentFilter): StaffOrder[] {
+  switch (filter) {
+    case "paid":
+      return orders.filter((o) => o.paymentStatus === "paid" && o.status !== "cancelled");
+    case "unpaid":
+      return orders.filter((o) => o.paymentStatus === "unpaid" && o.status !== "cancelled");
+    case "cash":
+      return orders.filter(
+        (o) => o.paymentStatus === "paid" && o.paymentMethod === "Cash" && o.status !== "cancelled",
+      );
+    case "transfer":
+      return orders.filter(
+        (o) =>
+          o.paymentStatus === "paid" && o.paymentMethod === "Transfer" && o.status !== "cancelled",
+      );
+    case "risk":
+      return orders.filter(isPaymentRisk);
+    default:
+      return orders;
+  }
+}
+
+function OwnerPaymentsView({
+  orders,
+  now,
+  onSelectOrder,
+}: {
+  orders: StaffOrder[];
+  now: Date;
+  onSelectOrder: (o: StaffOrder) => void;
+}) {
+  const [filter, setFilter] = useState<PaymentFilter>("all");
+  const visible = useMemo(() => applyPaymentFilter(orders, filter), [orders, filter]);
+
+  // Money totals — cancelled orders excluded, same convention as summarizeToday.
+  const totals = useMemo(() => {
+    let paid = 0;
+    let unpaid = 0;
+    let cash = 0;
+    let transfer = 0;
+    let riskCount = 0;
+    for (const o of orders) {
+      if (o.status === "cancelled") continue;
+      if (o.paymentStatus === "paid") {
+        paid += o.totalPrice;
+        if (o.paymentMethod === "Cash") cash += o.totalPrice;
+        else if (o.paymentMethod === "Transfer") transfer += o.totalPrice;
+      } else {
+        unpaid += o.totalPrice;
+        if (isPaymentRisk(o)) riskCount += 1;
+      }
+    }
+    return { paid, unpaid, cash, transfer, riskCount };
+  }, [orders]);
+
+  return (
+    <div className="mx-auto w-full max-w-[1400px] px-5 py-6 lg:px-8">
+      {/* Header */}
+      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="font-display text-[22px] leading-none text-[var(--color-cream)]">
+            Payments · 今日收款
+          </h2>
+          <p className="mt-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted-foreground)]">
+            {now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+            {" · "}audit only · read-only
+          </p>
+        </div>
+      </div>
+
+      {/* Summary cards */}
+      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-5">
+        <SupportCard
+          icon={Banknote}
+          label="Paid"
+          labelZh="已付"
+          value={baht(totals.paid)}
+          sub="collected today"
+          tone="money"
+          animDelay={60}
+        />
+        <SupportCard
+          icon={AlertTriangle}
+          label="Unpaid"
+          labelZh="未付"
+          value={baht(totals.unpaid)}
+          sub="outstanding"
+          tone={totals.unpaid > 0 ? "warn" : "muted"}
+          animDelay={120}
+        />
+        <SupportCard
+          icon={Wallet}
+          label="Cash"
+          labelZh="現金"
+          value={baht(totals.cash)}
+          sub="paid in cash"
+          tone="money"
+          animDelay={180}
+        />
+        <SupportCard
+          icon={ArrowLeftRight}
+          label="Transfer"
+          labelZh="轉帳"
+          value={baht(totals.transfer)}
+          sub="paid by transfer"
+          tone="money"
+          animDelay={240}
+        />
+        <SupportCard
+          icon={Receipt}
+          label="Risk"
+          labelZh="風險"
+          value={String(totals.riskCount)}
+          sub="done/delivered, unpaid"
+          tone={totals.riskCount > 0 ? "alert" : "muted"}
+          animDelay={300}
+        />
+      </div>
+
+      {/* Filter pills */}
+      <div className="mb-5 flex flex-wrap gap-2">
+        {PAYMENT_FILTERS.map(({ id, label, labelZh }) => {
+          const count = applyPaymentFilter(orders, id).length;
+          const isActive = filter === id;
+          const isRisk = id === "risk";
+          return (
+            <button
+              key={id}
+              type="button"
+              onClick={() => setFilter(id)}
+              className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-medium tracking-[0.06em] transition-colors ${
+                isActive
+                  ? isRisk
+                    ? "border-[var(--color-vermillion)]/60 bg-[var(--color-vermillion)]/12 text-[var(--color-vermillion)]"
+                    : "border-[var(--color-gold)]/60 bg-[var(--color-gold)]/12 text-[var(--color-gold)]"
+                  : "border-[var(--color-gold)]/15 text-[var(--color-muted-foreground)] hover:border-[var(--color-gold)]/30 hover:text-[var(--color-cream)]/70"
+              }`}
+            >
+              {label} · {labelZh}
+              <span
+                className={`rounded-full px-1.5 py-0.5 text-[10px] tabular-nums ${
+                  isActive
+                    ? isRisk
+                      ? "bg-[var(--color-vermillion)]/20 text-[var(--color-vermillion)]"
+                      : "bg-[var(--color-gold)]/20 text-[var(--color-gold)]"
+                    : "bg-[var(--color-gold)]/8 text-[var(--color-muted-foreground)]"
+                }`}
+              >
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Table */}
+      {visible.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <p className="text-[14px] text-[var(--color-muted-foreground)]">
+            No payments match this filter.
+          </p>
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-[var(--color-gold)]/12 bg-[var(--color-charcoal-soft)]/40">
+          <table className="w-full text-[13px]">
+            <thead>
+              <tr className="border-b border-[var(--color-gold)]/12">
+                {["Order / Location", "Payment", "Method", "Total", "Paid At", "Status", "Proof"].map(
+                  (h) => (
+                    <th
+                      key={h}
+                      className="px-4 py-3 text-left text-[11px] uppercase tracking-[0.14em] font-medium text-[var(--color-muted-foreground)]"
+                    >
+                      {h}
+                    </th>
+                  ),
+                )}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[var(--color-gold)]/8">
+              {visible.map((order) => (
+                <OwnerPaymentRow
+                  key={order.orderId}
+                  order={order}
+                  onClick={() => onSelectOrder(order)}
+                />
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OwnerPaymentRow({ order, onClick }: { order: StaffOrder; onClick: () => void }) {
+  const statusMeta = STATUS_META[order.status];
+  const payMeta = PAYMENT_META[order.paymentStatus];
+  const statusDark = OWNER_STATUS_BADGE[order.status];
+  const loc = orderLocation(order);
+  const cancelled = order.status === "cancelled";
+  const risk = isPaymentRisk(order);
+  const paid = order.paymentStatus === "paid";
+  const paidAtLabel = ownerFmtTime(order.paidAt);
+
+  return (
+    <tr
+      onClick={onClick}
+      className={`group cursor-pointer transition-colors hover:bg-[var(--color-gold)]/[0.04] ${
+        cancelled ? "opacity-55" : ""
+      }`}
+    >
+      {/* Order / Location */}
+      <td
+        className={`border-l-2 px-4 py-3 ${
+          risk ? "border-[var(--color-vermillion)]" : "border-transparent"
+        }`}
+      >
+        <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--color-muted-foreground)] tabular-nums">
+          {order.orderId}
+        </p>
+        <p className="mt-0.5 font-medium text-[var(--color-cream)]/85">
+          {loc.big}
+          {loc.num !== undefined && (
+            <span className="ml-1.5 tabular-nums text-[var(--color-gold)]">{loc.num}</span>
+          )}
+          <span className="ml-2 text-[11px] text-[var(--color-muted-foreground)]">{loc.zh}</span>
+        </p>
+        {order.orderType === "delivery" && order.customerName && (
+          <p className="mt-0.5 text-[11px] text-[var(--color-muted-foreground)] truncate max-w-[160px]">
+            {order.customerName}
+          </p>
+        )}
+      </td>
+
+      {/* Payment status */}
+      <td className="px-4 py-3">
+        <span
+          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium tracking-[0.05em] ${payMeta.badgeClass}`}
+        >
+          <span className={`h-1.5 w-1.5 rounded-full ${payMeta.dotClass}`} />
+          {payMeta.labelEn}
+        </span>
+        {risk && (
+          <p className="mt-1 text-[10px] uppercase tracking-[0.1em] text-[var(--color-vermillion)]">
+            Risk · 風險
+          </p>
+        )}
+      </td>
+
+      {/* Method */}
+      <td className="px-4 py-3 text-[12px]">
+        {paid && order.paymentMethod ? (
+          <span className="inline-flex items-center gap-1.5 text-[var(--color-cream)]/80">
+            {order.paymentMethod === "Cash" ? (
+              <Wallet className="h-3 w-3" strokeWidth={1.5} />
+            ) : (
+              <ArrowLeftRight className="h-3 w-3" strokeWidth={1.5} />
+            )}
+            {order.paymentMethod}
+          </span>
+        ) : (
+          <span className="text-[var(--color-muted-foreground)]/60">—</span>
+        )}
+      </td>
+
+      {/* Total */}
+      <td
+        className={`px-4 py-3 tabular-nums font-medium ${
+          cancelled
+            ? "text-[var(--color-muted-foreground)] line-through"
+            : "text-[var(--color-cream)]/85"
+        }`}
+      >
+        ฿{order.totalPrice.toLocaleString("en-US")}
+      </td>
+
+      {/* Paid at */}
+      <td className="px-4 py-3 tabular-nums text-[12px] whitespace-nowrap">
+        {paid && paidAtLabel ? (
+          <span className="text-[var(--color-cream)]/75">{paidAtLabel}</span>
+        ) : (
+          <span className="text-[var(--color-muted-foreground)]/60">—</span>
+        )}
+      </td>
+
+      {/* Order status */}
+      <td className="px-4 py-3">
+        <span
+          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium tracking-[0.05em] ${statusDark.bg} ${statusDark.text} ${statusDark.border}`}
+        >
+          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDark.dot}`} />
+          {statusMeta.labelEn} · {statusMeta.labelZh}
+        </span>
+      </td>
+
+      {/* Proof */}
+      <td className="px-4 py-3 text-[12px] whitespace-nowrap">
+        {order.hasPaymentProof ? (
+          order.paymentProofUrl ? (
+            <a
+              href={order.paymentProofUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-teal-700/40 bg-teal-600/10 px-2.5 py-1 text-[11px] font-medium text-teal-300 transition hover:bg-teal-600/20"
+            >
+              <ExternalLink size={10} strokeWidth={1.5} />
+              View
+            </a>
+          ) : (
+            <span className="text-[var(--color-muted-foreground)]">Received</span>
+          )
+        ) : (
+          <span className="text-[var(--color-muted-foreground)]/60">—</span>
+        )}
+      </td>
+    </tr>
+  );
+}
+
 /* ---------- Sidebar (static, desktop only) ---------- */
 
-type OwnerSection = "overview" | "orders";
+type OwnerSection = "overview" | "orders" | "payments";
 
 const NAV_ITEMS: { id: OwnerSection | null; label: string; icon: LucideIcon }[] = [
   { id: "overview", label: "Overview", icon: LayoutGrid     },
   { id: "orders",   label: "Orders",   icon: ClipboardList  },
   { id: null,       label: "Menu",     icon: UtensilsCrossed },
-  { id: null,       label: "Payments", icon: Banknote       },
+  { id: "payments", label: "Payments", icon: Banknote       },
   { id: null,       label: "Reports",  icon: LineChartIcon  },
   { id: null,       label: "Settings", icon: Settings       },
 ];
@@ -644,7 +992,7 @@ function OwnerSidebar({
           </p>
         ) : (
           <p className="text-[10.5px] leading-relaxed text-[var(--color-muted-foreground)]">
-            Overview &amp; Orders are live. More arriving soon.
+            Overview, Orders &amp; Payments are live. More arriving soon.
           </p>
         )}
       </div>
