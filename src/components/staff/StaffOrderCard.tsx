@@ -49,6 +49,13 @@ export function StaffOrderCard({ order, updating = false, onAdvance, onOpen, onC
   const action = getNextAction(order);
   const totalQty = order.items.reduce((s, i) => s + i.quantity, 0);
   const cancelled = order.status === "cancelled";
+  const isDelivery = order.orderType === "delivery";
+  // Food is out (or on the road) but money hasn't been collected — worth a
+  // visible nudge on pickup/delivery cards without blocking the workflow.
+  const collectPayment =
+    order.orderType !== "dine_in" &&
+    order.paymentStatus === "unpaid" &&
+    (order.status === "ready" || order.status === "out_for_delivery" || order.status === "delivered");
   const displayDeliveryFee = order.deliveryFee && order.deliveryFee > 0 ? order.deliveryFee : 30;
 
   return (
@@ -56,15 +63,23 @@ export function StaffOrderCard({ order, updating = false, onAdvance, onOpen, onC
       onClick={() => onOpen(order.orderId)}
       className={`paper-grain h-full rounded-2xl border border-[var(--color-gold)]/30 overflow-hidden flex flex-col shadow-[0_20px_40px_-25px_oklch(0_0_0/0.8)] cursor-pointer transition hover:border-[var(--color-gold)]/60 active:scale-[0.995] ${cancelled ? "opacity-60" : ""}`}
     >
+      {/* Delivery orders get a sky accent strip so they read at a glance */}
+      {isDelivery && !cancelled && <div aria-hidden className="h-1 w-full bg-sky-600/60" />}
       <div className="p-4 pb-3">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-[11px] uppercase tracking-[0.18em] font-medium text-[var(--color-ink)]/50 tabular-nums">
               {order.orderId} · {order.time} · {totalQty} items
             </p>
-            <h3 className="mt-1.5">
+            <h3 className="mt-1.5 flex items-center gap-2">
               <OrderLocationTitle order={order} tone="ink" />
+              {isDelivery && <Bike size={16} className="shrink-0 text-sky-700/80" />}
             </h3>
+            {cancelled && order.cancellationReason && (
+              <p className="mt-1.5 text-[12px] italic leading-snug text-[var(--color-ink)]/55 line-clamp-2">
+                {order.cancellationReason}
+              </p>
+            )}
           </div>
           <div className="shrink-0 mt-0.5 flex flex-col items-end gap-1">
             <span
@@ -148,6 +163,12 @@ export function StaffOrderCard({ order, updating = false, onAdvance, onOpen, onC
             {order.totalPrice.toLocaleString("en-US")}
           </span>
         </div>
+        {collectPayment && (
+          <div className="mb-3 flex items-center gap-2 rounded-lg border border-amber-600/35 bg-amber-500/12 px-3 py-2 text-[13px] font-medium text-amber-800">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
+            未收款 · Collect payment
+          </div>
+        )}
         {order.hasPaymentProof && order.paymentProofUrl && (
           <a
             href={order.paymentProofUrl}

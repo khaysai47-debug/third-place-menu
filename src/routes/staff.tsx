@@ -76,6 +76,17 @@ const STAFF_VIEW_TITLES: Record<StaffView, string> = {
 
 const SUMMARY_STATUSES: StaffOrderStatus[] = ["new", "preparing", "ready", "out_for_delivery", "delivered", "done"];
 
+// Friendlier per-tab empty copy — the board is calm, not broken.
+const EMPTY_TAB_COPY: Record<StaffOrderStatus, { zh: string; en: string }> = {
+  new:              { zh: "沒有新單",   en: "No new orders — all caught up" },
+  preparing:        { zh: "廚房清空",   en: "Nothing on the grill right now" },
+  ready:            { zh: "沒有待取餐", en: "Nothing waiting to go out" },
+  out_for_delivery: { zh: "沒有配送中", en: "No riders on the road" },
+  delivered:        { zh: "沒有已送達", en: "No deliveries completed yet" },
+  done:             { zh: "沒有已完成", en: "No finished orders yet tonight" },
+  cancelled:        { zh: "沒有取消",   en: "No cancellations tonight" },
+};
+
 const SUMMARY_CARD_STYLE: Partial<Record<StaffOrderStatus, { inactive: string; active: string }>> =
   {
     new: {
@@ -595,7 +606,7 @@ function StaffPage() {
                   <span className="h-px w-10 bg-[var(--color-gold)]/40" />
                 </div>
                 <p className="font-display text-[20px] text-[var(--color-gold-soft)]/80">
-                  沒有訂單 · No {STATUS_META[activeTab].labelEn.toLowerCase()} orders
+                  {EMPTY_TAB_COPY[activeTab].zh} · {EMPTY_TAB_COPY[activeTab].en}
                 </p>
               </div>
             )}

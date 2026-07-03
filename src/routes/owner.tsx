@@ -6,7 +6,7 @@
 // on desktop, single column on mobile. All numbers come from real data.
 
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   ArrowLeftRight,
@@ -14,6 +14,7 @@ import {
   Bike,
   ClipboardList,
   ExternalLink,
+  Flame,
   LayoutGrid,
   LineChart as LineChartIcon,
   MapPin,
@@ -22,6 +23,7 @@ import {
   RefreshCw,
   Scale,
   Settings,
+  Star,
   TrendingDown,
   User,
   UtensilsCrossed,
@@ -41,9 +43,10 @@ import {
 } from "recharts";
 import { orderLocation } from "@/components/staff/StaffOrderCard";
 import { PAYMENT_META, STATUS_META } from "@/components/staff/orderStatus";
-import { getStaffOrders, type StaffOrder } from "@/lib/staffOrders";
+import { getStaffOrders, type StaffOrder, type StaffOrderStatus } from "@/lib/staffOrders";
 import { isSameLocalDay, summarizeToday, todaysOrders } from "@/lib/ownerSummary";
 import { getExpenses, type Expense } from "@/lib/expenses";
+import { CATEGORIES, MENU, type MenuCategoryId } from "@/data/menu";
 
 export const Route = createFileRoute("/owner")({
   head: () => ({
@@ -273,9 +276,22 @@ function OwnerPage() {
             now={now}
             onSelectOrder={setSelectedOrder}
           />
+        ) : activeSection === "reports" ? (
+          <OwnerReportsView
+            orders={allTodayOrders}
+            expensesTotal={expensesTotalToday}
+            expLoadState={expLoadState}
+            now={now}
+            onSelectOrder={setSelectedOrder}
+          />
+        ) : activeSection === "menu" ? (
+          <OwnerMenuView />
         ) : (
           <main className="mx-auto grid w-full max-w-[1600px] grid-cols-12 gap-6 px-5 py-6 lg:px-8">
             <section className="col-span-12 space-y-6 xl:col-span-8">
+              <p className="text-[11px] uppercase tracking-[0.2em] text-[var(--color-muted-foreground)]">
+                Today&apos;s operations snapshot · 營運快照
+              </p>
               <Hero summary={summary} />
               <MetricsGrid summary={summary} />
               <ExpenseNetRow
@@ -383,7 +399,7 @@ function OwnerOrdersView({
           </h2>
           <p className="mt-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted-foreground)]">
             {now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
-            {" · "}{orders.length} total
+            {" · "}{orders.length} total · order audit trail
           </p>
         </div>
       </div>
@@ -455,7 +471,7 @@ function OwnerOrdersView({
 // STATUS_META.badgeClass uses text-[var(--color-ink)] for done/delivered/cancelled
 // which is near-invisible on the dark charcoal owner dashboard.
 const OWNER_STATUS_BADGE: Record<
-  import("@/lib/staffOrders").StaffOrderStatus,
+  StaffOrderStatus,
   { bg: string; text: string; border: string; dot: string }
 > = {
   new:              { bg: "bg-[var(--color-vermillion)]/12", text: "text-[var(--color-vermillion)]",  border: "border-[var(--color-vermillion)]/28", dot: "bg-[var(--color-vermillion)]"   },
@@ -640,7 +656,7 @@ function OwnerPaymentsView({
           </h2>
           <p className="mt-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted-foreground)]">
             {now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
-            {" · "}audit only · read-only
+            {" · "}payment audit · read-only
           </p>
         </div>
       </div>
@@ -896,16 +912,666 @@ function OwnerPaymentRow({ order, onClick }: { order: StaffOrder; onClick: () =>
   );
 }
 
+/* ---------- Reports view ---------- */
+// Daily business report v1 — pure math over the same today-orders/expenses state
+// the other views use. No fetching, no polling, read-only. Cancelled orders are
+// excluded from every money figure (they only appear as counts / audit rows).
+
+const REPORT_STATUS_ROWS: { status: StaffOrderStatus; labelEn: string; labelZh: string }[] = [
+  { status: "new",              labelEn: "New",              labelZh: "新單"  },
+  { status: "preparing",        labelEn: "Preparing",        labelZh: "製作中" },
+  { status: "ready",            labelEn: "Ready",            labelZh: "待取餐" },
+  { status: "out_for_delivery", labelEn: "Out for Delivery", labelZh: "配送中" },
+  { status: "done",             labelEn: "Done",             labelZh: "已完成" },
+  { status: "delivered",        labelEn: "Delivered",        labelZh: "已送達" },
+  { status: "cancelled",        labelEn: "Cancelled",        labelZh: "已取消" },
+];
+
+function OwnerReportsView({
+  orders,
+  expensesTotal,
+  expLoadState,
+  now,
+  onSelectOrder,
+}: {
+  orders: StaffOrder[];
+  expensesTotal: number;
+  expLoadState: LoadState;
+  now: Date;
+  onSelectOrder: (o: StaffOrder) => void;
+}) {
+  const r = useMemo(() => {
+    const live = orders.filter((o) => o.status !== "cancelled");
+    const cancelled = orders.filter((o) => o.status === "cancelled");
+
+    let gross = 0;
+    let collected = 0;
+    let cash = 0;
+    let transfer = 0;
+    let unpaidTotal = 0;
+    let paidCount = 0;
+    let unpaidCount = 0;
+    let deliveryRevenue = 0;
+    const typeCounts = { dine_in: 0, pickup: 0, delivery: 0 };
+    const statusCounts: Record<StaffOrderStatus, number> = {
+      new: 0, preparing: 0, ready: 0, out_for_delivery: 0,
+      delivered: 0, done: 0, cancelled: cancelled.length,
+    };
+
+    for (const o of live) {
+      gross += o.totalPrice;
+      typeCounts[o.orderType] += 1;
+      statusCounts[o.status] += 1;
+      if (o.orderType === "delivery") deliveryRevenue += o.totalPrice;
+      if (o.paymentStatus === "paid") {
+        paidCount += 1;
+        collected += o.totalPrice;
+        if (o.paymentMethod === "Cash") cash += o.totalPrice;
+        else if (o.paymentMethod === "Transfer") transfer += o.totalPrice;
+      } else {
+        unpaidCount += 1;
+        unpaidTotal += o.totalPrice;
+      }
+    }
+
+    const doneUnpaid = live.filter(
+      (o) => (o.status === "done" || o.status === "delivered") && o.paymentStatus === "unpaid",
+    );
+    const unpaidActive = live.filter(
+      (o) => o.status !== "done" && o.status !== "delivered" && o.paymentStatus === "unpaid",
+    );
+    const deliveriesPending = live.filter(
+      (o) => o.orderType === "delivery" && o.status !== "delivered",
+    );
+
+    return {
+      gross, collected, cash, transfer, unpaidTotal, paidCount, unpaidCount,
+      deliveryRevenue, typeCounts, statusCounts, cancelled,
+      doneUnpaid, unpaidActive, deliveriesPending,
+      orderCount: live.length,
+    };
+  }, [orders]);
+
+  // Top items by quantity from the item lines already on today's loaded orders.
+  const bestSellers = useMemo(() => {
+    const acc = new Map<string, { name: string; qty: number; revenue: number }>();
+    for (const o of orders) {
+      if (o.status === "cancelled") continue;
+      for (const it of o.items) {
+        if (!it.name) continue;
+        const cur = acc.get(it.name) ?? { name: it.name, qty: 0, revenue: 0 };
+        cur.qty += it.quantity;
+        cur.revenue += it.quantity * it.unitPrice;
+        acc.set(it.name, cur);
+      }
+    }
+    return [...acc.values()].sort((a, b) => b.qty - a.qty || b.revenue - a.revenue).slice(0, 8);
+  }, [orders]);
+
+  const expLoading = expLoadState !== "ready";
+  const net = r.collected - expensesTotal;
+
+  return (
+    <div className="mx-auto w-full max-w-[1400px] px-5 py-6 lg:px-8">
+      {/* Header */}
+      <div className="mb-5">
+        <h2 className="font-display text-[22px] leading-none text-[var(--color-cream)]">
+          Reports · 每日報表
+        </h2>
+        <p className="mt-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted-foreground)]">
+          {now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
+          {" · "}daily business report · read-only
+        </p>
+      </div>
+
+      {/* A — top summary cards */}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+        <SupportCard
+          icon={Banknote}
+          label="Gross Sales"
+          labelZh="總營業額"
+          value={baht(r.gross)}
+          sub="billed today, excl. cancelled"
+          tone="money"
+          animDelay={40}
+        />
+        <SupportCard
+          icon={Scale}
+          label="Net Today"
+          labelZh="今日淨額"
+          value={expLoading ? "…" : baht(net)}
+          sub="collected minus expenses"
+          tone={expLoading ? "muted" : net < 0 ? "alert" : "money"}
+          animDelay={100}
+        />
+        <SupportCard
+          icon={TrendingDown}
+          label="Expenses"
+          labelZh="今日支出"
+          value={expLoading ? "…" : baht(expensesTotal)}
+          sub="logged outflows"
+          tone={expLoading ? "muted" : "cost"}
+          animDelay={160}
+        />
+        <SupportCard
+          icon={ClipboardList}
+          label="Orders"
+          labelZh="訂單數"
+          value={String(r.orderCount)}
+          sub="placed today"
+          tone="muted"
+          animDelay={220}
+        />
+        <SupportCard
+          icon={XCircle}
+          label="Cancelled"
+          labelZh="已取消"
+          value={String(r.cancelled.length)}
+          sub="orders today"
+          tone={r.cancelled.length > 0 ? "warn" : "muted"}
+          animDelay={280}
+        />
+        <SupportCard
+          icon={Bike}
+          label="Delivery Orders"
+          labelZh="外送訂單"
+          value={String(r.typeCounts.delivery)}
+          sub={`${baht(r.deliveryRevenue)} billed`}
+          tone="muted"
+          animDelay={340}
+        />
+      </div>
+
+      {/* B / C / D — breakdown panels */}
+      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <ReportPanel title="Payment Breakdown" titleZh="收款組成" animDelay={120}>
+          <ReportRow label="Cash 現金" value={baht(r.cash)} accent="gold" />
+          <ReportRow label="Transfer 轉帳" value={baht(r.transfer)} accent="gold" />
+          <ReportRow
+            label="Unpaid 未付"
+            value={baht(r.unpaidTotal)}
+            accent={r.unpaidTotal > 0 ? "vermillion" : undefined}
+          />
+          <ReportRow label="Paid orders 已付單" value={String(r.paidCount)} />
+          <ReportRow label="Unpaid orders 未付單" value={String(r.unpaidCount)} />
+        </ReportPanel>
+
+        <ReportPanel title="Order Types" titleZh="訂單類型" animDelay={180}>
+          <ReportRow label="Dine-in 堂食" value={String(r.typeCounts.dine_in)} />
+          <ReportRow label="Pickup 自取" value={String(r.typeCounts.pickup)} />
+          <ReportRow label="Delivery 外送" value={String(r.typeCounts.delivery)} />
+          <ReportRow label="Delivery billed 外送金額" value={baht(r.deliveryRevenue)} accent="gold" />
+        </ReportPanel>
+
+        <ReportPanel title="Status Breakdown" titleZh="狀態分佈" animDelay={240}>
+          {REPORT_STATUS_ROWS.map(({ status, labelEn, labelZh }) => (
+            <div key={status} className="flex items-center justify-between gap-3 text-[13px]">
+              <span className="flex min-w-0 items-center gap-2 text-[var(--color-cream)]/85">
+                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${OWNER_STATUS_BADGE[status].dot}`} />
+                <span className="truncate">
+                  {labelEn}{" "}
+                  <span className="text-[11px] text-[var(--color-muted-foreground)]">{labelZh}</span>
+                </span>
+              </span>
+              <span
+                className={`staff-num shrink-0 ${
+                  r.statusCounts[status] > 0
+                    ? "text-[var(--color-cream)]"
+                    : "text-[var(--color-muted-foreground)]/60"
+                }`}
+              >
+                {r.statusCounts[status]}
+              </span>
+            </div>
+          ))}
+        </ReportPanel>
+      </div>
+
+      {/* E — risk / audit */}
+      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <AuditList
+          title="Done / Delivered — unpaid"
+          titleZh="已完成未付"
+          tone="var(--color-vermillion)"
+          orders={r.doneUnpaid}
+          empty="None — every closed order is paid."
+          onSelectOrder={onSelectOrder}
+          animDelay={160}
+        />
+        <AuditList
+          title="Unpaid — still active"
+          titleZh="未付進行中"
+          tone="var(--color-gold-soft)"
+          orders={r.unpaidActive}
+          empty="None — all active orders are settled."
+          onSelectOrder={onSelectOrder}
+          animDelay={220}
+        />
+        <AuditList
+          title="Deliveries not yet delivered"
+          titleZh="外送未送達"
+          tone="oklch(0.72 0.13 230)"
+          orders={r.deliveriesPending}
+          empty="None — no deliveries in flight."
+          onSelectOrder={onSelectOrder}
+          animDelay={280}
+        />
+        <AuditList
+          title="Cancelled — with reasons"
+          titleZh="今日取消"
+          tone="var(--color-muted-foreground)"
+          orders={r.cancelled}
+          empty="None — no cancellations today."
+          onSelectOrder={onSelectOrder}
+          showReason
+          animDelay={340}
+        />
+      </div>
+
+      {/* F — best sellers */}
+      <section
+        className="owner-float-card mt-6 overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 hover:border-[var(--color-gold)]/25"
+        style={{ animation: "owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 300ms both" }}
+      >
+        <div className="flex items-center gap-2.5 border-b border-[var(--color-gold)]/15 px-6 py-4">
+          <Flame className="h-3.5 w-3.5 text-[var(--color-vermillion)]/80" strokeWidth={1.5} />
+          <span className="text-[11px] uppercase tracking-[0.25em] text-[var(--color-gold-soft)]/90">
+            Best Sellers Today · 今日熱賣
+          </span>
+        </div>
+        {bestSellers.length > 0 ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-[13px]">
+              <thead>
+                <tr className="border-b border-[var(--color-gold)]/10 text-[11px] uppercase tracking-[0.12em] text-[var(--color-muted-foreground)]">
+                  <th className="px-6 py-3 text-left font-normal">#</th>
+                  <th className="py-3 text-left font-normal">Item</th>
+                  <th className="py-3 text-right font-normal">Qty</th>
+                  <th className="px-6 py-3 text-right font-normal">Sales</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--color-gold)]/8">
+                {bestSellers.map((item, idx) => (
+                  <tr key={item.name}>
+                    <td className="staff-num px-6 py-3 text-[var(--color-muted-foreground)]">
+                      {idx + 1}
+                    </td>
+                    <td className="py-3 text-[var(--color-cream)]/90">{item.name}</td>
+                    <td className="staff-num py-3 text-right text-[var(--color-cream)]/85">
+                      {item.qty}
+                    </td>
+                    <td className="staff-num px-6 py-3 text-right text-[var(--color-gold)]">
+                      {baht(item.revenue)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="px-6 py-10 text-center">
+            <p className="font-display text-[18px] text-[var(--color-gold-soft)]/80">
+              尚無銷售資料 · No item data yet
+            </p>
+            <p className="mx-auto mt-2 max-w-[420px] text-[12px] leading-relaxed text-[var(--color-muted-foreground)]">
+              Item analytics will unlock after order-item data is connected during backend
+              separation.
+            </p>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function ReportPanel({
+  title,
+  titleZh,
+  animDelay = 0,
+  children,
+}: {
+  title: string;
+  titleZh: string;
+  animDelay?: number;
+  children: ReactNode;
+}) {
+  return (
+    <section
+      className="owner-float-card overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 hover:border-[var(--color-gold)]/25"
+      style={{ animation: `owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) ${animDelay}ms both` }}
+    >
+      <div className="border-b border-[var(--color-gold)]/15 px-6 py-4">
+        <span className="text-[11px] uppercase tracking-[0.25em] text-[var(--color-gold-soft)]/90">
+          {title} · {titleZh}
+        </span>
+      </div>
+      <div className="space-y-3 px-6 py-5">{children}</div>
+    </section>
+  );
+}
+
+function ReportRow({
+  label,
+  value,
+  accent,
+}: {
+  label: string;
+  value: string;
+  accent?: "gold" | "vermillion";
+}) {
+  const valueClass =
+    accent === "gold"
+      ? "text-[var(--color-gold)]"
+      : accent === "vermillion"
+      ? "text-[var(--color-vermillion)]"
+      : "text-[var(--color-cream)]/85";
+  return (
+    <div className="flex items-center justify-between gap-3 text-[13px]">
+      <span className="min-w-0 truncate text-[var(--color-cream)]/85">{label}</span>
+      <span className={`staff-num shrink-0 ${valueClass}`}>{value}</span>
+    </div>
+  );
+}
+
+// Compact clickable audit list — rows open the read-only order modal.
+function AuditList({
+  title,
+  titleZh,
+  tone,
+  orders,
+  empty,
+  onSelectOrder,
+  showReason,
+  animDelay = 0,
+}: {
+  title: string;
+  titleZh: string;
+  tone: string;
+  orders: StaffOrder[];
+  empty: string;
+  onSelectOrder: (o: StaffOrder) => void;
+  showReason?: boolean;
+  animDelay?: number;
+}) {
+  return (
+    <section
+      className="owner-float-card overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 hover:border-[var(--color-gold)]/25"
+      style={{ animation: `owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) ${animDelay}ms both` }}
+    >
+      <div className="flex items-center gap-2.5 border-b border-[var(--color-gold)]/15 px-6 py-4">
+        <span className="h-4 w-1 rounded-full" style={{ background: tone }} />
+        <span className="min-w-0 truncate text-[11px] uppercase tracking-[0.2em] text-[var(--color-gold-soft)]/90">
+          {title} · {titleZh}
+        </span>
+        <span className="staff-num ml-auto shrink-0 text-[12px] text-[var(--color-muted-foreground)]">
+          {orders.length}
+        </span>
+      </div>
+      {orders.length > 0 ? (
+        <ul className="divide-y divide-[var(--color-gold)]/8">
+          {orders.slice(0, 6).map((o) => (
+            <li
+              key={o.orderId}
+              onClick={() => onSelectOrder(o)}
+              className="flex cursor-pointer items-start gap-3 px-6 py-3 transition-colors hover:bg-[var(--color-gold)]/[0.07]"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-[13px] text-[var(--color-cream)]/90">
+                  {locText(o)}
+                  <span className="ml-2 text-[11px] text-[var(--color-muted-foreground)]">
+                    {STATUS_META[o.status].labelEn}
+                  </span>
+                </div>
+                <div className="staff-num mt-0.5 truncate text-[11px] text-[var(--color-muted-foreground)]">
+                  {o.orderId} · {o.time}
+                </div>
+                {showReason && o.cancellationReason && (
+                  <div className="mt-0.5 truncate text-[11.5px] italic text-[var(--color-muted-foreground)]/70">
+                    {o.cancellationReason}
+                  </div>
+                )}
+              </div>
+              <span
+                className={`staff-num shrink-0 whitespace-nowrap text-[14px] ${
+                  o.status === "cancelled"
+                    ? "text-[var(--color-muted-foreground)] line-through"
+                    : "text-[var(--color-gold)]"
+                }`}
+              >
+                {baht(o.totalPrice)}
+              </span>
+            </li>
+          ))}
+          {orders.length > 6 && (
+            <li className="px-6 py-2.5 text-[11px] text-[var(--color-muted-foreground)]">
+              +{orders.length - 6} more — see Orders tab
+            </li>
+          )}
+        </ul>
+      ) : (
+        <p className="px-6 py-6 text-[12.5px] text-[var(--color-muted-foreground)]">{empty}</p>
+      )}
+    </section>
+  );
+}
+
+/* ---------- Menu view (read-only) ---------- */
+// Read-only snapshot of the menu bundled with the app (src/data/menu.ts — the
+// same data the customer menu renders from). No fetching here: live availability
+// is operated on the staff Menu board, and full menu management (editing prices,
+// stock, categories) connects after backend separation.
+
+const MENU_CATEGORY_LABEL: Record<MenuCategoryId, string> = Object.fromEntries(
+  CATEGORIES.map((c) => [c.id, c.nameEn]),
+) as Record<MenuCategoryId, string>;
+
+function OwnerMenuView() {
+  const [category, setCategory] = useState<MenuCategoryId | "all">("all");
+
+  const items = useMemo(() => {
+    const list = category === "all" ? MENU : MENU.filter((i) => i.category === category);
+    return [...list].sort((a, b) =>
+      a.category === b.category
+        ? a.order - b.order
+        : MENU_CATEGORY_LABEL[a.category].localeCompare(MENU_CATEGORY_LABEL[b.category]),
+    );
+  }, [category]);
+
+  const availableCount = MENU.filter((i) => i.available).length;
+  const popularCount = MENU.filter((i) => i.popular).length;
+  const needsPriceCount = MENU.filter((i) => i.price === undefined).length;
+
+  return (
+    <div className="mx-auto w-full max-w-[1400px] px-5 py-6 lg:px-8">
+      {/* Header */}
+      <div className="mb-5">
+        <h2 className="font-display text-[22px] leading-none text-[var(--color-cream)]">
+          Menu · 菜單總覽
+        </h2>
+        <p className="mt-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted-foreground)]">
+          read-only · menu overview
+        </p>
+      </div>
+
+      {/* Summary cards */}
+      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <SupportCard
+          icon={UtensilsCrossed}
+          label="Items"
+          labelZh="品項"
+          value={String(MENU.length)}
+          sub={`${CATEGORIES.length} categories`}
+          tone="muted"
+          animDelay={40}
+        />
+        <SupportCard
+          icon={Receipt}
+          label="Available"
+          labelZh="供應中"
+          value={String(availableCount)}
+          sub="on the menu snapshot"
+          tone="money"
+          animDelay={100}
+        />
+        <SupportCard
+          icon={Star}
+          label="Popular"
+          labelZh="人氣"
+          value={String(popularCount)}
+          sub="marked bestsellers"
+          tone={popularCount > 0 ? "warn" : "muted"}
+          animDelay={160}
+        />
+        <SupportCard
+          icon={AlertTriangle}
+          label="Needs Price"
+          labelZh="待定價"
+          value={String(needsPriceCount)}
+          sub="price to confirm"
+          tone={needsPriceCount > 0 ? "alert" : "muted"}
+          animDelay={220}
+        />
+      </div>
+
+      {/* Category filter pills */}
+      <div className="mb-5 flex flex-wrap gap-2">
+        {[{ id: "all" as const, nameEn: "All" }, ...CATEGORIES].map((c) => {
+          const isActive = category === c.id;
+          const count = c.id === "all" ? MENU.length : MENU.filter((i) => i.category === c.id).length;
+          return (
+            <button
+              key={c.id}
+              type="button"
+              onClick={() => setCategory(c.id)}
+              className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-medium tracking-[0.06em] transition-colors ${
+                isActive
+                  ? "border-[var(--color-gold)]/60 bg-[var(--color-gold)]/12 text-[var(--color-gold)]"
+                  : "border-[var(--color-gold)]/15 text-[var(--color-muted-foreground)] hover:border-[var(--color-gold)]/30 hover:text-[var(--color-cream)]/70"
+              }`}
+            >
+              {c.nameEn}
+              <span
+                className={`rounded-full px-1.5 py-0.5 text-[10px] tabular-nums ${
+                  isActive
+                    ? "bg-[var(--color-gold)]/20 text-[var(--color-gold)]"
+                    : "bg-[var(--color-gold)]/8 text-[var(--color-muted-foreground)]"
+                }`}
+              >
+                {count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Menu table */}
+      <div className="overflow-x-auto rounded-xl border border-[var(--color-gold)]/12 bg-[var(--color-charcoal-soft)]/40">
+        <table className="w-full text-[13px]">
+          <thead>
+            <tr className="border-b border-[var(--color-gold)]/12">
+              {["Item", "Category", "Price", "Unit", "Availability", "Tags"].map((h) => (
+                <th
+                  key={h}
+                  className="px-4 py-3 text-left text-[11px] uppercase tracking-[0.14em] font-medium text-[var(--color-muted-foreground)]"
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[var(--color-gold)]/8">
+            {items.map((item) => (
+              <tr key={item.id} className={item.available ? "" : "opacity-55"}>
+                <td className="px-4 py-3">
+                  <p className="font-medium text-[var(--color-cream)]/90">{item.nameEn}</p>
+                  <p className="mt-0.5 text-[10.5px] uppercase tracking-[0.12em] text-[var(--color-muted-foreground)] tabular-nums">
+                    {item.id}
+                  </p>
+                </td>
+                <td className="px-4 py-3 text-[var(--color-cream)]/70">
+                  {MENU_CATEGORY_LABEL[item.category]}
+                </td>
+                <td className="staff-num px-4 py-3 tabular-nums">
+                  {item.price !== undefined ? (
+                    <span className="text-[var(--color-gold)]">{baht(item.price)}</span>
+                  ) : (
+                    <span className="text-[11px] uppercase tracking-[0.08em] text-[var(--color-vermillion)]/75">
+                      To confirm
+                    </span>
+                  )}
+                </td>
+                <td className="px-4 py-3 text-[12px] text-[var(--color-muted-foreground)]">
+                  {item.unit ?? "—"}
+                </td>
+                <td className="px-4 py-3">
+                  {item.available ? (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/28 bg-emerald-500/12 px-2 py-0.5 text-[11px] font-medium tracking-[0.05em] text-emerald-300">
+                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                      Available
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-[var(--color-cream)]/12 bg-[var(--color-cream)]/6 px-2 py-0.5 text-[11px] font-medium tracking-[0.05em] text-[var(--color-cream)]/55">
+                      <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-cream)]/45" />
+                      Off menu
+                    </span>
+                  )}
+                </td>
+                <td className="px-4 py-3">
+                  {item.popular && (
+                    <span className="inline-flex items-center gap-1 rounded-full border border-[var(--color-gold)]/30 bg-[var(--color-gold)]/10 px-2 py-0.5 text-[11px] font-medium tracking-[0.05em] text-[var(--color-gold)]">
+                      <Star className="h-2.5 w-2.5" strokeWidth={2} />
+                      Popular
+                    </span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Planned management note */}
+      <section
+        className="owner-float-card mt-6 rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 px-6 py-5"
+        style={{ animation: "owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 200ms both" }}
+      >
+        <div className="text-[11px] uppercase tracking-[0.25em] text-[var(--color-gold-soft)]/90">
+          Menu Management · 菜單管理
+        </div>
+        <p className="mt-2 max-w-[640px] text-[13px] leading-relaxed text-[var(--color-muted-foreground)]">
+          This is the menu snapshot bundled with the app — the same data the customer menu renders
+          from. Day-to-day availability is operated on the staff Menu board. Full menu management
+          connects after backend separation, when the owner will be able to:
+        </p>
+        <ul className="mt-3 grid max-w-[640px] grid-cols-1 gap-1.5 text-[12.5px] text-[var(--color-cream)]/75 sm:grid-cols-2">
+          {[
+            "View the live menu",
+            "Toggle item availability",
+            "Edit prices",
+            "Track low stock",
+            "Manage categories",
+          ].map((f) => (
+            <li key={f} className="flex items-center gap-2">
+              <span className="h-1 w-1 shrink-0 rounded-full bg-[var(--color-gold)]/60" />
+              {f}
+            </li>
+          ))}
+        </ul>
+      </section>
+    </div>
+  );
+}
+
 /* ---------- Sidebar (static, desktop only) ---------- */
 
-type OwnerSection = "overview" | "orders" | "payments";
+type OwnerSection = "overview" | "orders" | "payments" | "reports" | "menu";
 
 const NAV_ITEMS: { id: OwnerSection | null; label: string; icon: LucideIcon }[] = [
   { id: "overview", label: "Overview", icon: LayoutGrid     },
   { id: "orders",   label: "Orders",   icon: ClipboardList  },
-  { id: null,       label: "Menu",     icon: UtensilsCrossed },
+  { id: "menu",     label: "Menu",     icon: UtensilsCrossed },
   { id: "payments", label: "Payments", icon: Banknote       },
-  { id: null,       label: "Reports",  icon: LineChartIcon  },
+  { id: "reports",  label: "Reports",  icon: LineChartIcon  },
   { id: null,       label: "Settings", icon: Settings       },
 ];
 
@@ -992,7 +1658,7 @@ function OwnerSidebar({
           </p>
         ) : (
           <p className="text-[10.5px] leading-relaxed text-[var(--color-muted-foreground)]">
-            Overview, Orders &amp; Payments are live. More arriving soon.
+            Overview, Orders, Menu, Payments &amp; Reports are live. Settings arriving soon.
           </p>
         )}
       </div>
@@ -1640,7 +2306,12 @@ function OwnerOrderModal({ order, onClose }: { order: StaffOrder; onClose: () =>
         <div className="flex shrink-0 items-start justify-between gap-3 border-b border-[var(--color-gold)]/15 px-5 pb-4 pt-5">
           <div className="min-w-0">
             <p className="staff-num text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--color-gold-soft)]/70 tabular-nums">
-              {order.orderId} · {order.time} · {totalQty} {totalQty === 1 ? "item" : "items"}
+              {order.orderId} · {order.time} · {totalQty} {totalQty === 1 ? "item" : "items"} ·{" "}
+              {order.orderType === "dine_in"
+                ? "Dine-in"
+                : order.orderType === "pickup"
+                ? "Pickup"
+                : "Delivery"}
             </p>
             <div className="mt-1.5 flex flex-wrap items-center gap-2">
               <span className="font-sans text-[20px] font-semibold leading-none text-[var(--color-cream)]">
@@ -1800,6 +2471,11 @@ function OwnerOrderModal({ order, onClose }: { order: StaffOrder; onClose: () =>
             <div className="flex items-center justify-between border-t border-[var(--color-gold)]/15 pt-4">
               <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--color-cream)]/50">
                 Proof · 收據
+                {order.paymentProofStatus && (
+                  <span className="ml-2 normal-case tracking-normal text-[var(--color-cream)]/40">
+                    {order.paymentProofStatus}
+                  </span>
+                )}
               </span>
               {order.paymentProofUrl ? (
                 <a

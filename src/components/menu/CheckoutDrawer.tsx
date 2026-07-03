@@ -161,18 +161,100 @@ export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Prop
         {/* Scrollable body */}
         <div className="overflow-y-auto flex-1 px-5 py-5 space-y-6">
           {success ? (
-            <div className="py-12 text-center space-y-3">
-              <div className="font-display text-[30px] text-[var(--color-gold-soft)]">
-                Order placed · 訂單已送出
+            <div className="py-8 text-center space-y-5">
+              <div>
+                <div className="mx-auto mb-3 flex items-center justify-center gap-3">
+                  <span className="h-px w-10 bg-[var(--color-gold)]/40" />
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400/80" />
+                  <span className="h-px w-10 bg-[var(--color-gold)]/40" />
+                </div>
+                <div className="font-display text-[30px] text-[var(--color-gold-soft)]">
+                  Order received · 訂單已送出
+                </div>
+                <p className="mt-2 text-[13px] text-[var(--color-cream)]/60 leading-relaxed">
+                  {orderType === "dine-in"
+                    ? "Staff will prepare it shortly."
+                    : orderType === "pickup"
+                    ? "Staff will confirm when it is ready for pickup."
+                    : "Staff will confirm delivery and payment."}
+                </p>
               </div>
-              <p className="text-[13px] text-[var(--color-cream)]/55 leading-relaxed">
-                Sent to the kitchen.
-                <br />
-                Staff will confirm your order shortly.
-              </p>
+
+              {/* Where this order is going */}
+              {orderType === "dine-in" && tableNumber.trim() && (
+                <div className="inline-flex items-baseline gap-2 rounded-full border border-[var(--color-gold)]/25 bg-[var(--color-ink)]/60 px-4 py-2 text-[13px] text-[var(--color-cream)]/80">
+                  Table <span className="staff-num text-[16px] text-[var(--color-gold)]">{tableNumber.trim()}</span>
+                  <span className="text-[11px] text-[var(--color-cream)]/45">堂食</span>
+                </div>
+              )}
+              {orderType !== "dine-in" && (name.trim() || phone.trim()) && (
+                <p className="text-[13px] text-[var(--color-cream)]/70">
+                  {name.trim()}
+                  {name.trim() && phone.trim() && " · "}
+                  {phone.trim() && <span className="staff-num">{phone.trim()}</span>}
+                </p>
+              )}
+
+              {orderType === "delivery" && (
+                <ul className="mx-auto max-w-[380px] space-y-1.5 text-left text-[12px] leading-relaxed text-[var(--color-cream)]/55">
+                  {[
+                    "Please keep your phone available — staff may call to confirm.",
+                    "The ฿30 delivery fee is included in your total.",
+                    "Payment confirmation may happen through staff chat.",
+                  ].map((line) => (
+                    <li key={line} className="flex gap-2">
+                      <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-[var(--color-gold)]/60" />
+                      {line}
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {/* Compact order summary */}
+              <div className="mx-auto max-w-[420px] rounded-2xl border border-[var(--color-gold)]/15 bg-[var(--color-ink)]/60 px-4 py-4 text-left">
+                <h3 className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-cream)]/45 mb-2.5">
+                  Your Order
+                </h3>
+                <div className="space-y-1.5">
+                  {items.map((item) => (
+                    <div key={item.id} className="flex justify-between items-baseline gap-3">
+                      <span className="min-w-0 truncate text-[13px] text-[var(--color-cream)]/85">
+                        {item.name}{" "}
+                        <span className="text-[11px] text-[var(--color-cream)]/45">×{item.qty}</span>
+                      </span>
+                      <span className="staff-num shrink-0 text-[13px] text-[var(--color-gold-soft)]">
+                        ฿{item.subtotal.toLocaleString("en-US")}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-3 space-y-1 border-t border-[var(--color-gold)]/12 pt-2.5">
+                  {orderType === "delivery" && (
+                    <>
+                      <div className="flex justify-between items-baseline text-[12px] text-[var(--color-cream)]/55">
+                        <span>Subtotal</span>
+                        <span className="staff-num">฿{total.toLocaleString("en-US")}</span>
+                      </div>
+                      <div className="flex justify-between items-baseline text-[12px] text-[var(--color-cream)]/55">
+                        <span>Delivery fee</span>
+                        <span className="staff-num">฿{deliveryFee.toLocaleString("en-US")}</span>
+                      </div>
+                    </>
+                  )}
+                  <div className="flex justify-between items-baseline pt-0.5">
+                    <span className="text-[11px] uppercase tracking-[0.16em] text-[var(--color-cream)]/50">
+                      Total
+                    </span>
+                    <span className="staff-num text-[18px] text-[var(--color-vermillion)]">
+                      ฿{finalTotal.toLocaleString("en-US")}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
               <button
                 onClick={onClose}
-                className="mt-4 text-[12px] uppercase tracking-[0.2em] text-[var(--color-cream)]/40 hover:text-[var(--color-cream)]/70 transition"
+                className="text-[12px] uppercase tracking-[0.2em] text-[var(--color-cream)]/40 hover:text-[var(--color-cream)]/70 transition"
               >
                 Close
               </button>
@@ -194,7 +276,7 @@ export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Prop
                         </span>
                       </span>
                       <span className="staff-num text-[14px] text-[var(--color-gold-soft)]">
-                        ฿{item.subtotal}
+                        ฿{item.subtotal.toLocaleString("en-US")}
                       </span>
                     </div>
                   ))}
@@ -204,7 +286,7 @@ export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Prop
                         Subtotal
                       </span>
                       <span className="staff-num text-[14px] text-[var(--color-cream)]/70">
-                        ฿{total.toLocaleString()}
+                        ฿{total.toLocaleString("en-US")}
                       </span>
                     </div>
                     {orderType === "delivery" && (
@@ -213,7 +295,7 @@ export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Prop
                           Delivery fee
                         </span>
                         <span className="staff-num text-[14px] text-[var(--color-cream)]/70">
-                          ฿{deliveryFee.toLocaleString()}
+                          ฿{deliveryFee.toLocaleString("en-US")}
                         </span>
                       </div>
                     )}
@@ -222,7 +304,7 @@ export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Prop
                         Total
                       </span>
                       <span className="staff-num text-[20px] text-[var(--color-vermillion)]">
-                        ฿{finalTotal.toLocaleString()}
+                        ฿{finalTotal.toLocaleString("en-US")}
                       </span>
                     </div>
                   </div>
@@ -344,7 +426,7 @@ export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Prop
               disabled={isSubmitting}
               className="w-full rounded-2xl bg-[var(--color-vermillion)] text-[var(--color-cream)] py-4 text-[18px] font-semibold shadow-[0_20px_40px_-18px_oklch(0.45_0.18_27/0.7)] border border-[var(--color-vermillion-deep)] active:scale-[0.99] transition disabled:opacity-60 disabled:cursor-not-allowed disabled:active:scale-100"
             >
-              {isSubmitting ? "Sending Order…" : `Place Order · ฿${finalTotal.toLocaleString()}`}
+              {isSubmitting ? "Sending Order…" : `Place Order · ฿${finalTotal.toLocaleString("en-US")}`}
             </button>
           </div>
         )}
