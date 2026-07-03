@@ -287,11 +287,12 @@ function OwnerPage() {
         ) : activeSection === "menu" ? (
           <OwnerMenuView />
         ) : (
-          <main className="mx-auto grid w-full max-w-[1600px] grid-cols-12 gap-6 px-5 py-6 lg:px-8">
+          <main className="mx-auto w-full max-w-[1600px] px-5 py-6 lg:px-8">
+            <p className="mb-4 text-[11px] uppercase tracking-[0.2em] text-[var(--color-muted-foreground)]">
+              Today&apos;s operations snapshot · 營運快照
+            </p>
+            <div className="grid grid-cols-12 gap-6">
             <section className="col-span-12 space-y-6 xl:col-span-8">
-              <p className="text-[11px] uppercase tracking-[0.2em] text-[var(--color-muted-foreground)]">
-                Today&apos;s operations snapshot · 營運快照
-              </p>
               <Hero summary={summary} />
               <MetricsGrid summary={summary} />
               <ExpenseNetRow
@@ -335,6 +336,7 @@ function OwnerPage() {
                 onRetry={() => void loadExpenses()}
               />
             </aside>
+            </div>
           </main>
         )}
       </div>
@@ -2001,8 +2003,8 @@ function PaymentMix({
 
   return (
     <section
-      className="owner-float-card overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 px-7 py-7 hover:border-[var(--color-gold)]/25"
-      style={{ animation: "owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 120ms both" }}
+      className="owner-float-card overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 px-6 py-6 hover:border-[var(--color-gold)]/25"
+      style={{ animation: "owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 300ms both" }}
     >
       <div className="text-[11px] uppercase tracking-[0.25em] text-[var(--color-gold-soft)]/90">
         Collection Breakdown · 收款組成
@@ -2552,7 +2554,7 @@ function NeedsAttention({
 
   return (
     <div
-      className="overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60"
+      className="owner-float-card overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 hover:border-[var(--color-gold)]/25"
       style={{ animation: "owner-fade-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) 240ms both" }}
     >
       <div className="border-b border-[var(--color-gold)]/15 px-6 py-5">
@@ -3105,7 +3107,7 @@ function ExpenseSummary({
   return (
     <section
       className="owner-float-card overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 hover:border-[var(--color-gold)]/25"
-      style={{ animation: "owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 200ms both" }}
+      style={{ animation: "owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 340ms both" }}
     >
       {/* Header */}
       <div className="border-b border-[var(--color-gold)]/15 px-6 py-5">
@@ -3182,7 +3184,7 @@ function ExpenseSummary({
             {recent.map((exp) => (
               <li
                 key={exp.id}
-                className="flex items-start gap-3 px-5 py-3.5 transition-colors hover:bg-[var(--color-gold)]/[0.04]"
+                className="flex items-start gap-3 px-6 py-3.5 transition-colors hover:bg-[var(--color-gold)]/[0.04]"
               >
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-[13px] text-[var(--color-cream)]/95">
