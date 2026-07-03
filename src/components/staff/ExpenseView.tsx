@@ -1,15 +1,12 @@
 // Staff expense view: add-expense form + today's expense list.
-// Read-only list comes from getExpenses(); writes go through addExpense().
-// No localStorage — all data lives in Airtable via n8n.
+// Data goes through the expense repository (n8n bridge today, Supabase after
+// separation). No localStorage — all data lives in the backend.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  addExpense,
-  getExpenses,
-  type Expense,
-  type ExpenseCategory,
-  type ExpensePaidFrom,
-} from "@/lib/expenses";
+import { getExpenseRepository } from "@/lib/data/expenseRepository";
+import type { Expense, ExpenseCategory, ExpensePaidFrom } from "@/lib/expenses";
+
+const expenseRepo = getExpenseRepository();
 
 type LoadState = "loading" | "error" | "ready";
 
@@ -196,7 +193,7 @@ export function ExpenseView() {
     loadingRef.current = true;
     setLoadState("loading");
     try {
-      setExpenses(await getExpenses());
+      setExpenses(await expenseRepo.listExpenses());
       setLoadState("ready");
     } catch (err) {
       console.error("Failed to load expenses", err);
@@ -228,7 +225,7 @@ export function ExpenseView() {
     }
 
     setSubmitting(true);
-    const result = await addExpense({
+    const result = await expenseRepo.addExpense({
       item_name: trimmedName,
       amount: parsedAmount,
       paid_from: paidFrom,

@@ -7,15 +7,16 @@ import { OrderDetailDrawer } from "@/components/staff/OrderDetailDrawer";
 import { StaffOrderCard } from "@/components/staff/StaffOrderCard";
 import { STATUS_META, STATUS_ORDER } from "@/components/staff/orderStatus";
 import { isCancellableStatus } from "@/lib/orderRules";
+import { getOrderRepository } from "@/lib/data/orderRepository";
 import {
-  getStaffOrders,
   nextStaffOrderStatus,
-  updateOrderPayment,
-  updateStaffOrderStatus,
   type StaffOrder,
   type StaffOrderStatus,
   type StaffPaymentMethod,
 } from "@/lib/staffOrders";
+
+// Repository = n8n bridge today, Supabase after separation (dataSource.ts).
+const orderRepo = getOrderRepository();
 
 // Plays a two-tone chime via Web Audio. Wrapped in try/catch because
 // AudioContext creation throws before the first user gesture on some browsers.
@@ -174,7 +175,7 @@ function StaffPage() {
   const loadOrders = useCallback(async () => {
     setLoadState("loading");
     try {
-      setOrders(await getStaffOrders());
+      setOrders(await orderRepo.listOrders());
       setLoadState("ready");
     } catch (error) {
       console.error("Failed to load staff orders", error);
@@ -193,7 +194,7 @@ function StaffPage() {
     if (refreshingRef.current || refreshBlocked()) return;
     refreshingRef.current = true;
     try {
-      const data = await getStaffOrders();
+      const data = await orderRepo.listOrders();
       if (!refreshBlocked()) setOrders(data);
     } catch (error) {
       console.error("Background refresh failed", error);
@@ -272,7 +273,7 @@ function StaffPage() {
     setOrders((prev) => prev.map((o) => (o.orderId === orderId ? { ...o, status: next } : o)));
 
     try {
-      const result = await updateStaffOrderStatus(current.airtableRecordId, next);
+      const result = await orderRepo.updateOrderStatus(current.airtableRecordId, next);
       if (result.success) {
         // Keep the optimistic state; let polling reconcile after a quiet window
         // so a not-yet-updated backend read can't bounce the card back.
@@ -320,7 +321,7 @@ function StaffPage() {
     );
 
     try {
-      const result = await updateOrderPayment(current.airtableRecordId, method);
+      const result = await orderRepo.updateOrderPayment(current.airtableRecordId, method);
       if (result.success) {
         // Keep the optimistic state; let polling reconcile after a quiet window
         // so a not-yet-updated backend read can't bounce the card back.
@@ -378,9 +379,7 @@ function StaffPage() {
     );
 
     try {
-      const result = await updateStaffOrderStatus(current.airtableRecordId, "cancelled", {
-        cancellationReason: reason,
-      });
+      const result = await orderRepo.cancelOrder(current.airtableRecordId, reason);
       if (result.success) {
         suppressRefreshUntilRef.current = Date.now() + 2500;
       } else {

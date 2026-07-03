@@ -43,7 +43,9 @@ import {
 } from "recharts";
 import { orderLocation } from "@/components/staff/StaffOrderCard";
 import { PAYMENT_META, STATUS_META } from "@/components/staff/orderStatus";
-import { getStaffOrders, type StaffOrder, type StaffOrderStatus } from "@/lib/staffOrders";
+import { getOrderRepository } from "@/lib/data/orderRepository";
+import { getExpenseRepository } from "@/lib/data/expenseRepository";
+import type { StaffOrder, StaffOrderStatus } from "@/lib/staffOrders";
 import {
   formatOrderType,
   isActiveStatus,
@@ -51,7 +53,7 @@ import {
   isPaymentRisk,
 } from "@/lib/orderRules";
 import { isSameLocalDay, summarizeToday, todaysOrders } from "@/lib/ownerSummary";
-import { getExpenses, type Expense } from "@/lib/expenses";
+import type { Expense } from "@/lib/expenses";
 import { CATEGORIES, MENU, type MenuCategoryId } from "@/data/menu";
 
 export const Route = createFileRoute("/owner")({
@@ -76,6 +78,11 @@ function dateLabel(now: Date): string {
 }
 
 const OWNER_NAME = "Mike Li";
+
+// Repositories = n8n bridge today, Supabase after separation (dataSource.ts).
+// Owner stays read-only: only the list methods are ever called here.
+const orderRepo = getOrderRepository();
+const expenseRepo = getExpenseRepository();
 
 function greeting(now: Date): string {
   const h = now.getHours();
@@ -116,7 +123,7 @@ function OwnerPage() {
   const loadOrders = useCallback(async () => {
     setLoadState("loading");
     try {
-      setOrders(await getStaffOrders());
+      setOrders(await orderRepo.listOrders());
       setNowTs(Date.now());
       setLoadState("ready");
     } catch (error) {
@@ -132,7 +139,7 @@ function OwnerPage() {
   const loadExpenses = useCallback(async () => {
     setExpLoadState("loading");
     try {
-      setExpenses(await getExpenses());
+      setExpenses(await expenseRepo.listExpenses());
       setExpLoadState("ready");
     } catch (err) {
       console.error("Owner expense fetch failed", err);
@@ -150,7 +157,7 @@ function OwnerPage() {
     if (refreshingRef.current) return;
     refreshingRef.current = true;
     try {
-      setOrders(await getStaffOrders());
+      setOrders(await orderRepo.listOrders());
       setNowTs(Date.now());
     } catch (error) {
       console.error("Owner dashboard refresh failed", error);
@@ -163,7 +170,7 @@ function OwnerPage() {
     if (expRefreshingRef.current) return;
     expRefreshingRef.current = true;
     try {
-      setExpenses(await getExpenses());
+      setExpenses(await expenseRepo.listExpenses());
       setExpLoadState("ready");
     } catch { /* silent — order data is still live */ }
     finally { expRefreshingRef.current = false; }
@@ -3160,7 +3167,7 @@ function RevenueTrend({
 }
 
 /* ---------- Expenses Today (owner-side read-only view) ---------- */
-// Shows today's purchase log from the same getExpenses() the staff form writes to.
+// Shows today's purchase log from the same expense feed the staff form writes to.
 // Amounts are displayed in vermillion (cost out) to visually contrast with gold revenue.
 // Gross sales figures are never touched here — expenses are always a separate section.
 
