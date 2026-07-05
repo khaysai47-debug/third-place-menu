@@ -320,6 +320,29 @@ owns it for the future path.
 6. Keep all writes on n8n until separately implemented and tested; intake
    (`submitOrder`) and menu availability migrate last, as before.
 
+## 9b. Phase 2B/2C preparation pass (built, nothing live changed)
+
+The safety rails for the path above now exist in-repo. `ACTIVE_DATA_SOURCE`
+is still `"n8n"`; none of this runs in production.
+
+- **Contracts** — `src/lib/data/contracts/orderContract.ts` /
+  `expenseContract.ts` / `adapterContract.ts`: the written data + behavior
+  contract any adapter must satisfy. They re-export the existing app types
+  (StaffOrder, Expense) rather than duplicating them, and export the
+  canonical vocabulary constants.
+- **Shared normalizers** — `src/lib/data/mappers/normalize.ts`:
+  normalizeMoney/Quantity/Timestamp/OrderStatus/PaymentStatus/PaymentMethod/
+  OrderType/DeliveryFields/CancellationFields. The Supabase mappers now
+  delegate to these; the live n8n mapper in staffOrders.ts is untouched.
+- **Parity validator** — `src/lib/data/dev/adapterParity.ts` (pure, dev-only,
+  imported by nothing): compareOrdersForParity / compareExpensesForParity /
+  summarizeParityResult. Procedure: `docs/adapter-parity-testing.md`.
+- **Discovery guide** — `docs/schema-discovery-guide.md`: step-by-step n8n
+  Cloud inspection for a non-backend person + fill-in worksheet. Every
+  unknown in code is marked `DISCOVERY_REQUIRED`.
+- **Runbook + risk register** — `docs/backend-separation-runbook.md`:
+  Phases 2B–2H with exit criteria, rollback plan, and a 10-item risk register.
+
 ---
 
 ## 10. Future Menu Management Architecture

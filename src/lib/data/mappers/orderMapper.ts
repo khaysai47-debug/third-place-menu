@@ -1,28 +1,39 @@
-// Supabase order row → app-facing StaffOrder mapper (Phase 2A).
+// Supabase order row → app-facing StaffOrder mapper (Phase 2A, hardened 2B-prep).
 //
 // NOT USED BY THE LIVE APP YET. The live n8n path keeps its own mapper inside
 // src/lib/staffOrders.ts (mapApiOrder) — including its done ⇄ "completed"
 // translation. This file centralizes the same rules for the FUTURE Supabase
 // read path, so the Phase 2B adapter is only: fetch rows → mapSupabaseOrderRows.
 //
+// The primitive rules (money, timestamps, closed vocabularies) live in
+// ./normalize.ts and the contract in ../contracts/orderContract.ts — this file
+// only owns the row shape and field wiring.
+//
 // ⚠ PROVISIONAL ROW SHAPE: no Supabase client, schema, or generated types
 // exist in this repo (verified Phase 2A inspection — see the map). The
 // SupabaseOrderRow below is a snake_case projection of the fields the app
 // needs (docs/backend-separation-map.md § "Phase 1 Data Shape Findings").
-// Phase 2B must align every column name with the real schema before use.
+// DISCOVERY_REQUIRED: Phase 2B must align every column name with the real
+// schema (worksheet: docs/schema-discovery-guide.md) before use.
 //
 // Parsing philosophy (identical to the live mapApiOrder): never trust the
 // row — unknown in, defensive defaults out. Unknown status → "new", unknown
 // order type → "dine_in", bad numbers → 0, empty strings → undefined/null.
 
-import type {
-  StaffOrder,
-  StaffOrderItem,
-  StaffOrderStatus,
-  StaffOrderType,
-  StaffPaymentMethod,
-  StaffPaymentStatus,
-} from "@/lib/staffOrders";
+import type { StaffOrder, StaffOrderItem, StaffOrderStatus } from "@/lib/staffOrders";
+import {
+  normalizeCancellationFields,
+  normalizeDeliveryFields,
+  normalizeMoney,
+  normalizeNullableString,
+  normalizeOptionalString,
+  normalizeOrderStatus,
+  normalizeOrderType,
+  normalizePaymentMethod,
+  normalizePaymentStatus,
+  normalizeQuantity,
+  normalizeTimestamp,
+} from "./normalize";
 
 /* ── Provisional row types — align with real schema in Phase 2B ─────────── */
 
@@ -56,11 +67,9 @@ export interface SupabaseOrderRow {
   items?: unknown;
 }
 
-/* ── Small parsers ──────────────────────────────────────────────────────── */
+/* ── Small local helpers ────────────────────────────────────────────────── */
 
 const asString = (v: unknown): string => (typeof v === "string" ? v : "");
-const asNumber = (v: unknown): number =>
-  typeof v === "number" && Number.isFinite(v) ? v : 0;
 
 /** HH:MM display time from an ISO timestamp — same rule as staffOrders.ts. */
 function formatTime(iso: string): string {
@@ -69,49 +78,25 @@ function formatTime(iso: string): string {
   return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
 }
 
-/* ── Status normalization — THE dangerous translation, centralized ──────── */
+/* ── Status write direction — THE dangerous translation ─────────────────── */
 
 // If the Supabase schema inherits Airtable's vocabulary, the database stores
-// "completed" where the app says "done". Phase 2B: verify the real schema and
-// set this flag accordingly. The READ direction is safe either way (both
-// spellings are accepted); this flag only affects the WRITE direction.
-export const DB_STATUS_USES_COMPLETED = false; // TODO(phase-2b): verify against real schema
-
-const UI_STATUSES: StaffOrderStatus[] = [
-  "new", "preparing", "ready", "out_for_delivery", "delivered", "done", "cancelled",
-];
-const ORDER_TYPES: StaffOrderType[] = ["dine_in", "pickup", "delivery"];
+// "completed" where the app says "done". DISCOVERY_REQUIRED (phase 2B): verify
+// the real schema and set this flag accordingly. The READ direction is safe
+// either way (normalizeOrderStatus accepts both spellings); this flag only
+// affects the WRITE direction.
+export const DB_STATUS_USES_COMPLETED = false;
 
 /** DB → app. Accepts both "done" and "completed"; unknown values → "new". */
-export function normalizeOrderStatusFromDb(value: unknown): StaffOrderStatus {
-  const raw = asString(value).toLowerCase();
-  if (raw === "completed") return "done";
-  return UI_STATUSES.includes(raw as StaffOrderStatus) ? (raw as StaffOrderStatus) : "new";
-}
+export const normalizeOrderStatusFromDb = normalizeOrderStatus;
 
 /** App → DB. Emits "completed" for done only if the schema demands it. */
 export function normalizeOrderStatusToDb(status: StaffOrderStatus): string {
   return DB_STATUS_USES_COMPLETED && status === "done" ? "completed" : status;
 }
 
-/* ── Payment normalization ──────────────────────────────────────────────── */
-
-/** Case-insensitive "paid"; anything else is unpaid — same as the live mapper. */
-export function normalizePaymentStatus(value: unknown): StaffPaymentStatus {
-  return asString(value).toLowerCase() === "paid" ? "paid" : "unpaid";
-}
-
-/**
- * Canonicalizes to the exact select values the app (and Airtable) use.
- * Case-insensitive on read (superset of the live mapper's exact match);
- * anything unrecognized is dropped to undefined, never invented.
- */
-export function normalizePaymentMethod(value: unknown): StaffPaymentMethod | undefined {
-  const raw = asString(value).toLowerCase();
-  if (raw === "cash") return "Cash";
-  if (raw === "transfer") return "Transfer";
-  return undefined;
-}
+/* Payment normalization moved to ./normalize.ts — re-exported for continuity. */
+export { normalizePaymentMethod, normalizePaymentStatus };
 
 /* ── Items ──────────────────────────────────────────────────────────────── */
 
@@ -119,16 +104,18 @@ export function normalizePaymentMethod(value: unknown): StaffPaymentMethod | und
  * Parses an items payload (jsonb array or joined rows) into StaffOrderItem[].
  * Accepts both snake_case (unit_price) and camelCase (unitPrice) line shapes.
  * Non-array input yields [] — an order never renders with phantom lines.
+ * DISCOVERY_REQUIRED: confirm whether items are a jsonb column on the orders
+ * table or a child table joined via select — and the exact line field names.
  */
 export function parseOrderItems(value: unknown): StaffOrderItem[] {
   if (!Array.isArray(value)) return [];
   return value.map((line) => {
     const l = (line ?? {}) as Record<string, unknown>;
     return {
-      id: asString(l.id) || undefined,
+      id: normalizeOptionalString(l.id),
       name: asString(l.name),
-      quantity: asNumber(l.quantity),
-      unitPrice: asNumber(l.unit_price ?? l.unitPrice),
+      quantity: normalizeQuantity(l.quantity),
+      unitPrice: normalizeMoney(l.unit_price ?? l.unitPrice),
     };
   });
 }
@@ -137,35 +124,39 @@ export function parseOrderItems(value: unknown): StaffOrderItem[] {
 
 /** Maps one provisional Supabase row to the stable app-facing StaffOrder. */
 export function mapSupabaseOrderRow(row: SupabaseOrderRow): StaffOrder {
-  const orderType = asString(row.order_type) as StaffOrderType;
-  const createdAt = asString(row.created_at);
+  const createdAt = normalizeTimestamp(row.created_at);
   return {
     // orderKey carrier — see adapters/types.ts. Field keeps its historical
     // name until a coordinated rename; only the data layer reads it as a key.
-    airtableRecordId: asString(row.id) || undefined,
+    airtableRecordId: normalizeOptionalString(row.id),
     orderId: asString(row.order_id),
-    orderType: ORDER_TYPES.includes(orderType) ? orderType : "dine_in",
-    tableNumber: asString(row.table_number) || null,
-    time: formatTime(createdAt),
-    createdAt: createdAt || undefined,
+    orderType: normalizeOrderType(row.order_type),
+    tableNumber: normalizeNullableString(row.table_number),
+    time: formatTime(createdAt ?? ""),
+    createdAt,
     items: parseOrderItems(row.items),
-    notes: asString(row.notes) || null,
-    totalPrice: asNumber(row.total_price),
-    customerName: asString(row.customer_name) || undefined,
-    customerPhone: asString(row.customer_phone) || undefined,
-    deliveryAddress: asString(row.delivery_address) || undefined,
-    subtotalPrice: asNumber(row.subtotal_price),
-    deliveryFee: asNumber(row.delivery_fee),
+    notes: normalizeNullableString(row.notes),
+    totalPrice: normalizeMoney(row.total_price),
+    ...normalizeDeliveryFields({
+      customerName: row.customer_name,
+      customerPhone: row.customer_phone,
+      deliveryAddress: row.delivery_address,
+      subtotalPrice: row.subtotal_price,
+      deliveryFee: row.delivery_fee,
+    }),
     status: normalizeOrderStatusFromDb(row.status),
     paymentStatus: normalizePaymentStatus(row.payment_status),
     paymentMethod: normalizePaymentMethod(row.payment_method),
-    paidAt: asString(row.paid_at) || undefined,
+    paidAt: normalizeTimestamp(row.paid_at),
+    // Contract: true or undefined, never false (UI truthiness convention).
     hasPaymentProof: row.has_payment_proof === true ? true : undefined,
-    paymentProofUrl: asString(row.payment_proof_url) || undefined,
-    paymentProofStatus: asString(row.payment_proof_status) || undefined,
-    paymentProofReceivedAt: asString(row.payment_proof_received_at) || undefined,
-    cancellationReason: asString(row.cancellation_reason) || undefined,
-    cancelledAt: asString(row.cancelled_at) || undefined,
+    paymentProofUrl: normalizeOptionalString(row.payment_proof_url),
+    paymentProofStatus: normalizeOptionalString(row.payment_proof_status),
+    paymentProofReceivedAt: normalizeTimestamp(row.payment_proof_received_at),
+    ...normalizeCancellationFields({
+      cancellationReason: row.cancellation_reason,
+      cancelledAt: row.cancelled_at,
+    }),
   };
 }
 

@@ -1,20 +1,28 @@
-// Supabase expense row → app-facing Expense mapper (Phase 2A).
+// Supabase expense row → app-facing Expense mapper (Phase 2A, hardened 2B-prep).
 //
 // NOT USED BY THE LIVE APP YET. The live n8n path keeps mapApiExpense inside
 // src/lib/expenses.ts. This mirrors its exact rules for the future Supabase
 // read path so Phase 2B is only: fetch rows → mapSupabaseExpenseRows.
+// Primitive rules come from ./normalize.ts; the contract is
+// ../contracts/expenseContract.ts.
 //
 // ⚠ PROVISIONAL ROW SHAPE: no Supabase schema exists in this repo (Phase 2A
 // inspection). Column names below follow the n8n API's snake_case fields,
-// which the backend presumably already stores. Align in Phase 2B.
+// which the backend presumably already stores. DISCOVERY_REQUIRED: align with
+// the real schema (worksheet: docs/schema-discovery-guide.md) in Phase 2B.
 
+import type { Expense, ExpenseCategory, ExpensePaidFrom } from "@/lib/expenses";
 import {
-  EXPENSE_CATEGORY_OPTIONS,
-  EXPENSE_PAID_FROM_OPTIONS,
-  type Expense,
-  type ExpenseCategory,
-  type ExpensePaidFrom,
-} from "@/lib/expenses";
+  EXPENSE_CATEGORY_VALUES,
+  EXPENSE_PAID_FROM_VALUES,
+  FALLBACK_CATEGORY,
+  FALLBACK_PAID_FROM,
+  FALLBACK_REVIEW_STATUS,
+} from "@/lib/data/contracts/expenseContract";
+import {
+  normalizeMoney,
+  normalizeNullableString,
+} from "./normalize";
 
 /** One expense row. Column names are PROVISIONAL (see header). */
 export interface SupabaseExpenseRow {
@@ -33,8 +41,6 @@ export interface SupabaseExpenseRow {
 }
 
 const asString = (v: unknown): string => (typeof v === "string" ? v : "");
-const asNumber = (v: unknown): number =>
-  typeof v === "number" && Number.isFinite(v) ? v : 0;
 
 /**
  * Maps one row to the stable Expense type with the live mapper's exact
@@ -48,13 +54,13 @@ export function mapSupabaseExpenseRow(row: SupabaseExpenseRow): Expense {
     id: asString(row.id),
     expenseId: asString(row.expense_id),
     itemName: asString(row.item_name),
-    amount: asNumber(row.amount),
-    paidFrom: EXPENSE_PAID_FROM_OPTIONS.includes(rawPaidFrom) ? rawPaidFrom : "Other",
-    category: EXPENSE_CATEGORY_OPTIONS.includes(rawCategory) ? rawCategory : "Other",
-    note: asString(row.note) || null,
+    amount: normalizeMoney(row.amount),
+    paidFrom: EXPENSE_PAID_FROM_VALUES.includes(rawPaidFrom) ? rawPaidFrom : FALLBACK_PAID_FROM,
+    category: EXPENSE_CATEGORY_VALUES.includes(rawCategory) ? rawCategory : FALLBACK_CATEGORY,
+    note: normalizeNullableString(row.note),
     createdAt: asString(row.created_at),
-    createdBy: asString(row.created_by) || null,
-    reviewStatus: asString(row.review_status) || "Pending",
+    createdBy: normalizeNullableString(row.created_by),
+    reviewStatus: asString(row.review_status) || FALLBACK_REVIEW_STATUS,
   };
 }
 
