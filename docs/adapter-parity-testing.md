@@ -136,6 +136,7 @@ the same way, which is a dev-only limitation, not a production bug.)
 | --- | --- | --- |
 | 2026-07-06 | ✅ PASS (normal AND `--strict`) | orders: 38/38 clean matches (incl. delivery, cancelled, transfer-paid, completed dine-in). expenses: 0 vs 0 — trivially equal; **must re-run on a day with real expense rows before this counts**. Strict timestamps passing means n8n passes Supabase timestamps through verbatim — no format note needed. |
 | 2026-07-06 (QA-1) | ✅ PASS after two fixes (normal AND `--strict`) | Real ฿1 test expense added via staff UI. First run: candidate 0 expenses — `expenses` lacked anon GRANT + RLS policy (added manually, see prerequisites). Second run: 3 field mismatches (`itemName`/`createdBy`/`id`) — the predicted n8n-output/frontend-mapper key drift; fixed in the live frontend mapper (see "Known differences"). Final: orders 38/38, expenses **1/1 clean**. Remaining coverage gap: payment proof only (QA-2). |
+| 2026-07-06 (QA-2 / flip gate) | ✅ PASS (normal AND `--strict`) — **FULL COVERAGE** | Test proof row inserted via the n8n Add Payment Proof webhook (keyed by `orders.id` UUID). `payment_proofs` anon SELECT + policy confirmed working. Result: orders **38/38 clean incl. proof fields**, expenses **1/1 clean**, coverage `orders=38 proofs=1 expenses=1` — **"all gate scenarios present ✓"** for the first time. This run plus QA-1 satisfied the parity portion of the Phase 2E gate; the read flip was executed the same day (owner decision — the original "second-day parity" item is absorbed into Phase 2F production stabilization, where reads are watched on live data for several service days anyway). |
 
 Still open before the Phase 2E flip: a second day of order data, an expenses
 run with real rows, a payment-proof order (none exist yet), and one walk of
@@ -170,7 +171,7 @@ Run log above.
    doesn't want it in reports. Deleting there removes it from BOTH read paths
    (n8n reads the same database).
 
-### QA-2 · Payment-proof parity
+### QA-2 · Payment-proof parity  ✅ DONE 2026-07-06 (see Run log)
 
 Verified facts (2026-07-06): there is NO production UI that adds a payment
 proof — the app only displays proof fields; the `third-place-add-payment-proof`
@@ -211,7 +212,13 @@ Invoke-RestMethod -Method Post -ContentType "application/json" `
    (find it by `source = 'parity-test'`; it has no child rows). Keep it until
    after the flip verification if convenient.
 
-### QA-3 · Second-day parity
+### QA-3 · Second-day parity  → absorbed into Phase 2F (owner decision, 2026-07-06)
+
+The flip proceeded on full same-day coverage; the second-day evidence now
+comes from Phase 2F stabilization: watch live reads for several service days
+and re-run `npm run parity` on at least one of them (writes still land via
+n8n, so the comparison stays meaningful until the n8n read webhooks retire).
+Original procedure kept below for those re-runs.
 
 1. On a different service day with fresh orders (ideally: ≥1 dine-in,
    ≥1 delivery, ≥1 cancelled, one cash-paid, one transfer-paid — the

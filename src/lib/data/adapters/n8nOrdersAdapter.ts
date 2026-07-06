@@ -1,4 +1,6 @@
-// OrderRepository backed by the existing n8n bridge — THE LIVE IMPLEMENTATION.
+// OrderRepository backed by the existing n8n bridge — the LIVE WRITE
+// implementation (reads flipped to Supabase in Phase 2E, 2026-07-06; this
+// adapter's listOrders stays as the parity reference and the rollback path).
 //
 // This adapter is a thin delegation layer: every method calls the exact
 // function the UI called before the repository layer existed, so behavior

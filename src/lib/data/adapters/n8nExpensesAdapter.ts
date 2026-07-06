@@ -1,4 +1,6 @@
-// ExpenseRepository backed by the existing n8n bridge — THE LIVE IMPLEMENTATION.
+// ExpenseRepository backed by the existing n8n bridge — the LIVE WRITE
+// implementation (reads flipped to Supabase in Phase 2E, 2026-07-06; this
+// adapter's listExpenses stays as the parity reference and the rollback path).
 // Thin delegation over src/lib/expenses.ts; behavior is identical to calling
 // getExpenses/addExpense directly.
 //

@@ -76,7 +76,12 @@ a payment-proof order, one walk of docs/adapter-contract-checklist.md.
   real data, including delivery / cancelled / transfer-paid / proof orders;
   every mismatch explained and fixed at the adapter (never in the UI).
 
-## Phase 2E — Flip READS only
+## Phase 2E — Flip READS only  *(FLIPPED 2026-07-06 — reads Supabase, writes n8n)*
+
+`ACTIVE_READ_SOURCE = "supabase"`, `ACTIVE_WRITE_SOURCE = "n8n"` as of the
+flip commit. Post-flip build/typecheck/parity/strict all passed. Deployed
+verification ("Test immediately after flipping" below) is the human step
+after the Vercel env vars are confirmed. Phase 2F stabilization starts now.
 
 ### Must ALL pass before flipping (gate)
 
@@ -89,28 +94,36 @@ tracks which scenarios are still unexercised.
       GRANT + RLS policy, and the n8n-output/frontend-mapper key drift was
       fixed in the live mapper (blank expense names repaired) — details in
       the parity doc's Run log + "Known differences".
-- [ ] **QA-2 payment-proof parity** — one proof row inserted via the n8n
-      Add Payment Proof webhook (order keyed by `orders.id` UUID), proof
-      fields matching on both sides. First real exercise of the n8n proof
-      output — mismatches here are fixed before flipping (risk register #6).
-- [ ] **QA-3 second-day parity** — `ok: true` both domains on a different
-      day of real data; coverage ideally shows dine-in + delivery +
-      cancelled + cash + transfer.
-- [ ] **QA-4 RLS/security review** — decision recorded; confirmed anon =
-      read-only SELECT on the four read tables, no anon writes, service_role
-      only inside n8n. (Full auth hardening is a separate pre-production
-      task, not part of the flip.)
-- [ ] One `{ strictTimestamps: true }` run passing, or a written note in the
-      parity doc explaining the accepted timestamp format difference.
-- [ ] Every parity mismatch adjudicated: adapter bugs fixed, upstream n8n
-      output gaps fixed in n8n (the expenses `itemName`/`createdBy`/row-key
-      gaps listed in the parity doc), nothing papered over in the UI.
-- [ ] Human checklist docs/adapter-contract-checklist.md walked once.
-- [ ] Vercel project env has ALL THREE (values from the password manager,
-      never from the repo): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
+- [x] **QA-2 payment-proof parity** — ✅ DONE 2026-07-06: proof row inserted
+      via the n8n webhook (keyed by `orders.id` UUID), proof fields clean on
+      both sides, coverage `proofs=1`; `payment_proofs` anon SELECT + policy
+      confirmed (risk register #6 closed).
+- [x] **QA-3 second-day parity** — absorbed into Phase 2F by owner decision
+      at flip time (2026-07-06): full same-day coverage was judged
+      sufficient; re-run `npm run parity` on a later service day during 2F
+      (n8n read webhooks stay alive, so the comparison remains meaningful).
+- [x] **QA-4 RLS/security review** — recorded 2026-07-06: anon = read-only
+      SELECT + `USING (true)` policies on all four read tables, NO anon
+      writes, service_role only inside n8n. ⚠️ Full auth/RLS hardening is a
+      separate pre-production task (parity doc QA-4) — still open, but not a
+      flip blocker.
+- [x] One `{ strictTimestamps: true }` run passing — multiple strict runs
+      passed, incl. the full-coverage flip-gate run.
+- [x] Every parity mismatch adjudicated — the QA-1 expense mapper drift was
+      fixed in the live frontend mapper (parity doc "Known differences");
+      no open mismatches.
+- [x] Contract checklist — superseded by the machine parity checks, which
+      compare every field the checklist lists, on full coverage (owner
+      decision at flip time; docs/adapter-contract-checklist.md remains for
+      reference).
+- [ ] **HUMAN STEP AT DEPLOY:** Vercel project env has ALL THREE (values
+      from the password manager, never from the repo — template:
+      `.env.example`): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
       (anon public key — NEVER service_role/sb_secret), and the existing
       `VITE_N8N_BASE_URL` (writes still go to n8n after the flip!).
-- [ ] `npm run build` and `npm run typecheck` pass.
+      ⚠️ After the flip, a deploy WITHOUT the two Supabase vars breaks every
+      dashboard read (clear error + retry UI, but broken nonetheless).
+- [x] `npm run build` and `npm run typecheck` pass (re-verified at flip).
 
 ### The flip itself (one small commit)
 
@@ -155,11 +168,17 @@ done as Phase 2E prep). The flip is:
 - n8n URLs/slugs (`src/lib/n8n.ts`), owner manual-refresh, staff 5s poll.
 - Menu availability (stays on n8n until its own phase).
 
-### Rollback (instant)
+### Rollback (instant, exact steps)
 
-- Set `ACTIVE_READ_SOURCE` back to `"n8n"` in `src/lib/data/dataSource.ts`,
-  redeploy. The n8n read webhooks stay alive until Phase 2H exactly for this.
-- Capture what forced the rollback in the risk register before retrying.
+1. In `src/lib/data/dataSource.ts`: set `ACTIVE_READ_SOURCE = "n8n"`.
+2. `ACTIVE_WRITE_SOURCE` is already `"n8n"` — leave it.
+3. `npm run build`
+4. `npm run typecheck`
+5. `git commit`
+6. `git push` / redeploy on Vercel.
+
+The n8n read webhooks stay alive until Phase 2H exactly for this. Capture
+what forced the rollback in the risk register before retrying.
 
 ## Phase 2F — Production-like read testing
 

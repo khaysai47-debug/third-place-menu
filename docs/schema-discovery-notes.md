@@ -219,11 +219,11 @@ Dine-in completed order: `order_type: dine_in`, `status: completed`,
 
 ## Unknown / risky fields
 - RLS status: RESOLVED for reads (2026-07-06) — anon `GRANT SELECT` +
-  permissive SELECT RLS policies (`USING (true)`) added manually on `orders`,
-  `order_items`, AND `expenses` (the expenses one was found missing during
-  QA-1: it returned 200 with rows RLS-filtered to empty — a silent failure
-  mode to remember). `payment_proofs` readability gets verified in QA-2.
-  No anon write grants exist (keep it that way).
+  permissive SELECT RLS policies (`USING (true)`) exist on ALL FOUR read
+  tables: `orders`, `order_items`, `expenses` (found missing during QA-1 —
+  it returned 200 with rows RLS-filtered to empty, a silent failure mode to
+  remember), and `payment_proofs` (verified working in QA-2 with a real
+  proof row). No anon write grants exist (keep it that way).
   ⚠️ Full security posture still needs review before real restaurant use.
 - `payment_proofs`: no real rows observed yet.
 - `preparing` / `ready` / `out_for_delivery`: accepted by n8n, not yet seen
