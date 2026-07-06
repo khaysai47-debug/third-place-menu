@@ -1,0 +1,57 @@
+# n8n Write Workflow Side-Effect Audit — Phase 2G-B
+
+**Purpose:** before any normal-app write moves off n8n, know whether the n8n
+workflow does anything BESIDES the database write (notifications, bot
+messages, social replies, secondary writes). A workflow that only writes the
+DB can be replaced by a server route 1:1; anything else needs its side effect
+duplicated or re-pointed first (recommendation B).
+
+**Evidence base (2026-07-06):** the Phase 2B discovery walked every workflow
+node-by-node (docs/schema-discovery-notes.md) and recorded ONLY webhook →
+mapping → Supabase-REST → respond chains — no notification, message, bot, or
+social nodes were reported in ANY of the nine Third Place workflows, and no
+bot/notification workflows were found in the account at all (those arrive in
+Phase 3). Live webhook behavior matches. Because n8n workflows can change
+outside this repo, each row still carries a **CONFIRM** checkbox: before
+migrating that write, open the workflow in n8n Cloud and spend 60 seconds
+verifying the node list still matches. If a new side-effect node appeared,
+the recommendation flips to B for that workflow.
+
+## Write workflows
+
+| # | Workflow | Webhook path | Method | Table(s) | Columns written | DB-only? | Bot/social/payment side effect | Breaks automation if moved? | Rec. | Confirm in n8n |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 1 | Order Intake API (Supabase Test) | `third-place-order-test` | POST | `orders` + `order_items` | orders: order_number, order_type, status("new"), table_number, customer_name/phone/address, customer_note, source("customer_menu"), subtotal, delivery_fee, total, payment_method(null) · items: order_id, item_code, item_name, quantity, unit_price, line_total, note(null) | ✅ per 2B discovery | none today; Phase 3 bots/notifications WILL attach here | No (today). Phase 3 must attach to the new path or the kept n8n webhook | **A** — safe to move now, but keep the n8n webhook alive for Phase 3 bots; plan the automation bridge (write-separation-plan § automation bridge) | [ ] |
+| 2 | Update Order Status API | `third-place-update-order-status` | POST | `orders` | status; if "cancelled": cancellation_reason (default "Other") + cancelled_at=now; else both reset to null. Match: order_number | ✅ per 2B discovery | none observed | No | **A** | [ ] |
+| 3 | Update Payment API | `third-place-update-payment` | POST | `orders` | payment_status (default "paid" lc), payment_method, paid_at=now ISO. Match: order_number | ✅ per 2B discovery | none observed | No | **A** | [ ] |
+| 4 | Add Expense API | `third-place-add-expense` | POST | `expenses` | expense_date (Bangkok yyyy-MM-dd), category (def "Other"), description (← item_name/note), amount (Number), payment_method (← paid_from, def "Other"), staff_name (def "Staff"), note | ✅ per 2B discovery | none observed | No | **A** | [ ] |
+| 5 | Update Menu Availability API | `third-place-update-menu-availability` | POST | `menu_items` | is_available ← (availabilityStatus === "Available"). Match: item_code | ✅ per 2B discovery | none observed | No — but resolve the boolean vs 3-state (Hidden) gap first (plan W6) | **A** (after the schema-gap check) | [ ] |
+| 6 | Add Payment Proof API | `third-place-add-payment-proof` | POST | `payment_proofs` | order_id (orders.id UUID), proof_url, proof_file_path(def ""), source(def "manual-test"), status(def "received"), note(def "") | ✅ per 2B discovery | none today — but this IS the Phase 3 bot flow's write | n/a — not moving | **C — stays n8n permanently** (no app caller exists; verified) | [ ] |
+
+No other Third Place write workflows were found in the 2B discovery (the
+remaining three — Staff Orders, Get Expenses, Menu Availability — are READ
+workflows; the first two are already replaced by Supabase reads and retire in
+Phase 2H, the menu read moves in 2G-E).
+
+## Current app callers (repo-verified 2026-07-06)
+
+| Action | Caller → function | n8n webhook | Via repository layer? |
+| --- | --- | --- | --- |
+| Customer order submit | `CheckoutDrawer.tsx` → `submitOrder()` (orders.ts) | order-test | No (deliberate — intake documented as later phase) |
+| Staff manual order | `ManualOrderForm.tsx` → `submitOrder()` | order-test | No (same) |
+| Staff status update | staff board → repo `updateOrderStatus` → `updateStaffOrderStatus()` | update-order-status | Yes |
+| Staff cancel | staff board → repo `cancelOrder` → same function, status "cancelled" | update-order-status | Yes |
+| Staff mark paid | staff board → repo `updateOrderPayment` → `updateOrderPayment()` | update-payment | Yes |
+| Staff add expense | ExpenseView → repo `addExpense` → `addExpense()` (expenses.ts) | add-expense | Yes |
+| Menu availability update | `MenuAvailabilityBoard.tsx` → `updateMenuAvailability()` | update-menu-availability | No |
+| Payment proof add | — none in app (display only) | add-payment-proof | n/a |
+| Menu availability READ | customer menu `index.tsx`, `MenuAvailabilityBoard`, `ManualOrderForm` → `getMenuAvailability()` | menu-availability (GET) | No — still n8n; moves in 2G-E |
+
+## Bottom line
+
+All five normal-op write workflows are DB-only today → recommendation **A**
+across the board, with the per-workflow CONFIRM checkbox as the last look
+before each migration. The only long-term n8n write is payment proof (#6).
+The automation-bridge design exists for when Phase 3 adds notifications —
+nothing needs duplicating today, which makes this the cheapest possible
+moment to move the writes.

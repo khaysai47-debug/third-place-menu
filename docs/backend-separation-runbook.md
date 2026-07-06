@@ -196,15 +196,22 @@ six normal-op writes W1–W6, one automation write W7 that stays on n8n
 forever, plus R1 — menu-availability READS, incl. the customer menu, still
 on n8n and bundled into 2G-E).
 
-- Recommended write path (confirm in 2G-B): **server API routes inside this
+- Write path (DECIDED 2G-B, 2026-07-06): **server API routes inside this
   app** (TanStack Start already ships a nitro server on Vercel) — write key
-  stays server-side, payloads validated, staff writes behind a shared staff
-  secret. Anon key remains read-only forever; no broad anon write grants.
-- Checklist: 2G-A audit ✅ → 2G-B choose write path → 2G-C order submit
+  stays server-side (`SUPABASE_SERVICE_ROLE_KEY`, never `VITE_*`), payloads
+  validated, staff writes behind a shared staff secret
+  (`STAFF_WRITE_SECRET`, `x-staff-secret` header). Anon key remains
+  read-only forever; no broad anon write grants.
+- Side-effect audit (docs/n8n-workflow-side-effects.md, 2G-B): all five
+  normal-op write workflows are DB-only today — no notifications/bot nodes
+  exist yet, so nothing needs duplicating; a 60-second CONFIRM check in n8n
+  precedes each individual migration. Payment proof stays n8n permanently.
+- Checklist: 2G-A audit ✅ → 2G-B write path ✅ → 2G-C order submit
   (implement AFTER 2G-D unless intake automation is re-pointed — intake is
-  the automation-entangled write) → 2G-D staff order actions → 2G-E
-  expenses + menu availability (write + read) → 2G-F automation stays in
-  n8n → 2G-G write smoke test + parity re-run.
+  the automation-entangled write; today none exists, but confirm at
+  migration time) → 2G-D staff order actions → 2G-E expenses + menu
+  availability (write + read) → 2G-F automation stays in n8n → 2G-G write
+  smoke test + parity re-run.
 - Every write keeps the never-throw `{ success, error? }` contract. Orders
   are keyed by `order_number` (TP-…), menu items by `item_code` — never by
   row UUID from the frontend.

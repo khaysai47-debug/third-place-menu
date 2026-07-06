@@ -178,11 +178,88 @@ Rollback, per write: `ACTIVE_WRITE_SOURCE` back to `"n8n"` (or the
 per-write switch if split), build, deploy. The n8n write webhooks stay
 untouched and alive until every write is proven — same doctrine as reads.
 
+## 2G-B DECISION RECORD (2026-07-06)
+
+**Write path: Option 4 confirmed** — TanStack Start / Nitro server routes
+inside this app, deployed with the existing Vercel deployment. Side-effect
+audit (docs/n8n-workflow-side-effects.md): all five normal-op write
+workflows are DB-only today — recommendation A across the board; payment
+proof stays n8n permanently. A 60-second per-workflow CONFIRM check in n8n
+remains before each individual migration.
+
+### Server env var names (placeholders — values NEVER in the repo)
+
+| Name | Where | Purpose |
+| --- | --- | --- |
+| `SUPABASE_SERVICE_ROLE_KEY` | Vercel server env + `.env.local` (dev), server-only | Write-capable key used ONLY inside server routes |
+| `STAFF_WRITE_SECRET` | same, server-only | Shared secret staff devices must present for staff writes |
+| `N8N_AUTOMATION_SECRET` | same, server-only, OPTIONAL/later | Auth for server→n8n automation callbacks (Phase 3 bridge) |
+
+The Supabase URL itself can be read from the existing `VITE_SUPABASE_URL`
+(it is public by nature and already ships in the client bundle).
+
+**Why these must NOT be `VITE_*`:** Vite statically inlines every
+`import.meta.env.VITE_*` value into the CLIENT bundle at build time — a
+`VITE_` prefix ships the value to every browser that loads the page. The
+three names above must be read via `process.env` on the Nitro server only,
+where they never enter any client artifact. Rule of thumb: `VITE_` = public
+by definition; anything secret gets a bare name.
+
+### Staff secret UX (MVP)
+
+- **Provisioning:** owner sets `STAFF_WRITE_SECRET` in Vercel; tells staff
+  the PIN/phrase verbally. One shared secret for the whole shop (per-person
+  accounts are post-MVP; Supabase Auth is the upgrade path).
+- **Entry:** the staff page prompts once for the secret (tiny settings
+  prompt, added in 2G-D) and stores it in `localStorage` on the staff iPad.
+- **Transport:** every staff write sends it as an `x-staff-secret` header;
+  server routes compare against `process.env.STAFF_WRITE_SECRET` and reject
+  with 401 otherwise. Always HTTPS on Vercel.
+- **Exposure surface:** never in the repo, never in the bundle; it lives on
+  the staff device and in transit inside TLS. It is NOT sent on customer
+  routes (order submit is public and secretless).
+- **Realistic MVP risk:** anyone with physical access to the staff device
+  is "staff"; a leaked PIN requires rotating one Vercel env var. Both are
+  acceptable for a single-shop MVP and strictly better than today, where
+  the write webhooks are public URLs needing no secret at all.
+
+### Design confirmations for the implementation phases
+
+- **Customer order submit (2G-C):** PUBLIC server route (no staff secret).
+  Server validates item codes against `menu_items`, RE-COMPUTES unit prices,
+  line totals, subtotal, delivery fee and total server-side — client-sent
+  money values are treated as display hints, never trusted. Writes `orders`
+  + `order_items` (atomicity: prefer a single Postgres RPC
+  `create_order(...)`; decide in 2G-C — n8n today does two sequential
+  inserts, so an RPC is an improvement, not a regression).
+- **Staff writes (2G-D/E):** status / cancel / mark-paid / add-expense /
+  menu-availability routes all require the `x-staff-secret` header. Same
+  column mappings and defaults the n8n workflows apply today (§ 1 tables).
+- **Menu availability read (2G-E):** moves to the direct Supabase read path
+  (anon SELECT + `USING (true)` policy on `menu_items`) — the customer menu
+  must not depend on n8n. Watch for the 200-but-empty RLS failure mode.
+
+### Automation bridge (design only — DO NOT implement now)
+
+When Phase 3 adds notifications/bots that today would have hung off n8n
+writes, the options are:
+
+| Approach | Notes |
+| --- | --- |
+| **Server route calls an n8n automation webhook after a successful write** | ✅ RECOMMENDED first: explicit, no new infra, testable, auth via `N8N_AUTOMATION_SECRET`; fire-and-forget so a slow n8n never blocks the write |
+| Supabase Database Webhooks (DB trigger → n8n) | Most robust (fires no matter who wrote); good second step; config lives in Supabase, mind auth + retries |
+| n8n scheduled polling | Simple but laggy and wasteful; only for non-urgent digests (daily summary) |
+| Supabase Realtime | Post-MVP; needs a persistent listener — n8n Cloud isn't one |
+
 ## 5. Phase 2G checklist
 
 - [x] **2G-A — audit complete** (this document, 2026-07-06).
-- [ ] **2G-B — choose write path**: confirm Option 4 (server routes) +
-      staff-secret design + server env var names; record the decision here.
+- [x] **2G-B — write path chosen** (2026-07-06): Option 4 server routes;
+      env names, staff-secret UX, automation bridge recorded above;
+      side-effect audit in docs/n8n-workflow-side-effects.md — all
+      normal-op writes are DB-only (rec. A), payment proof stays n8n.
+      Remaining: the per-workflow CONFIRM checkbox in n8n right before each
+      write's migration.
 - [ ] **2G-C — customer order submit** (W1): server route with
       server-recomputed totals; intake automation re-pointed or deliberately
       dual-fired. NOTE: despite the C-before-D numbering, implement AFTER
