@@ -16,8 +16,13 @@ VITE_SUPABASE_ANON_KEY=<anon public key — NEVER the service_role key>
 2. The anon role must be able to SELECT the four read tables.
    ✅ DONE 2026-07-06: `GRANT SELECT ON public.orders TO anon;` and
    `GRANT SELECT ON public.order_items TO anon;` were executed, plus
-   anon SELECT RLS policies (`USING (true)`) on both tables, for read parity
-   testing. `payment_proofs` and `expenses` were already readable.
+   anon SELECT RLS policies (`USING (true)`) on both tables.
+   `expenses` ALSO needed the same treatment (found during QA-1 — it
+   returned 200 with rows silently filtered to empty until
+   `GRANT SELECT ON public.expenses TO anon;` and policy
+   `anon_select_expenses_for_parity FOR SELECT TO anon USING (true)` were
+   added). Lesson: a 200-with-empty-rows can be missing grants/RLS, not
+   missing data. `payment_proofs` readability gets its real test in QA-2.
    (Security note: anon SELECT means anyone with the public anon key can read
    order data. This is equivalent exposure to the existing public n8n
    staff-orders GET webhook, so nothing new — but the whole RLS/security
@@ -77,21 +82,24 @@ way; use the browser path only if n8n CORS is ever opened for localhost.
 served from an origin n8n accepts — local `/staff` against n8n Cloud fails
 the same way, which is a dev-only limitation, not a production bug.)
 
-## Known differences to expect on the first run
+## Known differences — status
 
-Adjudicate these per step 5 below — they are documented, not surprises:
-
-- **Expenses `itemName` / `createdBy` / `id(rowKey)`**: discovery found the
-  current n8n Get Expenses output emits `description`/`staff_name` keys and no
-  `id`/`item_name`/`created_by`, while the frontend mapper reads the latter —
-  so the n8n reference may show `itemName: ""`, `createdBy: null`, and a
-  missing row key. The Supabase adapter maps the real columns
-  (`description` → itemName, `staff_name` → createdBy, `id` → row key), which
-  is the *correct* data. If parity flags these, the fix is in the n8n Get
-  Expenses output mapping (upstream), not in the Supabase adapter.
+- **Expenses `itemName` / `createdBy` / `id(rowKey)`** — PREDICTED, then
+  CONFIRMED and FIXED during QA-1 (2026-07-06). The Supabase-backed n8n Get
+  Expenses output emits `expense_id`/`description`/`staff_name` and no
+  `id`/`item_name`/`created_by` (verified against the live webhook), so the
+  frontend's Airtable-era mapper rendered blank expense names and empty React
+  list keys IN THE LIVE APP. Resolution: the fix went into the live frontend
+  mapper (`mapApiExpense` in src/lib/expenses.ts) — additive fallbacks
+  `id ← id || expense_id`, `itemName ← item_name || description`,
+  `createdBy ← created_by || staff_name` — because staff/owner UIs display
+  itemName and key lists by id. This repaired the live display regression AND
+  made both adapters emit identical real values. The Supabase adapter was NOT
+  dumbed down to match broken output.
 - **Order item ordering**: the Supabase adapter orders lines by
   `order_items.created_at`; if n8n emits a different line order, per-index
-  item mismatches appear even though the sets are identical.
+  item mismatches appear even though the sets are identical. (Not observed in
+  any run so far.)
 
 ## Full procedure (do all six, in order)
 
@@ -127,6 +135,7 @@ Adjudicate these per step 5 below — they are documented, not surprises:
 | Date | Result | Notes |
 | --- | --- | --- |
 | 2026-07-06 | ✅ PASS (normal AND `--strict`) | orders: 38/38 clean matches (incl. delivery, cancelled, transfer-paid, completed dine-in). expenses: 0 vs 0 — trivially equal; **must re-run on a day with real expense rows before this counts**. Strict timestamps passing means n8n passes Supabase timestamps through verbatim — no format note needed. |
+| 2026-07-06 (QA-1) | ✅ PASS after two fixes (normal AND `--strict`) | Real ฿1 test expense added via staff UI. First run: candidate 0 expenses — `expenses` lacked anon GRANT + RLS policy (added manually, see prerequisites). Second run: 3 field mismatches (`itemName`/`createdBy`/`id`) — the predicted n8n-output/frontend-mapper key drift; fixed in the live frontend mapper (see "Known differences"). Final: orders 38/38, expenses **1/1 clean**. Remaining coverage gap: payment proof only (QA-2). |
 
 Still open before the Phase 2E flip: a second day of order data, an expenses
 run with real rows, a payment-proof order (none exist yet), and one walk of
@@ -140,7 +149,7 @@ Work through these in order; each ends with a parity run whose `[coverage]`
 block should show the corresponding gap disappearing. Log each result in the
 Run log above.
 
-### QA-1 · Real-expense parity
+### QA-1 · Real-expense parity  ✅ DONE 2026-07-06 (see Run log)
 
 1. Open the deployed staff page → Expenses view, and add a small expense
    through the normal form: item name `PARITY TEST — safe to delete`,

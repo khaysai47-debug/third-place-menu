@@ -84,8 +84,11 @@ Exact procedures for the first four: docs/adapter-parity-testing.md
 § "Final pre-flip QA" (QA-1…QA-4). The parity runner's `[coverage]` block
 tracks which scenarios are still unexercised.
 
-- [ ] **QA-1 real-expense parity** — expenses ≥1/1 matching (normal and
-      `--strict`), added through the staff Expenses UI.
+- [x] **QA-1 real-expense parity** — ✅ DONE 2026-07-06: expenses 1/1 clean
+      (normal and `--strict`). Along the way: `expenses` needed its own anon
+      GRANT + RLS policy, and the n8n-output/frontend-mapper key drift was
+      fixed in the live mapper (blank expense names repaired) — details in
+      the parity doc's Run log + "Known differences".
 - [ ] **QA-2 payment-proof parity** — one proof row inserted via the n8n
       Add Payment Proof webhook (order keyed by `orders.id` UUID), proof
       fields matching on both sides. First real exercise of the n8n proof

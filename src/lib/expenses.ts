@@ -69,17 +69,22 @@ export interface AddExpensePayload {
 
 export type AddExpenseResult = { success: true } | { success: false; error: string };
 
-/** Raw shape returned by the n8n Get Expenses API — all fields unknown. */
+/** Raw shape returned by the n8n Get Expenses API — all fields unknown.
+ * The Supabase-backed API (verified live 2026-07-06) emits expense_id /
+ * description / staff_name and no id / item_name / created_by / review_status;
+ * the older Airtable-era keys are kept as fallbacks. */
 interface ApiExpense {
   id?: unknown;
   expense_id?: unknown;
   item_name?: unknown;
+  description?: unknown;
   amount?: unknown;
   paid_from?: unknown;
   category?: unknown;
   note?: unknown;
   created_at?: unknown;
   created_by?: unknown;
+  staff_name?: unknown;
   review_status?: unknown;
 }
 
@@ -91,15 +96,20 @@ function mapApiExpense(raw: ApiExpense): Expense {
   const rawPaidFrom = asString(raw.paid_from) as ExpensePaidFrom;
   const rawCategory = asString(raw.category) as ExpenseCategory;
   return {
-    id: asString(raw.id),
+    // The Supabase-backed API emits no plain `id` — the row UUID arrives as
+    // expense_id. Falling back keeps React list keys unique (key="" bug).
+    id: asString(raw.id) || asString(raw.expense_id),
     expenseId: asString(raw.expense_id),
-    itemName: asString(raw.item_name),
+    // Display name lives in `description` on the Supabase-backed API
+    // (item_name was the Airtable-era key; without this fallback the staff
+    // and owner expense lists render blank names).
+    itemName: asString(raw.item_name) || asString(raw.description),
     amount: asNumber(raw.amount),
     paidFrom: EXPENSE_PAID_FROM_OPTIONS.includes(rawPaidFrom) ? rawPaidFrom : "Other",
     category: EXPENSE_CATEGORY_OPTIONS.includes(rawCategory) ? rawCategory : "Other",
     note: asString(raw.note) || null,
     createdAt: asString(raw.created_at),
-    createdBy: asString(raw.created_by) || null,
+    createdBy: asString(raw.created_by) || asString(raw.staff_name) || null,
     reviewStatus: asString(raw.review_status) || "Pending",
   };
 }
