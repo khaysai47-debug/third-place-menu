@@ -1,7 +1,7 @@
 // OrderRepository backed by Supabase — READS IMPLEMENTED (Phase 2C),
 // writes still deliberately stubbed until Phase 2G.
 //
-// NOT USED BY THE LIVE APP while ACTIVE_DATA_SOURCE is "n8n"
+// NOT USED BY THE LIVE APP while ACTIVE_READ_SOURCE is "n8n"
 // (src/lib/data/dataSource.ts). listOrders() is callable directly for the
 // Phase 2D parity procedure (docs/adapter-parity-testing.md); nothing flips
 // before parity passes.

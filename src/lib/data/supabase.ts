@@ -11,7 +11,7 @@
 //
 // Env is read lazily inside the request, so importing this module — and
 // building/running the app — without Supabase env stays safe while
-// ACTIVE_DATA_SOURCE is "n8n". Calling it without env throws a clear
+// ACTIVE_READ_SOURCE is "n8n". Calling it without env throws a clear
 // developer error. Reads THROW on failure (repository contract: the UI has
 // retry states for reads).
 
@@ -21,7 +21,7 @@ export async function supabaseSelect<T>(table: string, query: string): Promise<T
   if (!url || !key) {
     throw new Error(
       "Supabase is not configured: set VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in " +
-        '.env.local (anon key only — never service_role). ACTIVE_DATA_SOURCE stays "n8n" ' +
+        '.env.local (anon key only — never service_role). ACTIVE_READ_SOURCE stays "n8n" ' +
         "until Phase 2E, so the live app is unaffected.",
     );
   }

@@ -11,8 +11,8 @@
 //   await m.runAdapterParity({ strictTimestamps: true });
 //
 // Prerequisites: VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY in .env.local
-// (anon key only). ACTIVE_DATA_SOURCE stays "n8n" the whole time — calling
-// the inactive Supabase adapter directly is the point.
+// (anon key only). ACTIVE_READ_SOURCE / ACTIVE_WRITE_SOURCE stay "n8n" the
+// whole time — calling the inactive Supabase adapter directly is the point.
 // Full procedure + pass criteria: docs/adapter-parity-testing.md.
 
 import { n8nOrdersAdapter } from "@/lib/data/adapters/n8nOrdersAdapter";

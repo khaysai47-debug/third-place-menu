@@ -1,6 +1,6 @@
 // Supabase order row → app-facing StaffOrder mapper (Phase 2C — real schema).
 //
-// NOT USED BY THE LIVE APP while ACTIVE_DATA_SOURCE is "n8n". The live n8n
+// NOT USED BY THE LIVE APP while ACTIVE_READ_SOURCE is "n8n". The live n8n
 // path keeps its own mapper inside src/lib/staffOrders.ts (mapApiOrder) —
 // including its done ⇄ "completed" translation. This file centralizes the same
 // rules for the Supabase read path: fetch rows → assemble → mapSupabaseOrderRows.

@@ -1,6 +1,6 @@
 // Supabase expense row → app-facing Expense mapper (Phase 2C — real schema).
 //
-// NOT USED BY THE LIVE APP while ACTIVE_DATA_SOURCE is "n8n". The live n8n
+// NOT USED BY THE LIVE APP while ACTIVE_READ_SOURCE is "n8n". The live n8n
 // path keeps mapApiExpense inside src/lib/expenses.ts. Primitive rules come
 // from ./normalize.ts; the contract is ../contracts/expenseContract.ts.
 //

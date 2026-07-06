@@ -7,7 +7,10 @@ contracts in `src/lib/data/contracts/`; parity procedure in
 
 **Standing rules for every phase below:**
 
-- `ACTIVE_DATA_SOURCE` stays `"n8n"` until Phase 2E, and only reads flip then.
+- The data-source switch is SPLIT (Phase 2E prep): `ACTIVE_READ_SOURCE` stays
+  `"n8n"` until the Phase 2E gate passes, and only reads flip then;
+  `ACTIVE_WRITE_SOURCE` stays `"n8n"` until Phase 2G — NEVER set it to
+  "supabase" while the Supabase write methods are stubs.
 - No n8n URL/slug changes at any point (`src/lib/n8n.ts` is live production).
 - Owner dashboard stays manual-refresh-only; staff keeps its 5s poll. Polling
   changes are product decisions, never migration side effects.
@@ -32,7 +35,7 @@ contracts in `src/lib/data/contracts/`; parity procedure in
   deliberately **no `@supabase/supabase-js` dependency** (two REST reads don't
   justify it; revisit at Phase 2G if writes/auth/realtime demand the SDK).
   Env is read lazily per-request, so the app builds and runs without Supabase
-  env while `ACTIVE_DATA_SOURCE` is `"n8n"`; calling the adapter without env
+  env while `ACTIVE_READ_SOURCE` is `"n8n"`; calling the adapter without env
   throws a clear developer error.
 - Env vars (in `.env.local`, values never committed):
   `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (anon key ONLY — the
@@ -44,7 +47,7 @@ contracts in `src/lib/data/contracts/`; parity procedure in
   working during the mixed phase (Supabase reads + n8n writes).
 - ONLY `listOrders()` and `listExpenses()` implemented (reads throw on
   failure). All writes remain `AdapterNotImplementedError` stubs.
-- `ACTIVE_DATA_SOURCE` remains `"n8n"` — production is untouched by this commit.
+- The data-source switch remains `"n8n"` — production is untouched by this commit.
 - Exit criteria: app builds; live app behavior unchanged; Supabase reads
   callable directly in dev. ✓
 
@@ -57,9 +60,9 @@ Supabase-side setup done for read parity: `GRANT SELECT` + permissive anon
 SELECT RLS policies (`USING (true)`) on `orders` and `order_items`.
 ⚠️ Revisit the RLS/security posture before real restaurant use — current anon
 read exposure equals the existing public n8n staff-orders GET, but it was
-enabled for testing, not decided for production. `ACTIVE_DATA_SOURCE` remains
-`"n8n"`; reads flip only via the Phase 2E gate below; writes stay on n8n
-until Phase 2G.
+enabled for testing, not decided for production. `ACTIVE_READ_SOURCE` and
+`ACTIVE_WRITE_SOURCE` remain `"n8n"`; reads flip only via the Phase 2E gate
+below; writes stay on n8n until Phase 2G.
 
 Remaining before the 2E gate: second day of data, expenses with real rows,
 a payment-proof order, one walk of docs/adapter-contract-checklist.md.
@@ -94,16 +97,24 @@ a payment-proof order, one walk of docs/adapter-contract-checklist.md.
 
 ### The flip itself (one small commit)
 
-1. In `src/lib/data/dataSource.ts`: **split the switch first** — reads flip,
-   writes don't. Replace the single constant with e.g.
-   `READ_DATA_SOURCE = "supabase"` and `WRITE_DATA_SOURCE = "n8n"`, and route
-   repository read methods by the read switch, write methods by the write
-   switch. Do NOT flip one shared constant: the Supabase write methods are
-   throwing stubs, so a shared flip breaks every staff action.
-2. Nothing to delete: the parity runner lives in `src/lib/data/dev/` and is
+The read/write switch split already exists (`src/lib/data/dataSource.ts`,
+done as Phase 2E prep). The flip is:
+
+1. Set `ACTIVE_READ_SOURCE = "supabase"` in `src/lib/data/dataSource.ts`.
+   `ACTIVE_WRITE_SOURCE` stays `"n8n"` — do NOT touch it; the Supabase write
+   methods are throwing stubs, so flipping it breaks every staff action.
+2. `npm run build` and `npm run typecheck` must pass.
+3. Local smoke test (`npm run dev`): staff board, owner dashboard (manual
+   refresh), customer menu render; a status update still works (n8n write).
+   Note: local reads-from-Supabase work, but local n8n reads are CORS-blocked
+   — the write actions are the thing to verify locally.
+4. Ensure `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` are set in the
+   production build environment / Vercel project settings (anon key only —
+   never service_role). Deploy.
+5. Verify on the deployed Vercel app: run the "Test immediately after
+   flipping" list below.
+6. Nothing to delete: the parity runner lives in `src/lib/data/dev/` and is
    imported by nothing in the app, so it ships nowhere.
-3. Deploy needs `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` set in the
-   production build environment (anon key only — never service_role).
 
 ### Test immediately after flipping
 
@@ -126,7 +137,7 @@ a payment-proof order, one walk of docs/adapter-contract-checklist.md.
 
 ### Rollback (instant)
 
-- Set the read switch back to `"n8n"` in `src/lib/data/dataSource.ts`,
+- Set `ACTIVE_READ_SOURCE` back to `"n8n"` in `src/lib/data/dataSource.ts`,
   redeploy. The n8n read webhooks stay alive until Phase 2H exactly for this.
 - Capture what forced the rollback in the risk register before retrying.
 
@@ -166,8 +177,9 @@ a payment-proof order, one walk of docs/adapter-contract-checklist.md.
 
 ## Rollback plan (any phase, any time)
 
-1. Set `ACTIVE_DATA_SOURCE` back to `"n8n"` in `src/lib/data/dataSource.ts`
-   (one line; if the switch was split, revert each flipped part).
+1. Set `ACTIVE_READ_SOURCE` back to `"n8n"` in `src/lib/data/dataSource.ts`
+   (one line; if `ACTIVE_WRITE_SOURCE` was ever flipped too — Phase 2G+ —
+   revert it the same way).
 2. Redeploy. Nothing else changes — the n8n adapters were never modified.
 3. Writes: unchanged if rollback happens before 2G; if a write was migrated,
    revert that write's switch too — the n8n write path is kept intact until 2H.

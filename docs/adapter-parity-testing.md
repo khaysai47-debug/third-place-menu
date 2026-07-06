@@ -24,12 +24,12 @@ VITE_SUPABASE_ANON_KEY=<anon public key — NEVER the service_role key>
    posture must be reviewed before real restaurant use, and writes must
    NEVER be granted to anon.)
 
-`ACTIVE_DATA_SOURCE` stays `"n8n"` throughout — the live app never touches
-Supabase during parity testing.
+`ACTIVE_READ_SOURCE` / `ACTIVE_WRITE_SOURCE` stay `"n8n"` throughout — the
+live app never touches Supabase during parity testing.
 
 **Goal:** prove, on the same underlying data, that the Supabase adapter's
 normalized output is identical to the live n8n adapter's output — *before*
-`ACTIVE_DATA_SOURCE` is ever flipped.
+`ACTIVE_READ_SOURCE` is ever flipped.
 
 **Tooling:** `src/lib/data/dev/adapterParity.ts` — pure compare functions,
 no I/O, imported by nothing in the app. The companion human checklist is
@@ -95,7 +95,7 @@ Adjudicate these per step 5 below — they are documented, not surprises:
 1. **Fetch current n8n output** — `n8nOrdersAdapter.listOrders()` /
    `n8nExpensesAdapter.listExpenses()` (this is exactly what production shows).
 2. **Fetch Supabase output behind the inactive adapter** — call the Supabase
-   adapter *directly* (as above). `ACTIVE_DATA_SOURCE` stays `"n8n"` the whole
+   adapter *directly* (as above). `ACTIVE_READ_SOURCE` stays `"n8n"` the whole
    time; calling the inactive adapter directly is the point.
 3. **Normalize both** — automatic: both adapters return normalized shapes.
    If you find yourself massaging data *outside* an adapter to make parity

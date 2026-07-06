@@ -12,8 +12,9 @@
 //   npm run parity -- --strict   (strict timestamp value comparison)
 //
 // Exit code 0 = parity OK for both domains; 1 = mismatches or fetch failures.
-// ACTIVE_DATA_SOURCE is untouched — this calls the inactive Supabase adapter
-// directly, which is the whole point (docs/adapter-parity-testing.md).
+// ACTIVE_READ_SOURCE / ACTIVE_WRITE_SOURCE are untouched — this calls the
+// inactive Supabase adapter directly, which is the whole point
+// (docs/adapter-parity-testing.md).
 
 import { createServer } from "vite";
 import tsconfigPaths from "vite-tsconfig-paths";

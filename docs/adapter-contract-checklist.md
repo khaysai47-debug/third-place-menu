@@ -2,7 +2,7 @@
 
 Manual verification list for any `OrderRepository` / `ExpenseRepository`
 implementation (used because the repo intentionally has no test framework).
-Run this before flipping `ACTIVE_DATA_SOURCE` in `src/lib/data/dataSource.ts`,
+Run this before flipping `ACTIVE_READ_SOURCE` in `src/lib/data/dataSource.ts`,
 comparing the candidate adapter's output against the live n8n adapter
 **side-by-side on the same data**.
 

@@ -227,7 +227,7 @@ staff.tsx / owner.tsx / ExpenseView
         ▼
 src/lib/data/orderRepository.ts · expenseRepository.ts   ← screens import these
         ▼
-src/lib/data/dataSource.ts   ACTIVE_DATA_SOURCE = "n8n"  ← the one-line Phase 2 switch
+src/lib/data/dataSource.ts   ACTIVE_READ_SOURCE / ACTIVE_WRITE_SOURCE = "n8n"  ← the split Phase 2 switches
         ▼                                    ▼
 adapters/n8nOrdersAdapter        adapters/supabaseOrdersAdapter   (stub, throws)
 adapters/n8nExpensesAdapter      adapters/supabaseExpensesAdapter (stub, throws)
@@ -242,11 +242,13 @@ src/lib/staffOrders.ts · orders.ts · expenses.ts   (unchanged n8n implementati
 - NOT wired (deliberate): customer checkout + staff ManualOrderForm `submitOrder`
   (order intake stays an n8n automation for now) and menu availability
   (`getMenuAvailability`/`updateMenuAvailability`) — both migrate in later phases.
-- The switch is a code constant, **not** an env var, so production cannot drift to
-  the unimplemented Supabase adapter through configuration. Flipping it today makes
-  every data call throw `AdapterNotImplementedError` — loud, not silent.
+- The switches are code constants, **not** env vars, so production cannot drift to
+  the unimplemented Supabase adapter through configuration. Reads and writes select
+  independently (Phase 2E prep): `ACTIVE_READ_SOURCE` may flip first; flipping
+  `ACTIVE_WRITE_SOURCE` today makes every staff write throw
+  `AdapterNotImplementedError` — loud, not silent — so it stays "n8n" until Phase 2G.
 - Phase 2 = implement the two Supabase adapters against the shapes in section 5,
-  flip `ACTIVE_DATA_SOURCE`, run the section 4 checklist.
+  flip `ACTIVE_READ_SOURCE`, run the section 4 checklist.
 
 ---
 
@@ -302,7 +304,7 @@ mapping layer (the hard, behavior-critical part) and left transport stubbed.
 | listExpenses | ✅ live | ⛔ stub (mapper ready) |
 | addExpense | ✅ live | ⛔ stub |
 
-`ACTIVE_DATA_SOURCE` remains `"n8n"`. The done ⇄ "completed" translation for
+`ACTIVE_READ_SOURCE` / `ACTIVE_WRITE_SOURCE` remain `"n8n"`. The done ⇄ "completed" translation for
 the LIVE path still lives in `staffOrders.ts` (unchanged); `orderMapper.ts`
 owns it for the future path.
 
@@ -315,15 +317,16 @@ owns it for the future path.
    (fetch → mapper; reads throw on failure).
 4. Compare n8n vs Supabase read output side-by-side on the same data using
    `docs/adapter-contract-checklist.md`.
-5. Flip **reads only** in a controlled commit (split `ACTIVE_DATA_SOURCE`
-   per-domain or per-operation at that point if needed).
+5. Flip **reads only** in a controlled commit — the read/write split exists
+   (`ACTIVE_READ_SOURCE` / `ACTIVE_WRITE_SOURCE` in dataSource.ts), so this
+   is the one-line `ACTIVE_READ_SOURCE = "supabase"` change.
 6. Keep all writes on n8n until separately implemented and tested; intake
    (`submitOrder`) and menu availability migrate last, as before.
 
 ## 9b. Phase 2B/2C preparation pass (built, nothing live changed)
 
-The safety rails for the path above now exist in-repo. `ACTIVE_DATA_SOURCE`
-is still `"n8n"`; none of this runs in production.
+The safety rails for the path above now exist in-repo. `ACTIVE_READ_SOURCE`
+and `ACTIVE_WRITE_SOURCE` are still `"n8n"`; none of this runs in production.
 
 - **Contracts** — `src/lib/data/contracts/orderContract.ts` /
   `expenseContract.ts` / `adapterContract.ts`: the written data + behavior
