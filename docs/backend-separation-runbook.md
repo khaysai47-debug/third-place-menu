@@ -50,9 +50,10 @@ contracts in `src/lib/data/contracts/`; parity procedure in
 
 ## Phase 2D — Side-by-side parity comparison  *(no flip yet)*
 
-- Run the full procedure in `docs/adapter-parity-testing.md`
-  (console runner `src/lib/data/dev/runParity.ts` + compare functions in
-  `src/lib/data/dev/adapterParity.ts`).
+- Run the full procedure in `docs/adapter-parity-testing.md` — normally
+  `npm run parity` (Node script `scripts/run-parity.mjs`, avoids browser
+  CORS against n8n Cloud); compare functions live in
+  `src/lib/data/dev/adapterParity.ts`.
 - Also walk the human checklist `docs/adapter-contract-checklist.md`.
 - Exit criteria: `ok: true` for orders AND expenses on ≥2 different days of
   real data, including delivery / cancelled / transfer-paid / proof orders;

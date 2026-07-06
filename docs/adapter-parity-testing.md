@@ -4,12 +4,31 @@
 and `supabaseExpensesAdapter.listExpenses()` are implemented (reads only;
 writes still throw until Phase 2G).
 
-**Prerequisites:** add to `.env.local` (never commit values):
+**Prerequisites:**
+
+1. Add to `.env.local` (never commit values):
 
 ```
 VITE_SUPABASE_URL=https://<project-ref>.supabase.co
 VITE_SUPABASE_ANON_KEY=<anon public key — NEVER the service_role key>
 ```
+
+2. The anon role must be able to SELECT the four read tables. As of
+   2026-07-06, `orders` and `order_items` return
+   `401 permission denied (42501)` for anon while `payment_proofs` and
+   `expenses` are readable — run in the Supabase SQL editor:
+
+```sql
+GRANT SELECT ON public.orders TO anon;
+GRANT SELECT ON public.order_items TO anon;
+```
+
+   If a table then returns 200 but rows are missing, RLS is enabled without a
+   read policy — that's the Phase 2E "RLS posture" decision, resolve it there.
+   (Security note: anon SELECT means anyone with the public anon key can read
+   order data. The current n8n staff-orders webhook is already an
+   unauthenticated public GET, so this is not a new exposure — but writes must
+   NEVER be granted to anon.)
 
 `ACTIVE_DATA_SOURCE` stays `"n8n"` throughout — the live app never touches
 Supabase during parity testing.
@@ -22,36 +41,44 @@ normalized output is identical to the live n8n adapter's output — *before*
 no I/O, imported by nothing in the app. The companion human checklist is
 `docs/adapter-contract-checklist.md`.
 
-## How to run it
+## How to run it (Node script — the normal way)
 
-This repo is a Vite browser app with no Node script runner (no tsx/ts-node,
-no `test` script), and the adapters read `import.meta.env.VITE_*` — they only
-run inside the Vite dev server. The runner is
-`src/lib/data/dev/runParity.ts` — imported by nothing in the app, so it never
-enters a production bundle.
+```
+npm run parity              # presence-mode timestamps
+npm run parity -- --strict  # strict timestamp value comparison
+```
 
-Exact steps:
+`scripts/run-parity.mjs` loads the real runner module
+(`src/lib/data/dev/runParity.ts`) through Vite's SSR module loader — the same
+adapters, mappers, and `.env.local` env the app would use — but executes it in
+Node, where browser CORS does not apply. No new dependency; nothing enters any
+bundle. Exit code 0 = both domains `ok: true`; 1 = mismatch or fetch failure.
 
-1. Add the two `VITE_SUPABASE_*` vars above to `.env.local` (next to
-   `VITE_N8N_BASE_URL`).
-2. `npm run dev` — restart it if it was already running (Vite reads
-   `.env.local` at startup).
-3. Open the local URL Vite prints (any page works — `/staff` is convenient).
-4. Open the browser devtools **Console** and paste:
+The runner fetches both adapters for both domains, logs a summary per domain,
+and reports `fetchErrors` per source. One source failing (missing env,
+permission denial, network) skips only that domain's comparison — the other
+still runs. A permission denial looks like
+`Supabase read failed: orders responded 401` (fix: the GRANT in the
+prerequisites above; an empty-but-200 result means RLS filtering — compare
+counts against the staff board).
+
+### Browser console (alternative — has a CORS catch)
+
+The same runner works from the devtools console of an `npm run dev` session:
 
 ```js
 const m = await import("/src/lib/data/dev/runParity.ts");
-await m.runAdapterParity();                            // presence-mode timestamps
-await m.runAdapterParity({ strictTimestamps: true });  // once formats verified
+await m.runAdapterParity();
 ```
 
-It fetches both adapters for both domains, logs a summary per domain, and
-returns `{ orders, expenses, fetchErrors }` for closer inspection. If one
-source fails to fetch (missing env, RLS denial, network), that domain's
-comparison is skipped and the error is logged and returned in `fetchErrors` —
-the other domain still runs. An RLS denial typically looks like
-`Supabase read failed: orders responded 401` (or an empty result with 200 —
-compare counts against the staff board).
+⚠️ CORS limitation: n8n Cloud does not send CORS headers for localhost
+origins, so the **n8n side fails in the browser** (`blocked by CORS`) unless
+the n8n webhooks set `Access-Control-Allow-Origin`. The Supabase side works
+(Supabase sends permissive CORS). This is why the Node script is the normal
+way; use the browser path only if n8n CORS is ever opened for localhost.
+(This also means the deployed staff/owner pages work only because they are
+served from an origin n8n accepts — local `/staff` against n8n Cloud fails
+the same way, which is a dev-only limitation, not a production bug.)
 
 ## Known differences to expect on the first run
 

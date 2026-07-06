@@ -1,9 +1,13 @@
 // DEV TOOL ONLY — manual parity runner (Phase 2D). Imported by NOTHING in the
-// app, so it never enters a production bundle. Run it from the browser console
-// of an `npm run dev` session (any page):
+// app, so it never enters a production bundle.
+//
+// Normal way to run it:  npm run parity   (scripts/run-parity.mjs loads this
+// module through Vite's SSR loader and runs it in Node — n8n Cloud blocks
+// localhost browser origins by CORS, Node has no CORS).
+// It also works from the browser console of `npm run dev` IF n8n CORS ever
+// allows localhost:
 //
 //   const m = await import("/src/lib/data/dev/runParity.ts");
-//   await m.runAdapterParity();
 //   await m.runAdapterParity({ strictTimestamps: true });
 //
 // Prerequisites: VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY in .env.local
