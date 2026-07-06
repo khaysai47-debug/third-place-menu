@@ -22,7 +22,10 @@ import { supabaseExpensesAdapter } from "@/lib/data/adapters/supabaseExpensesAda
 import {
   compareExpensesForParity,
   compareOrdersForParity,
+  formatCoverage,
+  summarizeCoverage,
   summarizeParityResult,
+  type ParityCoverage,
   type ParityOptions,
   type ParityResult,
 } from "./adapterParity";
@@ -31,6 +34,8 @@ import {
 export interface ParityRun {
   orders?: ParityResult;
   expenses?: ParityResult;
+  /** What the day's data exercised (from the n8n reference lists). */
+  coverage?: ParityCoverage;
   /** Fetch failures by source, e.g. "supabase orders" — comparison skipped. */
   fetchErrors: Record<string, string>;
 }
@@ -72,6 +77,11 @@ export async function runAdapterParity(options: ParityOptions = {}): Promise<Par
   if (n8nExpenses.status === "fulfilled" && sbExpenses.status === "fulfilled") {
     run.expenses = compareExpensesForParity(n8nExpenses.value, sbExpenses.value, options);
     console.log(summarizeParityResult(run.expenses));
+  }
+  // Coverage: parity can pass on thin data — show what today actually proved.
+  if (n8nOrders.status === "fulfilled" && n8nExpenses.status === "fulfilled") {
+    run.coverage = summarizeCoverage(n8nOrders.value, n8nExpenses.value);
+    console.log(formatCoverage(run.coverage));
   }
   return run;
 }

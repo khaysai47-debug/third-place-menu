@@ -49,7 +49,10 @@ Node, where browser CORS does not apply. No new dependency; nothing enters any
 bundle. Exit code 0 = both domains `ok: true`; 1 = mismatch or fetch failure.
 
 The runner fetches both adapters for both domains, logs a summary per domain,
-and reports `fetchErrors` per source. One source failing (missing env,
+then a `[coverage]` block showing what the day's data actually exercised
+(statuses, order types, payment methods, proof/expense counts) and which gate
+scenarios are still missing — parity can pass on thin data, coverage says how
+thin. It also reports `fetchErrors` per source. One source failing (missing env,
 permission denial, network) skips only that domain's comparison — the other
 still runs. A permission denial looks like
 `Supabase read failed: orders responded 401` (fix: the GRANT in the
@@ -127,6 +130,107 @@ Adjudicate these per step 5 below — they are documented, not surprises:
 
 Still open before the Phase 2E flip: a second day of order data, an expenses
 run with real rows, a payment-proof order (none exist yet), and one walk of
-the human checklist. Reads don't flip until the Phase 2E gate in
-docs/backend-separation-runbook.md is fully checked; writes stay on n8n
-until Phase 2G regardless.
+the human checklist. Exact procedures below. Reads don't flip until the
+Phase 2E gate in docs/backend-separation-runbook.md is fully checked; writes
+stay on n8n until Phase 2G regardless.
+
+## Final pre-flip QA — exact procedures
+
+Work through these in order; each ends with a parity run whose `[coverage]`
+block should show the corresponding gap disappearing. Log each result in the
+Run log above.
+
+### QA-1 · Real-expense parity
+
+1. Open the deployed staff page → Expenses view, and add a small expense
+   through the normal form: item name `PARITY TEST — safe to delete`,
+   amount `1`, category `Other`, paid from `Cash`, note optional.
+   (This is a normal n8n write — writes are on n8n, that's the point.)
+2. Confirm it appears in the staff expense list and in the owner dashboard's
+   expense section (manual refresh).
+3. Same Bangkok day, run `npm run parity` and `npm run parity -- --strict`.
+4. Expect: `[parity:expenses] OK` with counts ≥ 1 on both sides, and the
+   coverage gap "no expense rows" gone. Any mismatch here is adjudicated the
+   usual way — note the parity doc's "Known differences" section: the n8n
+   Get Expenses output may emit keys the frontend mapper doesn't read
+   (`itemName`/`createdBy`/row key) — if those mismatch, the fix is the n8n
+   output mapping, not the Supabase adapter.
+5. Cleanup policy: the row is ฿1 and clearly labeled — keep it until the flip
+   is done (it is useful for the second-day run), then delete it in the
+   Supabase Table Editor (`expenses` table; no child rows) if the owner
+   doesn't want it in reports. Deleting there removes it from BOTH read paths
+   (n8n reads the same database).
+
+### QA-2 · Payment-proof parity
+
+Verified facts (2026-07-06): there is NO production UI that adds a payment
+proof — the app only displays proof fields; the `third-place-add-payment-proof`
+n8n webhook exists for the future bot flow. So the safest way to create one
+test row is a one-off POST to that webhook (again: a write via n8n).
+
+1. Pick a safe test order: in the Supabase Table Editor → `orders`, choose an
+   old finished test row (e.g. a July 3–5 `completed` order), and copy its
+   **`id` (UUID)** — NOT `order_number`. `payment_proofs.order_id` joins on
+   `orders.id`; the staff API matches `proof.order_id === order.id`.
+2. POST to the webhook (PowerShell; URL base = your `VITE_N8N_BASE_URL`):
+
+```powershell
+Invoke-RestMethod -Method Post -ContentType "application/json" `
+  -Uri "https://<your-n8n-host>/webhook/third-place-add-payment-proof" `
+  -Body (@{
+    order_id  = "<orders.id UUID>"
+    proof_url = "https://example.com/parity-test-proof.jpg"
+    source    = "parity-test"
+    status    = "received"
+    note      = "PARITY TEST - safe to delete"
+  } | ConvertTo-Json)
+```
+
+   (`proof_file_path` may be omitted — n8n defaults it to `""`.)
+3. Run `npm run parity`. Expect: still `OK`, the chosen order shows
+   `hasPaymentProof`/`paymentProofUrl` matching on BOTH sides, and coverage
+   shows `proofs=1`.
+4. ⚠ This is the first time the n8n Staff Orders API's proof output is
+   exercised with a real row (discovery never observed one). If parity
+   MISMATCHES on proof fields, that is the test doing its job: compare the
+   n8n output keys against the Supabase adapter's mapping
+   (`latestPaymentProof` in orderMapper.ts) and fix whichever side is wrong —
+   do not flip until clean.
+5. Optional visual check: the staff order card and owner order detail should
+   show the proof link (deployed app, since local n8n reads are CORS-blocked).
+6. Cleanup: delete the row in Supabase Table Editor → `payment_proofs`
+   (find it by `source = 'parity-test'`; it has no child rows). Keep it until
+   after the flip verification if convenient.
+
+### QA-3 · Second-day parity
+
+1. On a different service day with fresh orders (ideally: ≥1 dine-in,
+   ≥1 delivery, ≥1 cancelled, one cash-paid, one transfer-paid — the
+   `[coverage]` block tells you what the day actually contains), run both
+   `npm run parity` and `npm run parity -- --strict` in a quiet moment
+   (not while orders are actively arriving — risk register #9).
+2. Expect `ok: true` on both domains. Log the run (date, counts, coverage
+   gaps remaining) in the Run log above.
+
+### QA-4 · RLS / security review (decision, not code)
+
+Current state (2026-07-06): anon has SELECT on all four read tables
+(`orders`/`order_items` granted + permissive `USING (true)` policies for
+parity; `payment_proofs`/`expenses` were already readable). **No anon writes
+exist — keep it that way.** Exposure today equals the public n8n
+staff-orders GET webhook, so the flip makes nothing worse.
+
+Before REAL restaurant use (regardless of flip), decide and record here:
+
+- [ ] Is public read of all orders acceptable long-term? (Likely no —
+      customer PII: names, phones, addresses.)
+- [ ] Options, in increasing effort: stricter RLS policies; staff/owner
+      auth (password/session) in front of the dashboards; moving Supabase
+      reads behind a backend API so the anon key disappears from the
+      browser entirely (pairs with the Phase 2G write decision).
+- [ ] Also applies to n8n: the staff-orders GET webhook is equally public —
+      any fix should cover both, or retire the n8n read path (Phase 2H).
+
+Do not implement auth as part of the flip — it is a separate, deliberate
+change. The flip only requires confirming: anon = read-only, service_role
+lives only in n8n, no secrets in the repo.

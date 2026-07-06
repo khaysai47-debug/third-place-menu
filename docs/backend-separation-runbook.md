@@ -80,19 +80,33 @@ a payment-proof order, one walk of docs/adapter-contract-checklist.md.
 
 ### Must ALL pass before flipping (gate)
 
-- [ ] Parity `ok: true` for orders AND expenses on **≥2 different days** of
-      real data (docs/adapter-parity-testing.md), including at least one day
-      with delivery + cancelled + transfer-paid orders, and once with a real
-      payment-proof order (none observed yet — see risk register #6).
+Exact procedures for the first four: docs/adapter-parity-testing.md
+§ "Final pre-flip QA" (QA-1…QA-4). The parity runner's `[coverage]` block
+tracks which scenarios are still unexercised.
+
+- [ ] **QA-1 real-expense parity** — expenses ≥1/1 matching (normal and
+      `--strict`), added through the staff Expenses UI.
+- [ ] **QA-2 payment-proof parity** — one proof row inserted via the n8n
+      Add Payment Proof webhook (order keyed by `orders.id` UUID), proof
+      fields matching on both sides. First real exercise of the n8n proof
+      output — mismatches here are fixed before flipping (risk register #6).
+- [ ] **QA-3 second-day parity** — `ok: true` both domains on a different
+      day of real data; coverage ideally shows dine-in + delivery +
+      cancelled + cash + transfer.
+- [ ] **QA-4 RLS/security review** — decision recorded; confirmed anon =
+      read-only SELECT on the four read tables, no anon writes, service_role
+      only inside n8n. (Full auth hardening is a separate pre-production
+      task, not part of the flip.)
 - [ ] One `{ strictTimestamps: true }` run passing, or a written note in the
       parity doc explaining the accepted timestamp format difference.
 - [ ] Every parity mismatch adjudicated: adapter bugs fixed, upstream n8n
       output gaps fixed in n8n (the expenses `itemName`/`createdBy`/row-key
       gaps listed in the parity doc), nothing papered over in the UI.
 - [ ] Human checklist docs/adapter-contract-checklist.md walked once.
-- [ ] RLS posture confirmed: the anon key can SELECT orders / order_items /
-      payment_proofs / expenses — and CANNOT write them. The service-role key
-      exists only inside n8n.
+- [ ] Vercel project env has ALL THREE (values from the password manager,
+      never from the repo): `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
+      (anon public key — NEVER service_role/sb_secret), and the existing
+      `VITE_N8N_BASE_URL` (writes still go to n8n after the flip!).
 - [ ] `npm run build` and `npm run typecheck` pass.
 
 ### The flip itself (one small commit)
@@ -104,16 +118,17 @@ done as Phase 2E prep). The flip is:
    `ACTIVE_WRITE_SOURCE` stays `"n8n"` — do NOT touch it; the Supabase write
    methods are throwing stubs, so flipping it breaks every staff action.
 2. `npm run build` and `npm run typecheck` must pass.
-3. Local smoke test (`npm run dev`): staff board, owner dashboard (manual
+3. `npm run parity` one final time the same day — fresh proof that both
+   sources agree at the moment of the flip.
+4. Local smoke test (`npm run dev`): staff board, owner dashboard (manual
    refresh), customer menu render; a status update still works (n8n write).
-   Note: local reads-from-Supabase work, but local n8n reads are CORS-blocked
-   — the write actions are the thing to verify locally.
-4. Ensure `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` are set in the
-   production build environment / Vercel project settings (anon key only —
-   never service_role). Deploy.
-5. Verify on the deployed Vercel app: run the "Test immediately after
+   Note: after this flip local READS come from Supabase and work locally;
+   local n8n WRITES may still be CORS-blocked from localhost — deployed
+   verification (step 6) is where writes are properly confirmed.
+5. Confirm the Vercel env gate item (all three `VITE_*` vars), then deploy.
+6. Verify on the deployed Vercel app: run the "Test immediately after
    flipping" list below.
-6. Nothing to delete: the parity runner lives in `src/lib/data/dev/` and is
+7. Nothing to delete: the parity runner lives in `src/lib/data/dev/` and is
    imported by nothing in the app, so it ships nowhere.
 
 ### Test immediately after flipping
@@ -126,6 +141,8 @@ done as Phase 2E prep). The flip is:
 - ALL writes still work via n8n: advance a status, cancel with reason,
   record a payment, add an expense — and the n8n automations behind them
   (notifications) demonstrably still fire.
+- Payment proof visibility: the QA-2 test proof (if kept) still shows its
+  link on the staff card / owner order detail, and the link opens.
 - Customer menu + checkout untouched and working (they never used the
   repository read path).
 

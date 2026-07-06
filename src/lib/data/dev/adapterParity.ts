@@ -258,6 +258,91 @@ export function compareExpensesForParity(
   );
 }
 
+/* ── Coverage summary — how much the day's data actually exercised ──────── */
+
+// Parity can pass while proving very little (0 expenses, 0 proofs, one order
+// type). This summarizes what the compared data contained, and lists the gate
+// items (runbook Phase 2E) that today's data did NOT exercise.
+
+export interface ParityCoverage {
+  orders: number;
+  statuses: Record<string, number>;
+  orderTypes: Record<string, number>;
+  paymentStatuses: Record<string, number>;
+  paymentMethods: Record<string, number>;
+  ordersWithProof: number;
+  expenses: number;
+  expenseCategories: Record<string, number>;
+  expensePaidFrom: Record<string, number>;
+  /** Gate-relevant scenarios this data set did not contain. */
+  gaps: string[];
+}
+
+function tally(values: (string | undefined)[]): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const v of values) {
+    const key = v || "(none)";
+    out[key] = (out[key] ?? 0) + 1;
+  }
+  return out;
+}
+
+/** Builds a coverage report from one day's normalized data (use the n8n reference lists). */
+export function summarizeCoverage(orders: StaffOrder[], expenses: Expense[]): ParityCoverage {
+  const statuses = tally(orders.map((o) => o.status));
+  const orderTypes = tally(orders.map((o) => o.orderType));
+  const paymentStatuses = tally(orders.map((o) => o.paymentStatus));
+  const paymentMethods = tally(orders.map((o) => o.paymentMethod));
+  const ordersWithProof = orders.filter((o) => o.hasPaymentProof).length;
+
+  const gaps: string[] = [];
+  if (!orderTypes.dine_in) gaps.push("no dine-in order");
+  if (!orderTypes.delivery) gaps.push("no delivery order");
+  if (!statuses.cancelled) gaps.push("no cancelled order");
+  if (!statuses.done && !statuses.delivered) gaps.push("no finished (done/delivered) order");
+  if (!paymentMethods.Cash) gaps.push("no cash-paid order");
+  if (!paymentMethods.Transfer) gaps.push("no transfer-paid order");
+  if (ordersWithProof === 0) gaps.push("no payment-proof order (gate requires ≥1 before the flip)");
+  if (expenses.length === 0) gaps.push("no expense rows (gate requires a real-expense day)");
+
+  return {
+    orders: orders.length,
+    statuses,
+    orderTypes,
+    paymentStatuses,
+    paymentMethods,
+    ordersWithProof,
+    expenses: expenses.length,
+    expenseCategories: tally(expenses.map((e) => e.category)),
+    expensePaidFrom: tally(expenses.map((e) => e.paidFrom)),
+    gaps,
+  };
+}
+
+const formatTally = (t: Record<string, number>): string =>
+  Object.entries(t)
+    .map(([k, n]) => `${k}=${n}`)
+    .join(" ") || "—";
+
+/** Renders a ParityCoverage as a readable multi-line report for the console. */
+export function formatCoverage(c: ParityCoverage): string {
+  const lines: string[] = [];
+  lines.push(`[coverage] orders=${c.orders} proofs=${c.ordersWithProof} expenses=${c.expenses}`);
+  lines.push(`  order statuses: ${formatTally(c.statuses)}`);
+  lines.push(`  order types: ${formatTally(c.orderTypes)}`);
+  lines.push(`  payment statuses: ${formatTally(c.paymentStatuses)}`);
+  lines.push(`  payment methods: ${formatTally(c.paymentMethods)}`);
+  lines.push(`  expense categories: ${formatTally(c.expenseCategories)}`);
+  lines.push(`  expense paidFrom: ${formatTally(c.expensePaidFrom)}`);
+  if (c.gaps.length) {
+    lines.push("  ⚠ coverage gaps — parity passed but these were never exercised:");
+    for (const gap of c.gaps) lines.push(`    - ${gap}`);
+  } else {
+    lines.push("  coverage: all gate scenarios present ✓");
+  }
+  return lines.join("\n");
+}
+
 /* ── Human-readable summary ─────────────────────────────────────────────── */
 
 /** Renders a ParityResult as a readable multi-line report for the console. */
