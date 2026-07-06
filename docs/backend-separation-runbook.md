@@ -60,18 +60,60 @@ contracts in `src/lib/data/contracts/`; parity procedure in
 
 ## Phase 2E — Flip READS only
 
-- One-line commit: `ACTIVE_DATA_SOURCE = "supabase"` in
-  `src/lib/data/dataSource.ts` (split the constant per-domain first if orders
-  and expenses flip separately).
-- Writes still go to n8n: the write methods on the Supabase adapters are
-  still stubs at this point ONLY if the switch was split per-operation —
-  otherwise implement pass-through: **decision point** — either split the
-  switch (reads per source, writes stay n8n) or delay the flip until 2G.
-  Recommended: split the switch so reads and writes select independently.
-- Nothing to delete: the parity runner lives in `src/lib/data/dev/` and is
-  imported by nothing in the app, so it ships nowhere.
-- Exit criteria: staff board, owner dashboard, expense views all render from
-  Supabase; all write actions still function via n8n.
+### Must ALL pass before flipping (gate)
+
+- [ ] Parity `ok: true` for orders AND expenses on **≥2 different days** of
+      real data (docs/adapter-parity-testing.md), including at least one day
+      with delivery + cancelled + transfer-paid orders, and once with a real
+      payment-proof order (none observed yet — see risk register #6).
+- [ ] One `{ strictTimestamps: true }` run passing, or a written note in the
+      parity doc explaining the accepted timestamp format difference.
+- [ ] Every parity mismatch adjudicated: adapter bugs fixed, upstream n8n
+      output gaps fixed in n8n (the expenses `itemName`/`createdBy`/row-key
+      gaps listed in the parity doc), nothing papered over in the UI.
+- [ ] Human checklist docs/adapter-contract-checklist.md walked once.
+- [ ] RLS posture confirmed: the anon key can SELECT orders / order_items /
+      payment_proofs / expenses — and CANNOT write them. The service-role key
+      exists only inside n8n.
+- [ ] `npm run build` and `npm run typecheck` pass.
+
+### The flip itself (one small commit)
+
+1. In `src/lib/data/dataSource.ts`: **split the switch first** — reads flip,
+   writes don't. Replace the single constant with e.g.
+   `READ_DATA_SOURCE = "supabase"` and `WRITE_DATA_SOURCE = "n8n"`, and route
+   repository read methods by the read switch, write methods by the write
+   switch. Do NOT flip one shared constant: the Supabase write methods are
+   throwing stubs, so a shared flip breaks every staff action.
+2. Nothing to delete: the parity runner lives in `src/lib/data/dev/` and is
+   imported by nothing in the app, so it ships nowhere.
+3. Deploy needs `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` set in the
+   production build environment (anon key only — never service_role).
+
+### Test immediately after flipping
+
+- Staff board renders the same orders as before the flip (spot-check counts
+  and one delivery + one cancelled order's fields).
+- Owner dashboard (manual refresh only — unchanged): Today totals, payment
+  mix, cancelled-today count match the pre-flip values on the same data.
+- Expense view shows today's expenses; owner Net Today unchanged.
+- ALL writes still work via n8n: advance a status, cancel with reason,
+  record a payment, add an expense — and the n8n automations behind them
+  (notifications) demonstrably still fire.
+- Customer menu + checkout untouched and working (they never used the
+  repository read path).
+
+### Do NOT touch in this phase
+
+- Writes (Phase 2G), order intake `submitOrder` (last of all, maybe never).
+- n8n URLs/slugs (`src/lib/n8n.ts`), owner manual-refresh, staff 5s poll.
+- Menu availability (stays on n8n until its own phase).
+
+### Rollback (instant)
+
+- Set the read switch back to `"n8n"` in `src/lib/data/dataSource.ts`,
+  redeploy. The n8n read webhooks stay alive until Phase 2H exactly for this.
+- Capture what forced the rollback in the risk register before retrying.
 
 ## Phase 2F — Production-like read testing
 

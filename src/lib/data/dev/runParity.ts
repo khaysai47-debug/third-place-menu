@@ -23,19 +23,51 @@ import {
   type ParityResult,
 } from "./adapterParity";
 
-/** Fetches both adapters for both domains, compares, and logs the summaries. */
-export async function runAdapterParity(
-  options: ParityOptions = {},
-): Promise<{ orders: ParityResult; expenses: ParityResult }> {
-  const [n8nOrders, sbOrders, n8nExpenses, sbExpenses] = await Promise.all([
+/** A domain's comparison, or the fetch error that prevented it. */
+export interface ParityRun {
+  orders?: ParityResult;
+  expenses?: ParityResult;
+  /** Fetch failures by source, e.g. "supabase orders" — comparison skipped. */
+  fetchErrors: Record<string, string>;
+}
+
+const message = (reason: unknown): string =>
+  reason instanceof Error ? reason.message : String(reason);
+
+/**
+ * Fetches both adapters for both domains, compares whatever succeeded, and
+ * logs the summaries. One source failing (bad env, RLS, network) doesn't hide
+ * the others — its error is logged and returned in fetchErrors instead.
+ */
+export async function runAdapterParity(options: ParityOptions = {}): Promise<ParityRun> {
+  const [n8nOrders, sbOrders, n8nExpenses, sbExpenses] = await Promise.allSettled([
     n8nOrdersAdapter.listOrders(),
     supabaseOrdersAdapter.listOrders(),
     n8nExpensesAdapter.listExpenses(),
     supabaseExpensesAdapter.listExpenses(),
   ]);
-  const orders = compareOrdersForParity(n8nOrders, sbOrders, options);
-  const expenses = compareExpensesForParity(n8nExpenses, sbExpenses, options);
-  console.log(summarizeParityResult(orders));
-  console.log(summarizeParityResult(expenses));
-  return { orders, expenses };
+
+  const run: ParityRun = { fetchErrors: {} };
+  const sources: [string, PromiseSettledResult<unknown>][] = [
+    ["n8n orders", n8nOrders],
+    ["supabase orders", sbOrders],
+    ["n8n expenses", n8nExpenses],
+    ["supabase expenses", sbExpenses],
+  ];
+  for (const [name, result] of sources) {
+    if (result.status === "rejected") {
+      run.fetchErrors[name] = message(result.reason);
+      console.error(`[parity] ${name} fetch FAILED — comparison skipped:`, message(result.reason));
+    }
+  }
+
+  if (n8nOrders.status === "fulfilled" && sbOrders.status === "fulfilled") {
+    run.orders = compareOrdersForParity(n8nOrders.value, sbOrders.value, options);
+    console.log(summarizeParityResult(run.orders));
+  }
+  if (n8nExpenses.status === "fulfilled" && sbExpenses.status === "fulfilled") {
+    run.expenses = compareExpensesForParity(n8nExpenses.value, sbExpenses.value, options);
+    console.log(summarizeParityResult(run.expenses));
+  }
+  return run;
 }

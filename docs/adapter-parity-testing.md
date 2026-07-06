@@ -30,7 +30,14 @@ run inside the Vite dev server. The runner is
 `src/lib/data/dev/runParity.ts` — imported by nothing in the app, so it never
 enters a production bundle.
 
-With `npm run dev` running, open any page and paste into the browser console:
+Exact steps:
+
+1. Add the two `VITE_SUPABASE_*` vars above to `.env.local` (next to
+   `VITE_N8N_BASE_URL`).
+2. `npm run dev` — restart it if it was already running (Vite reads
+   `.env.local` at startup).
+3. Open the local URL Vite prints (any page works — `/staff` is convenient).
+4. Open the browser devtools **Console** and paste:
 
 ```js
 const m = await import("/src/lib/data/dev/runParity.ts");
@@ -38,8 +45,13 @@ await m.runAdapterParity();                            // presence-mode timestam
 await m.runAdapterParity({ strictTimestamps: true });  // once formats verified
 ```
 
-It fetches both adapters for both domains, logs the two summaries, and returns
-the raw `ParityResult`s for closer inspection.
+It fetches both adapters for both domains, logs a summary per domain, and
+returns `{ orders, expenses, fetchErrors }` for closer inspection. If one
+source fails to fetch (missing env, RLS denial, network), that domain's
+comparison is skipped and the error is logged and returned in `fetchErrors` —
+the other domain still runs. An RLS denial typically looks like
+`Supabase read failed: orders responded 401` (or an empty result with 200 —
+compare counts against the staff board).
 
 ## Known differences to expect on the first run
 

@@ -143,6 +143,9 @@ export function ManualOrderForm({ onSubmitted }: Props) {
         lineTotal: l.unitPrice * l.qty,
       })),
       totalItems,
+      // Dine-in manual order: no delivery leg, so subtotal IS the item total.
+      subtotalPrice: total,
+      deliveryFee: 0,
       totalPrice: total,
       status: "draft",
     };
