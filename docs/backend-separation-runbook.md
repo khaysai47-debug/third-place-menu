@@ -191,17 +191,30 @@ what forced the rollback in the risk register before retrying.
 
 ## Phase 2G — Migrate writes, separately and one at a time
 
-- Order: `updateOrderStatus` (+ cancellation fields) → `updateOrderPayment`
-  → `addExpense` → menu availability → `submitOrder` last (or intake stays on
-  n8n permanently — bots and notifications hang off it).
-- Every write keeps the never-throw `{ success, error? }` contract and is
-  keyed by row id.
+**Full plan: `docs/write-separation-plan.md`** (2G-A audit done 2026-07-06:
+six normal-op writes W1–W6, one automation write W7 that stays on n8n
+forever, plus R1 — menu-availability READS, incl. the customer menu, still
+on n8n and bundled into 2G-E).
+
+- Recommended write path (confirm in 2G-B): **server API routes inside this
+  app** (TanStack Start already ships a nitro server on Vercel) — write key
+  stays server-side, payloads validated, staff writes behind a shared staff
+  secret. Anon key remains read-only forever; no broad anon write grants.
+- Checklist: 2G-A audit ✅ → 2G-B choose write path → 2G-C order submit
+  (implement AFTER 2G-D unless intake automation is re-pointed — intake is
+  the automation-entangled write) → 2G-D staff order actions → 2G-E
+  expenses + menu availability (write + read) → 2G-F automation stays in
+  n8n → 2G-G write smoke test + parity re-run.
+- Every write keeps the never-throw `{ success, error? }` contract. Orders
+  are keyed by `order_number` (TP-…), menu items by `item_code` — never by
+  row UUID from the frontend.
 - CAUTION: n8n automations (notifications, bot replies) currently trigger off
-  n8n writes. Before moving any write, confirm what downstream automation
-  listens to it and re-point that automation (e.g. Supabase trigger → n8n
-  webhook) first.
-- Exit criteria per write: parity of resulting rows + the automation that
-  depended on it demonstrably still fires.
+  n8n writes. Before moving any write, confirm in the n8n workflow what else
+  it does besides the DB write, and re-point that automation (e.g. Supabase
+  DB webhook → n8n, or the server route calls n8n) first.
+- Exit criteria per write: plan § 4 walked — row values match what n8n would
+  have written, read paths show it, dependent automation still fires,
+  `npm run parity` still passes.
 
 ## Phase 2H — n8n keeps the automation jobs (end state)
 
