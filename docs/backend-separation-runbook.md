@@ -26,23 +26,33 @@ contracts in `src/lib/data/contracts/`; parity procedure in
   `orderMapper.ts` / `expenseMapper.ts` / `normalize.ts` has an answer or an
   explicit `NOT FOUND`.
 
-## Phase 2C — Implement Supabase READ adapter behind the inactive switch
+## Phase 2C — Implement Supabase READ adapter behind the inactive switch  *(DONE 2026-07-06)*
 
-- Add `@supabase/supabase-js` + ONE client module (first new dependency of the
-  migration; not before this phase). Env vars follow the existing
-  `VITE_*` pattern; decide RLS/anon-key posture from discovery notes.
-- Align `SupabaseOrderRow` / `SupabaseExpenseRow` with the worksheet; set
-  `DB_STATUS_USES_COMPLETED` from the verified status vocabulary.
-- Implement ONLY `listOrders()` and `listExpenses()` (reads throw on failure).
-  All writes remain `AdapterNotImplementedError` stubs.
+- Client: `src/lib/data/supabase.ts` — a plain-fetch PostgREST SELECT helper,
+  deliberately **no `@supabase/supabase-js` dependency** (two REST reads don't
+  justify it; revisit at Phase 2G if writes/auth/realtime demand the SDK).
+  Env is read lazily per-request, so the app builds and runs without Supabase
+  env while `ACTIVE_DATA_SOURCE` is `"n8n"`; calling the adapter without env
+  throws a clear developer error.
+- Env vars (in `.env.local`, values never committed):
+  `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` (anon key ONLY — the
+  service-role key stays in n8n; RLS posture still to confirm before 2E).
+- `SupabaseOrderRow` / `SupabaseExpenseRow` aligned with the worksheet;
+  `DB_STATUS_USES_COMPLETED = true` (verified: DB stores "completed", never
+  "done"). orderKey = `orders.order_number` ("TP-…"), NOT the row UUID —
+  the n8n write workflows match by order_number, so this keeps staff actions
+  working during the mixed phase (Supabase reads + n8n writes).
+- ONLY `listOrders()` and `listExpenses()` implemented (reads throw on
+  failure). All writes remain `AdapterNotImplementedError` stubs.
 - `ACTIVE_DATA_SOURCE` remains `"n8n"` — production is untouched by this commit.
 - Exit criteria: app builds; live app behavior unchanged; Supabase reads
-  callable directly in dev.
+  callable directly in dev. ✓
 
 ## Phase 2D — Side-by-side parity comparison  *(no flip yet)*
 
 - Run the full procedure in `docs/adapter-parity-testing.md`
-  (dev-only scratch route + `src/lib/data/dev/adapterParity.ts`).
+  (console runner `src/lib/data/dev/runParity.ts` + compare functions in
+  `src/lib/data/dev/adapterParity.ts`).
 - Also walk the human checklist `docs/adapter-contract-checklist.md`.
 - Exit criteria: `ok: true` for orders AND expenses on ≥2 different days of
   real data, including delivery / cancelled / transfer-paid / proof orders;
@@ -58,7 +68,8 @@ contracts in `src/lib/data/contracts/`; parity procedure in
   otherwise implement pass-through: **decision point** — either split the
   switch (reads per source, writes stay n8n) or delay the flip until 2G.
   Recommended: split the switch so reads and writes select independently.
-- Delete the dev parity scratch route in the same commit.
+- Nothing to delete: the parity runner lives in `src/lib/data/dev/` and is
+  imported by nothing in the app, so it ships nowhere.
 - Exit criteria: staff board, owner dashboard, expense views all render from
   Supabase; all write actions still function via n8n.
 

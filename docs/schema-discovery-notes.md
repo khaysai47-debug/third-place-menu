@@ -201,6 +201,22 @@ Dine-in completed order: `order_type: dine_in`, `status: completed`,
 - Writes stay on n8n; reads don't flip until parity passes
   (`docs/adapter-parity-testing.md`).
 
+### Confirmed 2026-07-06 by calling the live GET webhooks directly
+- Staff Orders API emits `airtableRecordId` = `orderId` = **`order_number`**
+  ("TP-…") — the frontend's orderKey is the order_number, NOT the row UUID.
+  Combined with the write workflows matching by order_number, Supabase reads
+  must put order_number in `airtableRecordId` or staff buttons break.
+- Staff Orders API returns **all orders, no date filter** (July 3 + July 5
+  rows in one response).
+- Get Expenses API returns **today only** (empty `data` on a day with no
+  expenses, while yesterday's rows exist) — Bangkok-local `expense_date`.
+- Timestamps pass through from Supabase verbatim, e.g.
+  `2026-07-05T11:23:07.579571+00:00` (created_at, microseconds) and
+  `2026-07-05T11:25:34.372+00:00` (paid_at, milliseconds) — UTC offset form.
+- Money values are JSON numbers. `paymentStatus` emitted as `Paid`/`unpaid`;
+  `paymentMethod` as `Transfer`/`Cash`/null. Absent strings emitted as `""`,
+  absent paidAt/paymentMethod as `null`.
+
 ## Unknown / risky fields
 - RLS status: unknown.
 - `payment_proofs`: no real rows observed yet.

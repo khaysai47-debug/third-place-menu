@@ -1,8 +1,18 @@
 # Adapter Parity Testing (Phase 2D)
 
-**Status:** procedure skeleton — the Supabase side does not exist yet, so this
-cannot be run today. It becomes runnable the moment `supabaseOrdersAdapter.listOrders()`
-/ `supabaseExpensesAdapter.listExpenses()` are implemented (Phase 2C).
+**Status:** RUNNABLE — Phase 2C is done: `supabaseOrdersAdapter.listOrders()`
+and `supabaseExpensesAdapter.listExpenses()` are implemented (reads only;
+writes still throw until Phase 2G).
+
+**Prerequisites:** add to `.env.local` (never commit values):
+
+```
+VITE_SUPABASE_URL=https://<project-ref>.supabase.co
+VITE_SUPABASE_ANON_KEY=<anon public key — NEVER the service_role key>
+```
+
+`ACTIVE_DATA_SOURCE` stays `"n8n"` throughout — the live app never touches
+Supabase during parity testing.
 
 **Goal:** prove, on the same underlying data, that the Supabase adapter's
 normalized output is identical to the live n8n adapter's output — *before*
@@ -12,55 +22,40 @@ normalized output is identical to the live n8n adapter's output — *before*
 no I/O, imported by nothing in the app. The companion human checklist is
 `docs/adapter-contract-checklist.md`.
 
-## Why there is no `scripts/compare-adapters.ts`
+## How to run it
 
 This repo is a Vite browser app with no Node script runner (no tsx/ts-node,
 no `test` script), and the adapters read `import.meta.env.VITE_*` — they only
-run inside the Vite dev server. So the comparison runs as **dev-scratch code
-inside the running app**, not as a standalone script. Two supported ways:
+run inside the Vite dev server. The runner is
+`src/lib/data/dev/runParity.ts` — imported by nothing in the app, so it never
+enters a production bundle.
 
-### Option A — temporary dev-only route (recommended)
+With `npm run dev` running, open any page and paste into the browser console:
 
-Create a scratch route (e.g. `src/routes/dev-parity.tsx`) that is **never
-linked from any screen and is deleted before the flip commit**:
-
-```tsx
-// TEMPORARY — delete before flipping ACTIVE_DATA_SOURCE.
-import { createFileRoute } from "@tanstack/react-router";
-import { n8nOrdersAdapter } from "@/lib/data/adapters/n8nOrdersAdapter";
-import { supabaseOrdersAdapter } from "@/lib/data/adapters/supabaseOrdersAdapter";
-import { n8nExpensesAdapter } from "@/lib/data/adapters/n8nExpensesAdapter";
-import { supabaseExpensesAdapter } from "@/lib/data/adapters/supabaseExpensesAdapter";
-import {
-  compareOrdersForParity,
-  compareExpensesForParity,
-  summarizeParityResult,
-} from "@/lib/data/dev/adapterParity";
-
-async function runParity() {
-  const [n8nOrders, sbOrders] = await Promise.all([
-    n8nOrdersAdapter.listOrders(),
-    supabaseOrdersAdapter.listOrders(),
-  ]);
-  console.log(summarizeParityResult(compareOrdersForParity(n8nOrders, sbOrders)));
-
-  const [n8nExpenses, sbExpenses] = await Promise.all([
-    n8nExpensesAdapter.listExpenses(),
-    supabaseExpensesAdapter.listExpenses(),
-  ]);
-  console.log(summarizeParityResult(compareExpensesForParity(n8nExpenses, sbExpenses)));
-}
-
-export const Route = createFileRoute("/dev-parity")({
-  component: () => <button onClick={runParity}>Run parity (see console)</button>,
-});
+```js
+const m = await import("/src/lib/data/dev/runParity.ts");
+await m.runAdapterParity();                            // presence-mode timestamps
+await m.runAdapterParity({ strictTimestamps: true });  // once formats verified
 ```
 
-### Option B — browser console in `npm run dev`
+It fetches both adapters for both domains, logs the two summaries, and returns
+the raw `ParityResult`s for closer inspection.
 
-Import the same functions from any dev-loaded module scope (e.g. temporarily
-expose them on `window` from a screen you have open) and run the same snippet.
-Option A is cleaner; use B only for quick re-checks.
+## Known differences to expect on the first run
+
+Adjudicate these per step 5 below — they are documented, not surprises:
+
+- **Expenses `itemName` / `createdBy` / `id(rowKey)`**: discovery found the
+  current n8n Get Expenses output emits `description`/`staff_name` keys and no
+  `id`/`item_name`/`created_by`, while the frontend mapper reads the latter —
+  so the n8n reference may show `itemName: ""`, `createdBy: null`, and a
+  missing row key. The Supabase adapter maps the real columns
+  (`description` → itemName, `staff_name` → createdBy, `id` → row key), which
+  is the *correct* data. If parity flags these, the fix is in the n8n Get
+  Expenses output mapping (upstream), not in the Supabase adapter.
+- **Order item ordering**: the Supabase adapter orders lines by
+  `order_items.created_at`; if n8n emits a different line order, per-index
+  item mismatches appear even though the sets are identical.
 
 ## Full procedure (do all six, in order)
 
@@ -81,7 +76,8 @@ Option A is cleaner; use B only for quick re-checks.
    bar. Check counts on a day with real variety: delivery + cancelled +
    paid-by-transfer + payment-proof orders.
 6. **Only then flip reads** — Phase 2E in docs/backend-separation-runbook.md.
-   Delete the scratch route in the same commit.
+   (Nothing to delete: the runner lives in `src/lib/data/dev/` and is never
+   bundled; it stays as regression tooling.)
 
 ## Pass criteria
 

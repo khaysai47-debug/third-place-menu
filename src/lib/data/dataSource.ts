@@ -12,9 +12,11 @@
 // splitting this constant when Phase 2 actually starts — keep it one value
 // until then.
 //
-// SAFETY: "supabase" currently selects stub adapters whose every method throws
-// AdapterNotImplementedError, so a premature flip fails loudly on first data
-// access rather than corrupting anything.
+// SAFETY: "supabase" selects adapters whose READS are implemented (Phase 2C)
+// but whose WRITES still throw AdapterNotImplementedError until Phase 2G — so
+// a premature flip breaks every staff action loudly instead of silently
+// bypassing the n8n automations. Do not flip before parity passes (Phase 2D,
+// docs/adapter-parity-testing.md).
 
 export type DataSource = "n8n" | "supabase";
 

@@ -14,8 +14,8 @@
 // clean numeric STRINGS (e.g. "150.00"). Postgres numeric/decimal columns
 // commonly serialize to JSON as strings via PostgREST; the live n8n path never
 // produces those, so for n8n data behavior is identical (numbers pass through,
-// garbage → 0). DISCOVERY_REQUIRED: confirm the real Supabase column types —
-// if money columns are float8/int this superset simply never triggers.
+// garbage → 0). CONFIRMED (Phase 2B): observed money values arrive as JSON
+// numbers, so the string branch is a safety net that normally never triggers.
 
 import type {
   NormalizedOrderStatus,
@@ -92,9 +92,11 @@ export function normalizeOptionalString(value: unknown): string | undefined {
  * back to "new": the unknown order surfaces at the top of the staff board
  * instead of vanishing, and never masquerades as done/cancelled (which would
  * corrupt money totals).
- * DISCOVERY_REQUIRED: confirm the exact status strings the Supabase table
- * stores; if new spellings exist (e.g. "in_progress"), extend this mapping
- * EXPLICITLY — do not rely on the fallback in production.
+ * CONFIRMED (Phase 2B): the DB stores "completed" (never "done"), "delivered",
+ * "cancelled", "new" — but n8n does NOT constrain the column, so any string
+ * the frontend flow writes (preparing/ready/out_for_delivery) can appear.
+ * If a NEW spelling ever shows up, extend this mapping EXPLICITLY — do not
+ * rely on the fallback in production.
  */
 export function normalizeOrderStatus(value: unknown): NormalizedOrderStatus {
   const raw = asString(value).toLowerCase();
@@ -109,8 +111,9 @@ export function normalizeOrderStatus(value: unknown): NormalizedOrderStatus {
  * (including unknown values like "pending" or "refunded") → "unpaid". This is
  * the live rule and it fails safe: an order that might not be paid shows as
  * unpaid, which staff can fix, rather than as paid, which loses money.
- * DISCOVERY_REQUIRED: the write path sends capitalized "Paid" — confirm the
- * Supabase column's casing/enum before implementing writes.
+ * CONFIRMED (Phase 2B): real rows hold "Paid" AND "unpaid", and the n8n
+ * default can write lowercase "paid" — case-insensitive matching here is
+ * mandatory, not defensive.
  */
 export function normalizePaymentStatus(value: unknown): NormalizedPaymentStatus {
   return asString(value).toLowerCase() === "paid" ? "paid" : "unpaid";
@@ -120,8 +123,8 @@ export function normalizePaymentStatus(value: unknown): NormalizedPaymentStatus 
  * DB → app payment method. Canonicalizes case-insensitively to the exact
  * select values "Cash" / "Transfer"; anything unrecognized → undefined, never
  * invented (owner Payment Mix must not gain a phantom method).
- * DISCOVERY_REQUIRED: confirm whether Supabase stores "Cash"/"Transfer"
- * verbatim (Airtable heritage) or lowercase enum values.
+ * CONFIRMED (Phase 2B): Supabase stores "Cash"/"Transfer" verbatim
+ * (capitalized), or null before payment.
  */
 export function normalizePaymentMethod(value: unknown): NormalizedPaymentMethod | undefined {
   const raw = asString(value).toLowerCase();
