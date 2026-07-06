@@ -50,6 +50,20 @@ contracts in `src/lib/data/contracts/`; parity procedure in
 
 ## Phase 2D — Side-by-side parity comparison  *(no flip yet)*
 
+**Status 2026-07-06: first-day parity PASSED** — `npm run parity` and
+`npm run parity -- --strict` both `ok: true`: orders 38/38 clean matches,
+expenses 0 vs 0 (trivially — re-test on a day with real expense rows).
+Supabase-side setup done for read parity: `GRANT SELECT` + permissive anon
+SELECT RLS policies (`USING (true)`) on `orders` and `order_items`.
+⚠️ Revisit the RLS/security posture before real restaurant use — current anon
+read exposure equals the existing public n8n staff-orders GET, but it was
+enabled for testing, not decided for production. `ACTIVE_DATA_SOURCE` remains
+`"n8n"`; reads flip only via the Phase 2E gate below; writes stay on n8n
+until Phase 2G.
+
+Remaining before the 2E gate: second day of data, expenses with real rows,
+a payment-proof order, one walk of docs/adapter-contract-checklist.md.
+
 - Run the full procedure in `docs/adapter-parity-testing.md` — normally
   `npm run parity` (Node script `scripts/run-parity.mjs`, avoids browser
   CORS against n8n Cloud); compare functions live in

@@ -218,7 +218,11 @@ Dine-in completed order: `order_type: dine_in`, `status: completed`,
   absent paidAt/paymentMethod as `null`.
 
 ## Unknown / risky fields
-- RLS status: unknown.
+- RLS status: RESOLVED for reads (2026-07-06) — anon `GRANT SELECT` +
+  permissive SELECT RLS policies (`USING (true)`) added manually on `orders`
+  and `order_items` for parity testing; `payment_proofs` / `expenses` were
+  already anon-readable. No anon write grants exist (keep it that way).
+  ⚠️ Full security posture still needs review before real restaurant use.
 - `payment_proofs`: no real rows observed yet.
 - `preparing` / `ready` / `out_for_delivery`: accepted by n8n, not yet seen
   in Supabase rows.

@@ -13,21 +13,15 @@ VITE_SUPABASE_URL=https://<project-ref>.supabase.co
 VITE_SUPABASE_ANON_KEY=<anon public key — NEVER the service_role key>
 ```
 
-2. The anon role must be able to SELECT the four read tables. As of
-   2026-07-06, `orders` and `order_items` return
-   `401 permission denied (42501)` for anon while `payment_proofs` and
-   `expenses` are readable — run in the Supabase SQL editor:
-
-```sql
-GRANT SELECT ON public.orders TO anon;
-GRANT SELECT ON public.order_items TO anon;
-```
-
-   If a table then returns 200 but rows are missing, RLS is enabled without a
-   read policy — that's the Phase 2E "RLS posture" decision, resolve it there.
+2. The anon role must be able to SELECT the four read tables.
+   ✅ DONE 2026-07-06: `GRANT SELECT ON public.orders TO anon;` and
+   `GRANT SELECT ON public.order_items TO anon;` were executed, plus
+   anon SELECT RLS policies (`USING (true)`) on both tables, for read parity
+   testing. `payment_proofs` and `expenses` were already readable.
    (Security note: anon SELECT means anyone with the public anon key can read
-   order data. The current n8n staff-orders webhook is already an
-   unauthenticated public GET, so this is not a new exposure — but writes must
+   order data. This is equivalent exposure to the existing public n8n
+   staff-orders GET webhook, so nothing new — but the whole RLS/security
+   posture must be reviewed before real restaurant use, and writes must
    NEVER be granted to anon.)
 
 `ACTIVE_DATA_SOURCE` stays `"n8n"` throughout — the live app never touches
@@ -124,3 +118,15 @@ Adjudicate these per step 5 below — they are documented, not surprises:
 - One run with `strictTimestamps: true` passing, or a written note explaining
   the accepted timestamp format difference.
 - The human checklist (docs/adapter-contract-checklist.md) also walked once.
+
+## Run log
+
+| Date | Result | Notes |
+| --- | --- | --- |
+| 2026-07-06 | ✅ PASS (normal AND `--strict`) | orders: 38/38 clean matches (incl. delivery, cancelled, transfer-paid, completed dine-in). expenses: 0 vs 0 — trivially equal; **must re-run on a day with real expense rows before this counts**. Strict timestamps passing means n8n passes Supabase timestamps through verbatim — no format note needed. |
+
+Still open before the Phase 2E flip: a second day of order data, an expenses
+run with real rows, a payment-proof order (none exist yet), and one walk of
+the human checklist. Reads don't flip until the Phase 2E gate in
+docs/backend-separation-runbook.md is fully checked; writes stay on n8n
+until Phase 2G regardless.
