@@ -362,6 +362,115 @@ Verify after the next Vercel deploy (before any staff-write testing):
 Rollback: delete the `api/` directory and revert the commit — the static SPA
 deploy is unaffected either way (n8n writes were never touched).
 
+### 2G-E — Controlled staff write testing on production (2026-07-08)
+
+(Owner phase naming. The write-separation-plan's original "2G-E — expenses +
+menu availability" is untouched and becomes the NEXT implementation phase.)
+
+Production writes remain on n8n throughout — every test below targets ONE
+disposable test order, keyed by its `order_number`, through the deployed
+`/api/staff/*` functions.
+
+**Already verified on production (2026-07-08):**
+
+- `POST /api/staff/update-status` without `x-staff-secret` → 401 JSON.
+- `GET /api/staff/update-status` → 405 JSON.
+- `/`, `/staff`, `/owner` all load; reads work.
+- Vercel env has `SUPABASE_SERVICE_ROLE_KEY` + `STAFF_WRITE_SECRET`.
+
+**Route contracts under test** (single implementation:
+`api/_lib/staffOrderWrites.server.ts`; all match rows by
+`orders.order_number`, never a UUID):
+
+| Route | Body | Columns written |
+| --- | --- | --- |
+| `POST /api/staff/update-status` | `{ orderId, status, cancellationReason? }` — status ∈ the app's 7 values | non-cancel: `status` ("done"→`completed`) + `cancellation_reason`/`cancelled_at` reset to null; "cancelled": as cancel-order |
+| `POST /api/staff/cancel-order` | `{ orderId, reason? }` | `status="cancelled"`, `cancellation_reason` (reason or "Other"), `cancelled_at=now` — payment fields untouched (n8n parity) |
+| `POST /api/staff/mark-paid` | `{ orderId, paymentMethod: "Cash"\|"Transfer" }` | `payment_status="Paid"`, `payment_method`, `paid_at=now` |
+
+**Step 0 — create the test order** (never test on a customer order): staff
+page → Add Order 加單 → one cheapest item, dine-in, note
+`TEST ORDER 2G-E — do not prepare`. This uses the untouched n8n intake, so
+the row is created exactly like production rows. Note its `TP-…` number.
+Prefer testing outside service hours (mid-test the transient Paid state
+counts in owner Today until the final cancel).
+
+**Step 1 — API tests** (PowerShell; secret via Read-Host so it never enters
+shell history — never paste secrets inline):
+
+```powershell
+$env:STAFF_SECRET = Read-Host "Paste STAFF_WRITE_SECRET from .env.local"
+$env:BASE_URL = "https://third-place-menu.vercel.app"
+$env:TEST_ORDER = "TP-XXXX"   # <-- the Step 0 order number
+$H = @{ "x-staff-secret" = $env:STAFF_SECRET }
+
+# A) status update
+Invoke-RestMethod -Method Post -Uri "$env:BASE_URL/api/staff/update-status" -Headers $H -ContentType "application/json" -Body (@{ orderId = $env:TEST_ORDER; status = "preparing" } | ConvertTo-Json)
+# B) mark paid Cash
+Invoke-RestMethod -Method Post -Uri "$env:BASE_URL/api/staff/mark-paid" -Headers $H -ContentType "application/json" -Body (@{ orderId = $env:TEST_ORDER; paymentMethod = "Cash" } | ConvertTo-Json)
+# C) mark paid Transfer (overwrite)
+Invoke-RestMethod -Method Post -Uri "$env:BASE_URL/api/staff/mark-paid" -Headers $H -ContentType "application/json" -Body (@{ orderId = $env:TEST_ORDER; paymentMethod = "Transfer" } | ConvertTo-Json)
+# D) cancel — final state doubles as cleanup (cancelled = excluded from owner money)
+Invoke-RestMethod -Method Post -Uri "$env:BASE_URL/api/staff/cancel-order" -Headers $H -ContentType "application/json" -Body (@{ orderId = $env:TEST_ORDER; reason = "2G-E test cleanup" } | ConvertTo-Json)
+```
+
+Expected: every call returns `ok: True` (Invoke-RestMethod throws on
+non-2xx). After A: `status="preparing"`, cancellation fields null. After B:
+`payment_status="Paid"`, `payment_method="Cash"`, `paid_at` stamped. After
+C: `payment_method="Transfer"`, `paid_at` newer. After D:
+`status="cancelled"`, `cancellation_reason="2G-E test cleanup"`,
+`cancelled_at` stamped, payment fields unchanged.
+
+**Step 2 — Supabase Table Editor verification**: `orders` table, filter
+`order_number = TP-XXXX`; after each call check `status`,
+`payment_status`, `payment_method`, `paid_at`, `cancellation_reason`,
+`cancelled_at` against the expected values above. Timestamps ISO, sane.
+
+**Step 3 — UI-path test on a staff device** (exercises the Supabase adapter
+end-to-end, per-device only): on `/staff`, tap ⚿ and enter the staff
+secret; in the browser console run
+`localStorage.setItem("tp-staff-write-source", "supabase")`. Re-run Step 0
+to make a second test order, then advance / mark paid / cancel it FROM THE
+UI. Verify the board updates optimistically and survives the 5s poll
+(reads are Supabase, so what you wrote is what it reads). Then
+`localStorage.removeItem("tp-staff-write-source")` and confirm a normal n8n
+write still works on some other harmless action.
+
+**Step 4 — owner dashboard**: manual refresh; both test orders sit in
+cancelled (excluded from gross/net/payment mix); cancelled-today count
+includes them (expected).
+
+**Rollback / reset**: the final cancelled state IS the cleanup — no reset
+needed. To reset a field manually anyway: Table Editor → orders → the row →
+edit the columns listed in Step 2 (e.g. `payment_status` back to `unpaid`,
+`payment_method`/`paid_at` to NULL). Full removal, ONLY if desired, via SQL
+editor — review before running, children first:
+
+```sql
+-- shown for reference; do not run without checking the order_number twice
+DELETE FROM order_items WHERE order_id = (SELECT id FROM orders WHERE order_number = 'TP-XXXX');
+DELETE FROM orders WHERE order_number = 'TP-XXXX';
+```
+
+**Decision gate — before flipping staff writes to Supabase:**
+
+- [ ] Step 1 A–D all `ok: True` with matching Supabase rows (Step 2).
+- [ ] Step 3 UI-path test passed on the actual staff device.
+- [ ] n8n CONFIRM checkboxes for the two workflows being replaced
+      (docs/n8n-workflow-side-effects.md rows 2–3): 60-second node-list
+      check that they are still DB-only.
+- [ ] ⚠️ FLIP DESIGN (confirmed 2026-07-08): do NOT flip
+      `ACTIVE_WRITE_SOURCE` — that would also route `submitOrder` (customer
+      checkout + manual order) to the Supabase adapter where it is still a
+      THROWING STUB and would break order intake. The staff flip is a small
+      code change in `src/lib/data/orderRepository.ts` binding ONLY
+      `updateOrderStatus` / `cancelOrder` / `updateOrderPayment` to
+      `supabaseOrdersAdapter` (replacing the localStorage override),
+      while `ACTIVE_WRITE_SOURCE` stays `"n8n"` for `submitOrder`.
+- [ ] Staff devices provisioned: secret entered via ⚿ on each device BEFORE
+      the flip deploys (writes fail with a clear error otherwise).
+- [ ] n8n status/payment webhooks stay alive as instant rollback.
+
 ## Phase 2H — n8n keeps the automation jobs (end state)
 
 - n8n permanently retains: Instagram/Messenger/LINE/WeChat bot conversations,
