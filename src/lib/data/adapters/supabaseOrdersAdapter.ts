@@ -1,13 +1,13 @@
-// OrderRepository backed by Supabase — reads implemented (Phase 2C, live since
-// the 2E flip); STAFF WRITES implemented in Phase 2G-D via the /api/staff/*
-// server routes. NOT the live write path: ACTIVE_WRITE_SOURCE stays "n8n"
-// (src/lib/data/dataSource.ts) — only the per-device localStorage override in
-// orderRepository.ts reaches these writes, for testing.
+// OrderRepository backed by Supabase — reads live since the 2E flip; the
+// three STAFF WRITES (status/cancel/mark-paid) are the LIVE DEFAULT since
+// Phase 2G-F via STAFF_ACTION_WRITE_SOURCE (dataSource.ts), going through the
+// /api/staff/* server routes validated in 2G-E. submitOrder still throws —
+// order intake stays on n8n (ACTIVE_WRITE_SOURCE).
 //
 // Schema source of truth: docs/schema-discovery-notes.md (filled 2026-07-06).
 // Row shapes + field wiring live in ../mappers/orderMapper.ts.
 //
-// ─── WRITES (Phase 2G-D) ─────────────────────────────────────────────────────
+// ─── WRITES (Phase 2G-D routes, 2G-F flip) ───────────────────────────────────
 //
 // - Never-throw { success, error? } contract, same as the n8n path.
 // - Writes go through the app's own server routes (src/routes/api.staff.*.ts)
@@ -25,8 +25,7 @@
 
 import type { OrderRepository } from "./types";
 import { AdapterNotImplementedError } from "./types";
-import type { UpdateStaffOrderResult } from "@/lib/staffOrders";
-import { getStaffWriteSecret } from "@/lib/staffWriteSecret";
+import { staffWrite } from "../staffWriteClient";
 import { supabaseSelect } from "../supabase";
 import {
   assembleSupabaseOrderRows,
@@ -38,41 +37,6 @@ import {
 
 const notImplemented = (method: string) =>
   new AdapterNotImplementedError("supabaseOrdersAdapter", method);
-
-/**
- * POSTs one staff write to an /api/staff/* server route with the device's
- * staff secret. Never throws — mirrors the n8n path's result contract and
- * bilingual error copy so the staff UI behaves identically.
- */
-async function staffWrite(
-  path: string,
-  body: Record<string, unknown>,
-): Promise<UpdateStaffOrderResult> {
-  const secret = getStaffWriteSecret();
-  if (!secret) {
-    return {
-      success: false,
-      error: "未設定員工密碼 · Staff secret not set — tap the key button in the header.",
-    };
-  }
-  try {
-    const response = await fetch(path, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-staff-secret": secret },
-      body: JSON.stringify(body),
-    });
-    const data = (await response.json().catch(() => null)) as {
-      ok?: boolean;
-      error?: string;
-    } | null;
-    if (!response.ok || data?.ok !== true) {
-      return { success: false, error: data?.error ?? "更新失敗 · Update failed. Try again." };
-    }
-    return { success: true };
-  } catch {
-    return { success: false, error: "無法連接伺服器 · Can't reach order server." };
-  }
-}
 
 export const supabaseOrdersAdapter: OrderRepository = {
   // Mirrors the n8n Staff Orders API (confirmed live 2026-07-06): ALL orders,

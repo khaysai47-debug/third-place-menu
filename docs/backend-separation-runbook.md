@@ -500,6 +500,121 @@ DELETE FROM orders WHERE order_number = 'TP-XXXX';
       the flip deploys (writes fail with a clear error otherwise).
 - [ ] n8n status/payment webhooks stay alive as instant rollback.
 
+### 2G-F — TARGETED staff-write flip (2026-07-08)
+
+Staff order actions (status / cancel / mark-paid) now default to the
+Supabase server routes via a NEW switch in `src/lib/data/dataSource.ts`:
+
+- `STAFF_ACTION_WRITE_SOURCE = "supabase"` — governs exactly the staff
+  actions; deliberately separate from `ACTIVE_WRITE_SOURCE` (still `"n8n"`),
+  which still governs `submitOrder` (customer checkout + staff manual order)
+  because the Supabase `submitOrder` is a throwing stub.
+- The 2G-D per-device localStorage override (`tp-staff-write-source`) was
+  REMOVED — superseded by the one constant. The ⚿ secret flow is unchanged;
+  a device without the secret gets a clear "tap the key button" error.
+- ROLLBACK (one line): `STAFF_ACTION_WRITE_SOURCE` back to `"n8n"`, build,
+  deploy. The n8n adapters/webhooks were never modified.
+- ⚠️ PROVISIONING: every staff device must have the current
+  `STAFF_WRITE_SECRET` entered via ⚿ BEFORE this deploy serves it.
+
+### 2G-G — Expense write server route + targeted flip (2026-07-08)
+
+Pre-check passed: the n8n Add Expense workflow is DB-only (side-effects doc
+row 4, rec. A) — safe to move.
+
+- New route `POST /api/staff/add-expense` (same delegate pattern:
+  `api/staff/add-expense.ts` for production, `src/routes/
+  api.staff.add-expense.ts` for dev, one implementation in
+  `api/_lib/staffOrderWrites.server.ts`). Requires `x-staff-secret`;
+  validates the frozen snake_case payload (`item_name`, positive `amount`,
+  closed `paid_from`/`category` vocabularies, optional `note`/`created_by`).
+- INSERT mapping replicates n8n (schema notes § Expenses): `expense_date` ←
+  Bangkok yyyy-MM-dd, `description` ← item_name, `payment_method` ←
+  paid_from, `staff_name` ← created_by or "Staff", `note`. Returns
+  `{ ok: true, expenseId }` (the row UUID — the app's expenseId).
+- `supabaseExpensesAdapter.addExpense` implemented via the shared
+  `staffWriteClient`; `expenseRepository.addExpense` follows
+  `STAFF_ACTION_WRITE_SOURCE` — same one-line rollback as 2G-F.
+- Dev-verified: 401 without secret, 400 on bad paid_from and negative
+  amount; order routes regression-checked (404 unknown order).
+
+### 2G-H — Menu availability: BLOCKED on schema (decision, 2026-07-08)
+
+DO NOT migrate the menu availability write yet, and note the READ (customer
+menu!) is also still on n8n. Confirmed state:
+
+- App model: three states — `Available` / `Sold Out` / `Hidden`
+  (`src/lib/menuAvailability.ts`, MenuAvailabilityBoard).
+- DB: `menu_items.is_available` **boolean** only. The n8n write collapses
+  the three states (`is_available ← status === "Available"`), and the n8n
+  read maps the boolean back to only `Available`/`Sold Out` — **"Hidden"
+  cannot round-trip today**: a hidden item comes back as Sold Out.
+- DECISION: add a dedicated 3-state column. Text + CHECK beats an enum type
+  (no migration needed to extend later) and beats keeping booleans (the
+  whole problem is booleans can't hold 3 states):
+
+```sql
+-- Run in Supabase SQL editor — REVIEW FIRST, not run by any tool:
+ALTER TABLE public.menu_items
+  ADD COLUMN availability_status text NOT NULL DEFAULT 'available'
+  CHECK (availability_status IN ('available', 'sold_out', 'hidden'));
+UPDATE public.menu_items
+  SET availability_status = CASE WHEN is_available THEN 'available' ELSE 'sold_out' END;
+```
+
+- ⚠️ Backfill caveat: currently-hidden items are stored as `false` =
+  indistinguishable from Sold Out — after the migration the owner must
+  re-mark Hidden items by hand (one-time).
+- Until every consumer migrates: writers should set BOTH columns
+  (`is_available = availability_status === 'available'`) so the n8n
+  workflows and old reads keep working. Retire `is_available` only in the
+  Phase 2H cleanup.
+- After the schema change lands: menu-availability server route + read
+  migration (`menu_items` anon SELECT for the customer menu) in their own
+  phase, per plan W6/R1.
+
+### NEXT — Customer order submit (plan only, DO NOT implement yet)
+
+The last normal-op write. Server route design (plan § W1 + 2G-B decisions):
+
+1. PUBLIC route (no staff secret — customers order), e.g.
+   `POST /api/order/submit`: receives cart lines (item codes + quantities),
+   order type, table number / customer info, note.
+2. Server fetches `menu_items` from Supabase and RE-COMPUTES unit prices,
+   line totals, subtotal, delivery fee, and total — client-sent money is a
+   display hint, never trusted; unknown item codes and insane quantities are
+   rejected (this closes today's trust-the-client n8n behavior).
+3. Server INSERTs `orders` + `order_items` (prefer a single Postgres RPC
+   `create_order(...)` for atomicity; n8n does two sequential inserts today,
+   so an RPC is an upgrade, not a regression).
+4. Returns the `order_number` the frontend uses everywhere.
+5. OPTIONAL bridge (Phase 3): after a successful insert, fire-and-forget an
+   n8n automation webhook (auth via `N8N_AUTOMATION_SECRET`) so future
+   bots/notifications keep working; the n8n intake webhook stays alive
+   regardless.
+6. Flip mechanism: implement Supabase `submitOrder` in the adapter → flip
+   `ACTIVE_WRITE_SOURCE` (by then it governs ONLY submitOrder). Rollback
+   stays one line.
+
+### Production test checklist after the 2G-F/2G-G deploy
+
+1. ⚿ on each staff device: enter the CURRENT rotated secret.
+2. Staff board: advance a TEST order's status (create via Add Order first,
+   as in 2G-E), mark paid Cash, cancel with a reason — all from the UI; the
+   board must update and survive the 5s poll.
+3. Expenses: add `TEST EXPENSE 2G-G` (small amount, category Other) from
+   the staff Expenses view; it must appear in the list (Supabase read) and
+   in Supabase Table Editor with description/payment_method/staff_name/
+   expense_date correct. Then DELETE that row in Table Editor (expenses
+   have no cancelled state — the row otherwise pollutes owner Net Today).
+4. Owner dashboard: manual refresh — numbers sane; the cancelled test order
+   excluded; after deleting the test expense, Net Today back to normal.
+5. Customer checkout: place NO real test order via checkout unless needed —
+   intake is unchanged (n8n); a quick page-load check is enough.
+6. n8n executions list: status/payment/expense webhooks should now show NO
+   new executions from app actions (only bots/manual runs) — confirms the
+   app stopped depending on them while they stay alive as fallback.
+
 ## Phase 2H — n8n keeps the automation jobs (end state)
 
 - n8n permanently retains: Instagram/Messenger/LINE/WeChat bot conversations,

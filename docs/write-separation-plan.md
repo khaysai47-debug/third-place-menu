@@ -1,10 +1,13 @@
 # Write Separation Plan — Phase 2G (audit + architecture)
 
-**Status:** 2G-A audit COMPLETE (2026-07-06); 2G-D staff order routes
-ROUTE-READY but not active (2026-07-08). Flags unchanged
-(`ACTIVE_READ_SOURCE = "supabase"`, `ACTIVE_WRITE_SOURCE = "n8n"`).
-Remaining normal-op writes to migrate: expenses (W5), menu availability
-(W6 — after the 3-state gap is resolved), customer order intake (W1, last).
+**Status (2026-07-08):** staff order actions (W2/W3/W4) AND expense add
+(W5) are LIVE on Supabase server routes via the targeted
+`STAFF_ACTION_WRITE_SOURCE` switch (runbook 2G-F/2G-G) — pending the
+post-deploy production checklist. `ACTIVE_READ_SOURCE = "supabase"`;
+`ACTIVE_WRITE_SOURCE = "n8n"` (governs submitOrder only in practice).
+Remaining normal-op migrations: menu availability (W6 — BLOCKED on the
+3-state schema, SQL prepared in runbook 2G-H), menu availability READ (R1,
+customer menu), customer order intake (W1, last — plan in runbook § NEXT).
 Payment proof add (W7) stays n8n long-term for bot/social automation.
 
 **Business goal:** before real restaurant use, normal app operations must not
@@ -269,24 +272,32 @@ writes, the options are:
       dual-fired. NOTE: despite the C-before-D numbering, implement AFTER
       2G-D if intake automations aren't re-pointed yet — intake is the
       automation-entangled one (runbook has always ordered it last).
-- [x] **2G-D — staff order actions ROUTE-READY** (2026-07-08): status +
-      cancel + mark-paid server routes (`/api/staff/*`, `x-staff-secret`) and
-      the Supabase adapter writes implemented — but NOT ACTIVE by default:
-      `ACTIVE_WRITE_SOURCE` stays `"n8n"`; a per-device localStorage override
-      (`tp-staff-write-source`) is the controlled test path. 2G-D2
-      (2026-07-08) fixed deployed `/api/*` serving: native Vercel functions
-      in `api/staff/*` delegating to the same shared handlers as the dev
-      routes (the Nitro `vercel` preset attempt broke the SPA-shell prerender
-      and was reverted — details in runbook 2G-D2). Remaining before the
-      actual flip: verify `/api/staff/*` on the deployed app, deployed write
-      testing, and the n8n CONFIRM checkboxes (side-effects doc rows 2–3).
-      n8n status/payment webhooks stay the live default + rollback.
-- [ ] **2G-E — expenses + menu availability** (W5/W6 + R1): expense insert
-      route; menu-availability update route (resolve the is_available
-      boolean vs 3-state gap first); `menu_items` anon SELECT for the read.
-- [ ] **2G-F — automation stays in n8n** (W7 + Phase 3 surface): payment
-      proof intake, bots, notifications; document which n8n workflows remain
-      and which retire.
-- [ ] **2G-G — parity / write smoke test**: full § 4 pass over every
+- [x] **2G-D — staff order actions FLIPPED** (2026-07-08): routes built
+      (2G-D), Vercel serving fixed via native `api/` functions (2G-D2),
+      controlled production test PASSED (runbook 2G-E, order
+      TP-S-20260708-152853), and the targeted flip landed (runbook 2G-F):
+      status/cancel/mark-paid default to the Supabase server routes via
+      `STAFF_ACTION_WRITE_SOURCE` — `ACTIVE_WRITE_SOURCE` stays `"n8n"` for
+      submitOrder. The 2G-D localStorage override was removed. n8n
+      status/payment webhooks stay alive as the one-line rollback.
+      (NOTE: runbook section letters are owner-named and drifted from this
+      checklist — runbook 2G-E=test, 2G-F=staff flip, 2G-G=expense,
+      2G-H=menu decision.)
+- [x] **W5 — expense insert FLIPPED** (2026-07-08, runbook 2G-G):
+      `/api/staff/add-expense` route + Supabase adapter write, following the
+      same `STAFF_ACTION_WRITE_SOURCE` switch; pending the post-deploy
+      production checklist (runbook 2G-F/G section).
+- [ ] **W6 + R1 — menu availability**: BLOCKED on schema — `is_available`
+      boolean cannot hold Hidden (it can't even round-trip today). Decision +
+      migration SQL prepared in runbook 2G-H; after the column lands:
+      update route (write both columns during transition) + `menu_items`
+      anon SELECT for the customer-menu read.
+- [ ] **2G-C / W1 — customer order submit** (LAST): server route with
+      server-recomputed totals; plan refreshed in runbook § NEXT. Flip via
+      `ACTIVE_WRITE_SOURCE` once it governs only submitOrder.
+- [ ] **W7 — automation stays in n8n** (payment proof intake, bots,
+      notifications): document which n8n workflows remain and which retire
+      at Phase 2H cleanup.
+- [ ] **Final — parity / write smoke test**: full § 4 pass over every
       migrated write on the deployed app + one `npm run parity` run + the
       runbook's post-flip verification list.

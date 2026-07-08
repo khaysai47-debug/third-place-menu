@@ -1,7 +1,8 @@
 import process from "node:process";
 import { z } from "zod";
 
-// Server-only staff order write handlers (Phase 2G-D/2G-D2).
+// Server-only staff write handlers — order actions (Phase 2G-D/2G-D2) and
+// add-expense (Phase 2G-G).
 //
 // Each export is a complete web-standard (Request) => Response handler,
 // consumed by TWO thin delegate layers so there is ONE implementation:
@@ -195,4 +196,67 @@ export async function postMarkPaid(request: Request): Promise<Response> {
   if (updated instanceof Response) return updated;
   if (updated === 0) return jsonError(404, "Order not found.");
   return Response.json({ ok: true, orderId, paymentStatus: "paid", paymentMethod });
+}
+
+/* ── Add expense (Phase 2G-G) ───────────────────────────────────────────── */
+
+// Frozen frontend payload (snake_case — see src/lib/expenses.ts) with the
+// app's closed vocabularies. Column mapping replicates the n8n Add Expense
+// workflow (docs/schema-discovery-notes.md § Expenses): the display name goes
+// to `description` (no item_name column), paid_from → payment_method,
+// expense_date is the Bangkok-local service day.
+const addExpenseBody = z.object({
+  item_name: z.string().min(1),
+  amount: z.number().positive().finite(),
+  paid_from: z.enum(["Cash", "Transfer", "Owner Paid", "Other"]),
+  category: z.enum(["Drinks", "Ingredient", "Stock Refill", "Utility", "Delivery", "Other"]),
+  note: z.string().optional(),
+  created_by: z.string().optional(),
+});
+
+/** Bangkok service-day date (yyyy-MM-dd) — same rule as the n8n insert. */
+const bangkokToday = (): string =>
+  new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Bangkok" });
+
+/** POST /api/staff/add-expense — INSERT into expenses; returns the row UUID. */
+export async function postAddExpense(request: Request): Promise<Response> {
+  const denied = checkStaffSecret(request);
+  if (denied) return denied;
+
+  const body = addExpenseBody.safeParse(await request.json().catch(() => null));
+  if (!body.success) return jsonError(400, "Invalid request body.");
+  const { item_name, amount, paid_from, category, note, created_by } = body.data;
+
+  const url = process.env.VITE_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return jsonError(500, "Server is not configured for staff writes.");
+  try {
+    const response = await fetch(`${url.replace(/\/+$/, "")}/rest/v1/expenses`, {
+      method: "POST",
+      headers: {
+        apikey: key,
+        Authorization: `Bearer ${key}`,
+        "Content-Type": "application/json",
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify({
+        expense_date: bangkokToday(),
+        category,
+        description: item_name,
+        amount,
+        payment_method: paid_from,
+        staff_name: created_by || "Staff",
+        note: note || "",
+      }),
+    });
+    if (!response.ok) {
+      console.error(`Supabase expense insert failed: responded ${response.status}`);
+      return jsonError(500, "Expense insert failed.");
+    }
+    const rows = (await response.json()) as { id?: string }[];
+    return Response.json({ ok: true, expenseId: rows[0]?.id ?? null });
+  } catch (error) {
+    console.error("Supabase expense insert failed", error);
+    return jsonError(500, "Expense insert failed.");
+  }
 }

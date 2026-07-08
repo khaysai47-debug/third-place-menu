@@ -1,30 +1,18 @@
-// ExpenseRepository backed by Supabase — READ IMPLEMENTED (Phase 2C),
-// addExpense still deliberately stubbed until Phase 2G.
-//
-// NOT USED BY THE LIVE APP while ACTIVE_READ_SOURCE is "n8n". listExpenses()
-// is callable directly for the Phase 2D parity procedure
-// (docs/adapter-parity-testing.md); nothing flips before parity passes.
+// ExpenseRepository backed by Supabase — reads live since the 2E flip;
+// addExpense LIVE DEFAULT since Phase 2G-G via STAFF_ACTION_WRITE_SOURCE
+// (dataSource.ts), going through the /api/staff/add-expense server route.
 //
 // Schema source of truth: docs/schema-discovery-notes.md (filled 2026-07-06).
 // Row shape + the paid_from→payment_method / description→itemName wiring live
-// in ../mappers/expenseMapper.ts.
-//
-// Phase 2G — addExpense(): keep the never-throw { success, error? } contract
-// and the snake_case AddExpensePayload field names (frozen — n8n automations
-// consume them). Note the n8n insert maps paid_from → payment_method column.
+// in ../mappers/expenseMapper.ts; the write-side mapping is applied inside
+// the server route (api/_lib/staffOrderWrites.server.ts).
 //
 // Contract references: contracts/expenseContract.ts, contracts/adapterContract.ts.
 
 import type { ExpenseRepository } from "./types";
-import { AdapterNotImplementedError } from "./types";
+import { staffWrite } from "../staffWriteClient";
 import { supabaseSelect } from "../supabase";
-import {
-  mapSupabaseExpenseRows,
-  type SupabaseExpenseRow,
-} from "../mappers/expenseMapper";
-
-const notImplemented = (method: string) =>
-  new AdapterNotImplementedError("supabaseExpensesAdapter", method);
+import { mapSupabaseExpenseRows, type SupabaseExpenseRow } from "../mappers/expenseMapper";
 
 /** Bangkok service-day date (yyyy-MM-dd) — the window the n8n Get Expenses API uses. */
 const bangkokToday = (): string =>
@@ -41,8 +29,7 @@ export const supabaseExpensesAdapter: ExpenseRepository = {
     );
     return mapSupabaseExpenseRows(rows);
   },
-  addExpense: async () => {
-    // TODO(phase-2g): never-throw write; payload stays snake_case; paid_from → payment_method.
-    throw notImplemented("addExpense");
-  },
+  // Frozen snake_case payload passes through verbatim; the server route maps
+  // paid_from → payment_method, item_name → description, stamps expense_date.
+  addExpense: (payload) => staffWrite("/api/staff/add-expense", { ...payload }),
 };
