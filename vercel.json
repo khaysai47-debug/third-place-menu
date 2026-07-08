@@ -1,6 +1,6 @@
 {
   "rewrites": [
     { "source": "/_build/:path*", "destination": "/:path*" },
-    { "source": "/(.*)", "destination": "/_shell.html" }
+    { "source": "/((?!api/).*)", "destination": "/_shell.html" }
   ]
 }

@@ -293,13 +293,53 @@ CONFIRM checkbox (docs/n8n-workflow-side-effects.md rows 2–3), and the
 deployment prerequisite below. Rollback at any point: the override off /
 `ACTIVE_WRITE_SOURCE` back to `"n8n"` — n8n webhooks are untouched.
 
-⚠️ **Deployment prerequisite before any write flip:** the current Vercel
-deploy is a prerendered static SPA — `vercel.json` rewrites `/(.*)` to
-`/_shell.html`, so `/api/staff/*` is NOT reachable on production today. The
-routes work under `npm run dev` and any node server deploy. Before flipping,
-the deployment must actually serve the Nitro server for `/api/*` (exclude
-`/api/*` from the rewrite and deploy the server output). Do this in its own
-verified deploy step.
+**Deployment prerequisite — RESOLVED in 2G-D2 (2026-07-08), see below.**
+
+### 2G-D2 — Vercel API routing for /api/staff/* FIXED (2026-07-08)
+
+Investigation confirmed the 2G-D warning as fact: the deploy was static-only.
+The Lovable vite wrapper (`@lovable.dev/vite-tanstack-config`) only runs its
+Nitro deploy plugin when a `nitro` option is set explicitly in
+`vite.config.ts` or when building inside a Lovable sandbox — on Vercel CI
+neither holds, so no server function was ever built or deployed, and the
+`vercel.json` catch-all rewrite sent `/api/staff/*` to `/_shell.html`
+(POST → the SPA shell as HTML, handlers never ran).
+
+The fix (config only, no app code):
+
+- `vite.config.ts`: `nitro: { preset: "vercel" }` — the build now emits
+  `.vercel/output/` (Vercel Build Output API): static assets + prerendered
+  `_shell.html` in `static/`, the whole TanStack/Nitro server as one Node
+  function (`__server`, nodejs24.x, streaming), and a `config.json` whose
+  routing is: `/assets/*` immutable-cached → filesystem (static) →
+  everything else, INCLUDING `/api/staff/*`, → the server function. When
+  `.vercel/output` exists after the build step, Vercel uses it automatically
+  and its `config.json` supersedes `vercel.json` rewrites. `npm run dev`
+  is unaffected (the plugin runs only on build).
+- `vercel.json`: catch-all rewrite source narrowed from `/(.*)` to
+  `/((?!api/).*)` — inert while Build Output API is active, but if the app
+  is ever built without Nitro again, `/api/*` fails loudly (404) instead of
+  silently returning the shell.
+
+Local verification (2026-07-08): `npm run build` then `npx vite preview`
+serving the built output — `POST /api/staff/update-status` without a secret
+returned `401 {"ok":false,"error":"Unauthorized."}` (JSON, handler + env
+path working), `GET /` and `GET /staff` returned the HTML shell. Client
+static output greps clean of `STAFF_WRITE_SECRET` / service-role references.
+
+Verify after the next Vercel deploy (before any staff-write testing):
+
+1. `POST https://<prod>/api/staff/update-status` with no secret → 401 JSON
+   (NOT an HTML shell response — that would mean the function isn't serving).
+2. Staff board / owner dashboard / customer menu still render and read data.
+3. A status update via the normal UI still works (n8n write path unchanged).
+4. Vercel project env must now also hold the server-only vars when write
+   testing starts: `SUPABASE_SERVICE_ROLE_KEY`, `STAFF_WRITE_SECRET`
+   (server env — never `VITE_*`).
+
+Rollback: revert the two-file commit — the build stops emitting
+`.vercel/output` and Vercel falls back to the static SPA deploy exactly as
+before (n8n writes were never touched).
 
 ## Phase 2H — n8n keeps the automation jobs (end state)
 

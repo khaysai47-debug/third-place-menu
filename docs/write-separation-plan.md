@@ -273,11 +273,12 @@ writes, the options are:
       cancel + mark-paid server routes (`/api/staff/*`, `x-staff-secret`) and
       the Supabase adapter writes implemented — but NOT ACTIVE by default:
       `ACTIVE_WRITE_SOURCE` stays `"n8n"`; a per-device localStorage override
-      (`tp-staff-write-source`) is the controlled test path. Remaining before
-      the actual flip: deployed `/api/*` serving (the current Vercel deploy is
-      a static SPA — see runbook 2G-D), deployed testing, and the n8n CONFIRM
-      checkboxes (side-effects doc rows 2–3). n8n status/payment webhooks stay
-      the live default + rollback.
+      (`tp-staff-write-source`) is the controlled test path. 2G-D2
+      (2026-07-08) fixed deployed `/api/*` serving: Nitro `vercel` preset →
+      Build Output API server function (runbook 2G-D2). Remaining before the
+      actual flip: verify `/api/staff/*` on the deployed app, deployed write
+      testing, and the n8n CONFIRM checkboxes (side-effects doc rows 2–3).
+      n8n status/payment webhooks stay the live default + rollback.
 - [ ] **2G-E — expenses + menu availability** (W5/W6 + R1): expense insert
       route; menu-availability update route (resolve the is_available
       boolean vs 3-state gap first); `menu_items` anon SELECT for the read.
