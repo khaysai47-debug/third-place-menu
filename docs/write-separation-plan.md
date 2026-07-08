@@ -1,7 +1,11 @@
-# Write Separation Plan — Phase 2G (audit + architecture, no code yet)
+# Write Separation Plan — Phase 2G (audit + architecture)
 
-**Status:** 2G-A audit COMPLETE (2026-07-06). Nothing implemented; flags
-unchanged (`ACTIVE_READ_SOURCE = "supabase"`, `ACTIVE_WRITE_SOURCE = "n8n"`).
+**Status:** 2G-A audit COMPLETE (2026-07-06); 2G-D staff order routes
+ROUTE-READY but not active (2026-07-08). Flags unchanged
+(`ACTIVE_READ_SOURCE = "supabase"`, `ACTIVE_WRITE_SOURCE = "n8n"`).
+Remaining normal-op writes to migrate: expenses (W5), menu availability
+(W6 — after the 3-state gap is resolved), customer order intake (W1, last).
+Payment proof add (W7) stays n8n long-term for bot/social automation.
 
 **Business goal:** before real restaurant use, normal app operations must not
 depend on n8n. n8n becomes the automation layer only (bots, social chat,
@@ -265,9 +269,15 @@ writes, the options are:
       dual-fired. NOTE: despite the C-before-D numbering, implement AFTER
       2G-D if intake automations aren't re-pointed yet — intake is the
       automation-entangled one (runbook has always ordered it last).
-- [ ] **2G-D — staff order actions** (W2/W3/W4): status + cancel + payment
-      routes with staff secret; n8n status/payment webhooks retired from the
-      app but kept alive for rollback.
+- [x] **2G-D — staff order actions ROUTE-READY** (2026-07-08): status +
+      cancel + mark-paid server routes (`/api/staff/*`, `x-staff-secret`) and
+      the Supabase adapter writes implemented — but NOT ACTIVE by default:
+      `ACTIVE_WRITE_SOURCE` stays `"n8n"`; a per-device localStorage override
+      (`tp-staff-write-source`) is the controlled test path. Remaining before
+      the actual flip: deployed `/api/*` serving (the current Vercel deploy is
+      a static SPA — see runbook 2G-D), deployed testing, and the n8n CONFIRM
+      checkboxes (side-effects doc rows 2–3). n8n status/payment webhooks stay
+      the live default + rollback.
 - [ ] **2G-E — expenses + menu availability** (W5/W6 + R1): expense insert
       route; menu-availability update route (resolve the is_available
       boolean vs 3-state gap first); `menu_items` anon SELECT for the read.

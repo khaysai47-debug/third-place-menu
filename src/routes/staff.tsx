@@ -8,6 +8,7 @@ import { StaffOrderCard } from "@/components/staff/StaffOrderCard";
 import { STATUS_META, STATUS_ORDER } from "@/components/staff/orderStatus";
 import { isCancellableStatus } from "@/lib/orderRules";
 import { getOrderRepository } from "@/lib/data/orderRepository";
+import { getStaffWriteSecret, setStaffWriteSecret } from "@/lib/staffWriteSecret";
 import {
   nextStaffOrderStatus,
   type StaffOrder,
@@ -43,12 +44,25 @@ function playNewOrderChime(): void {
       osc.stop(start + 0.45);
     };
     const t = ctx.currentTime;
-    tone(880, t);         // A5
+    tone(880, t); // A5
     tone(1108.73, t + 0.2); // C#6
     setTimeout(() => void ctx.close(), 1500);
   } catch {
     // AudioContext unavailable or blocked — banner/title still show
   }
+}
+
+// Phase 2G-D: enter/clear the staff write secret used by the Supabase
+// server-route write path (stored in localStorage only, sent as x-staff-secret).
+// Inert while writes stay on n8n — needed only when a device opts into the
+// Supabase test path (see orderRepository.ts).
+function promptStaffWriteSecret(): void {
+  const next = window.prompt(
+    "員工密碼 · Staff write secret (leave empty to clear)",
+    getStaffWriteSecret() ?? "",
+  );
+  if (next === null) return;
+  setStaffWriteSecret(next.trim() || null);
 }
 
 export const Route = createFileRoute("/staff")({
@@ -76,17 +90,24 @@ const STAFF_VIEW_TITLES: Record<StaffView, string> = {
   expenses: "Expense Log",
 };
 
-const SUMMARY_STATUSES: StaffOrderStatus[] = ["new", "preparing", "ready", "out_for_delivery", "delivered", "done"];
+const SUMMARY_STATUSES: StaffOrderStatus[] = [
+  "new",
+  "preparing",
+  "ready",
+  "out_for_delivery",
+  "delivered",
+  "done",
+];
 
 // Friendlier per-tab empty copy — the board is calm, not broken.
 const EMPTY_TAB_COPY: Record<StaffOrderStatus, { zh: string; en: string }> = {
-  new:              { zh: "沒有新單",   en: "No new orders — all caught up" },
-  preparing:        { zh: "廚房清空",   en: "Nothing on the grill right now" },
-  ready:            { zh: "沒有待取餐", en: "Nothing waiting to go out" },
+  new: { zh: "沒有新單", en: "No new orders — all caught up" },
+  preparing: { zh: "廚房清空", en: "Nothing on the grill right now" },
+  ready: { zh: "沒有待取餐", en: "Nothing waiting to go out" },
   out_for_delivery: { zh: "沒有配送中", en: "No riders on the road" },
-  delivered:        { zh: "沒有已送達", en: "No deliveries completed yet" },
-  done:             { zh: "沒有已完成", en: "No finished orders yet tonight" },
-  cancelled:        { zh: "沒有取消",   en: "No cancellations tonight" },
+  delivered: { zh: "沒有已送達", en: "No deliveries completed yet" },
+  done: { zh: "沒有已完成", en: "No finished orders yet tonight" },
+  cancelled: { zh: "沒有取消", en: "No cancellations tonight" },
 };
 
 const SUMMARY_CARD_STYLE: Partial<Record<StaffOrderStatus, { inactive: string; active: string }>> =
@@ -131,7 +152,7 @@ function StaffPage() {
 
   // New-order notification bookkeeping
   const notifyInitializedRef = useRef(false); // true after first successful load
-  const prevNewCountRef = useRef(0);          // baseline for comparison
+  const prevNewCountRef = useRef(0); // baseline for comparison
   const bannerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const titleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -419,9 +440,19 @@ function StaffPage() {
         <header className="px-5 pt-6 pb-4">
           <div className="flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-[var(--color-gold-soft)]/80">
             <span>員工 · Staff</span>
-            <span className="flex items-center gap-1.5">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              Live
+            <span className="flex items-center gap-3">
+              <button
+                onClick={promptStaffWriteSecret}
+                aria-label="Staff write secret 員工密碼"
+                title="Staff write secret 員工密碼"
+                className="text-[var(--color-gold-soft)]/50 hover:text-[var(--color-cream)] transition"
+              >
+                ⚿
+              </button>
+              <span className="flex items-center gap-1.5">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                Live
+              </span>
             </span>
           </div>
           <div className="mt-3 flex items-baseline gap-3">
@@ -471,8 +502,10 @@ function StaffPage() {
                     onClick={() => setActiveTab(status)}
                     className={`rounded-2xl border px-4 py-3.5 text-left transition active:scale-[0.98] ${
                       active
-                        ? (SUMMARY_CARD_STYLE[status]?.active ?? "bg-[var(--color-charcoal-soft)] border-[var(--color-gold)]/60")
-                        : (SUMMARY_CARD_STYLE[status]?.inactive ?? "bg-[var(--color-charcoal-soft)]/50 border-[var(--color-gold)]/20")
+                        ? (SUMMARY_CARD_STYLE[status]?.active ??
+                          "bg-[var(--color-charcoal-soft)] border-[var(--color-gold)]/60")
+                        : (SUMMARY_CARD_STYLE[status]?.inactive ??
+                          "bg-[var(--color-charcoal-soft)]/50 border-[var(--color-gold)]/20")
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">

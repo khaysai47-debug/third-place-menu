@@ -223,6 +223,84 @@ on n8n and bundled into 2G-E).
   have written, read paths show it, dependent automation still fires,
   `npm run parity` still passes.
 
+### 2G-D — Staff order server routes PREPARED (2026-07-08, not flipped)
+
+Status: routes + Supabase write adapter implemented; **`ACTIVE_WRITE_SOURCE`
+remains `"n8n"`** — the n8n write path is unchanged and stays the active
+default and the rollback path. Production behavior is identical to before
+this commit.
+
+What exists now:
+
+- Server routes (POST, server-side only, in `src/routes/`):
+  - `/api/staff/update-status` — `{ orderId, status, cancellationReason? }`;
+    validates against the app's 7 statuses; writes `orders.status`
+    ("done" stored as "completed"); non-cancel statuses reset
+    `cancellation_reason`/`cancelled_at` to null (n8n parity).
+  - `/api/staff/cancel-order` — `{ orderId, reason? }`; status "cancelled" +
+    `cancellation_reason` (default "Other") + `cancelled_at` now.
+  - `/api/staff/mark-paid` — `{ orderId, paymentMethod: "Cash"|"Transfer" }`;
+    `payment_status` "Paid", `payment_method`, `paid_at` now.
+  - All match rows by `orders.order_number` (the frontend orderId, "TP-…") —
+    never a client-sent UUID. Responses are `{ ok: true, … }` or
+    `{ ok: false, error }` with proper status codes (400/401/404/500); no
+    stack traces or env values ever reach the client.
+- Auth: every route requires the `x-staff-secret` header and compares it to
+  `STAFF_WRITE_SECRET`. Missing/wrong → 401. Missing env → safe 500.
+- Server-only env vars (`.env.example` has the names): `SUPABASE_SERVICE_ROLE_KEY`
+  and `STAFF_WRITE_SECRET`, read via `process.env` inside
+  `src/lib/staffOrderWrites.server.ts` only — never `VITE_*`, never in the
+  client bundle. The anon key remains read-only; the frontend never writes
+  Supabase directly.
+- Supabase adapter (`supabaseOrdersAdapter`): the three staff write stubs are
+  now real — they POST to the routes above with the device's staff secret
+  (localStorage, entered via the small ⚿ button in the staff header;
+  empty prompt clears it). `submitOrder` stays a stub (2G-C, last).
+- Per-device test override (no global flip): in the staff device's console,
+  `localStorage.setItem("tp-staff-write-source", "supabase")` routes the three
+  staff actions through the new path on THAT DEVICE only;
+  `localStorage.removeItem("tp-staff-write-source")` reverts instantly.
+
+Manual local test checklist (secrets typed into the shell/prompt only —
+never committed):
+
+1. `.env.local` has `SUPABASE_SERVICE_ROLE_KEY` + `STAFF_WRITE_SECRET`
+   (plus the three `VITE_*` vars). `npm run dev`.
+2. curl (replace TP-… with a real dev order; `$STAFF_WRITE_SECRET` from your
+   shell env, not pasted inline):
+   ```sh
+   curl -i -X POST http://localhost:5173/api/staff/update-status \
+     -H "Content-Type: application/json" -H "x-staff-secret: $STAFF_WRITE_SECRET" \
+     -d '{"orderId":"TP-XXXX","status":"preparing"}'
+   curl -i -X POST http://localhost:5173/api/staff/mark-paid \
+     -H "Content-Type: application/json" -H "x-staff-secret: $STAFF_WRITE_SECRET" \
+     -d '{"orderId":"TP-XXXX","paymentMethod":"Cash"}'
+   curl -i -X POST http://localhost:5173/api/staff/cancel-order \
+     -H "Content-Type: application/json" -H "x-staff-secret: $STAFF_WRITE_SECRET" \
+     -d '{"orderId":"TP-XXXX","reason":"Test"}'
+   ```
+   Also verify the failure modes: wrong/missing secret → 401; unknown
+   orderId → 404; bad status/method → 400.
+3. UI path: on the staff page, tap ⚿ and enter the secret; in the console set
+   the `tp-staff-write-source` override; advance / mark paid / cancel an
+   order; verify the row in Supabase Table Editor matches what n8n would have
+   written (status/completed spelling, cancellation fields, paid_at).
+4. Revert the device: remove the localStorage override. n8n writes work again
+   immediately (nothing was changed on that path).
+
+**Production flip is a LATER step** — after deployed testing, the n8n
+CONFIRM checkbox (docs/n8n-workflow-side-effects.md rows 2–3), and the
+deployment prerequisite below. Rollback at any point: the override off /
+`ACTIVE_WRITE_SOURCE` back to `"n8n"` — n8n webhooks are untouched.
+
+⚠️ **Deployment prerequisite before any write flip:** the current Vercel
+deploy is a prerendered static SPA — `vercel.json` rewrites `/(.*)` to
+`/_shell.html`, so `/api/staff/*` is NOT reachable on production today. The
+routes work under `npm run dev` and any node server deploy. Before flipping,
+the deployment must actually serve the Nitro server for `/api/*` (exclude
+`/api/*` from the rewrite and deploy the server output). Do this in its own
+verified deploy step.
+
 ## Phase 2H — n8n keeps the automation jobs (end state)
 
 - n8n permanently retains: Instagram/Messenger/LINE/WeChat bot conversations,
