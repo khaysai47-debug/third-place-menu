@@ -15,9 +15,9 @@ export default defineConfig({
     // All data is fetched client-side from n8n, so no SSR is needed at request time.
     spa: { enabled: true },
   },
-  // Phase 2G-D2: emit .vercel/output (Build Output API) so Vercel deploys the
-  // Nitro server function — required for the /api/staff/* server routes.
-  // Without this the deploy plugin is skipped outside Lovable sandboxes and
-  // production is static-only (no server, /api/* unreachable).
-  nitro: { preset: "vercel" },
+  // Phase 2G-D2 NOTE: do NOT add `nitro: { preset: "vercel" }` here. It moves
+  // the SSR bundle into .vercel/output, which breaks the SPA-shell prerender
+  // (it imports dist/server/server.js) and fails the Vercel build. Production
+  // /api/staff/* is served by native Vercel functions in /api instead — see
+  // docs/backend-separation-runbook.md § 2G-D2.
 });

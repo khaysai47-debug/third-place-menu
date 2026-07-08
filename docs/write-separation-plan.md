@@ -274,8 +274,10 @@ writes, the options are:
       the Supabase adapter writes implemented — but NOT ACTIVE by default:
       `ACTIVE_WRITE_SOURCE` stays `"n8n"`; a per-device localStorage override
       (`tp-staff-write-source`) is the controlled test path. 2G-D2
-      (2026-07-08) fixed deployed `/api/*` serving: Nitro `vercel` preset →
-      Build Output API server function (runbook 2G-D2). Remaining before the
+      (2026-07-08) fixed deployed `/api/*` serving: native Vercel functions
+      in `api/staff/*` delegating to the same shared handlers as the dev
+      routes (the Nitro `vercel` preset attempt broke the SPA-shell prerender
+      and was reverted — details in runbook 2G-D2). Remaining before the
       actual flip: verify `/api/staff/*` on the deployed app, deployed write
       testing, and the n8n CONFIRM checkboxes (side-effects doc rows 2–3).
       n8n status/payment webhooks stay the live default + rollback.

@@ -305,27 +305,38 @@ neither holds, so no server function was ever built or deployed, and the
 `vercel.json` catch-all rewrite sent `/api/staff/*` to `/_shell.html`
 (POST → the SPA shell as HTML, handlers never ran).
 
-The fix (config only, no app code):
+**Failed first attempt (reverted — do not retry):** `nitro: { preset:
+"vercel" }` in `vite.config.ts`. It emitted a correct `.vercel/output/`, but
+moved the SSR bundle out of `dist/server/` — and TanStack's SPA-shell
+prerender (forced on whenever `spa.enabled`) starts a vite preview server
+that imports `dist/server/server.js`. Clean builds (locally and on Vercel)
+died in prerender with ERR_MODULE_NOT_FOUND → "Failed to fetch /". The
+initial local "pass" had loaded a STALE `dist/server/server.js` from a
+pre-nitro build. Lesson recorded: always verify deploy-config changes with
+`rm -rf dist .vercel/output` first.
 
-- `vite.config.ts`: `nitro: { preset: "vercel" }` — the build now emits
-  `.vercel/output/` (Vercel Build Output API): static assets + prerendered
-  `_shell.html` in `static/`, the whole TanStack/Nitro server as one Node
-  function (`__server`, nodejs24.x, streaming), and a `config.json` whose
-  routing is: `/assets/*` immutable-cached → filesystem (static) →
-  everything else, INCLUDING `/api/staff/*`, → the server function. When
-  `.vercel/output` exists after the build step, Vercel uses it automatically
-  and its `config.json` supersedes `vercel.json` rewrites. `npm run dev`
-  is unaffected (the plugin runs only on build).
-- `vercel.json`: catch-all rewrite source narrowed from `/(.*)` to
-  `/((?!api/).*)` — inert while Build Output API is active, but if the app
-  is ever built without Nitro again, `/api/*` fails loudly (404) instead of
-  silently returning the shell.
+The actual fix — native Vercel functions, one shared implementation:
 
-Local verification (2026-07-08): `npm run build` then `npx vite preview`
-serving the built output — `POST /api/staff/update-status` without a secret
-returned `401 {"ok":false,"error":"Unauthorized."}` (JSON, handler + env
-path working), `GET /` and `GET /staff` returned the HTML shell. Client
-static output greps clean of `STAFF_WRITE_SECRET` / service-role references.
+- `src/lib/staffOrderWrites.server.ts` now contains the COMPLETE handlers as
+  web-standard `(Request) => Response` functions (`postUpdateStatus`,
+  `postCancelOrder`, `postMarkPaid`). It is deliberately self-contained (zod
+  + `process.env` only; no vite aliases, no `import.meta.env`) so it bundles
+  identically under vite and under Vercel's function builder.
+- Two thin delegate surfaces, zero duplicated logic:
+  - `src/routes/api.staff.*.ts` — TanStack Start server routes (dev).
+  - `api/staff/*.ts` — native Vercel functions (production). Vercel builds
+    the `api/` directory alongside ANY framework output, so the static SPA
+    deploy itself is byte-identical to what has been live for weeks.
+- `vercel.json`: catch-all rewrite stays narrowed to `/((?!api/).*)` —
+  functions match before rewrites anyway, but this keeps `/api/*` fail-loud.
+- The Supabase URL is read from `process.env.VITE_SUPABASE_URL` (public
+  config; the same project env var is available to function runtimes).
+
+Local verification (2026-07-08, clean `rm -rf dist .vercel/output` build):
+`npm run build` + typecheck pass; dev-server curls — no secret → 401 JSON,
+bad status → 400, unknown order → 404 on cancel AND mark-paid (proving the
+`process.env` → Supabase chain end-to-end). Client bundle greps clean of
+`STAFF_WRITE_SECRET` / service-role references.
 
 Verify after the next Vercel deploy (before any staff-write testing):
 
@@ -335,11 +346,11 @@ Verify after the next Vercel deploy (before any staff-write testing):
 3. A status update via the normal UI still works (n8n write path unchanged).
 4. Vercel project env must now also hold the server-only vars when write
    testing starts: `SUPABASE_SERVICE_ROLE_KEY`, `STAFF_WRITE_SECRET`
-   (server env — never `VITE_*`).
+   (server env — never `VITE_*`), and `VITE_SUPABASE_URL` must be exposed to
+   the production runtime (it already exists for builds).
 
-Rollback: revert the two-file commit — the build stops emitting
-`.vercel/output` and Vercel falls back to the static SPA deploy exactly as
-before (n8n writes were never touched).
+Rollback: delete the `api/` directory and revert the commit — the static SPA
+deploy is unaffected either way (n8n writes were never touched).
 
 ## Phase 2H — n8n keeps the automation jobs (end state)
 
