@@ -367,6 +367,35 @@ deploy is unaffected either way (n8n writes were never touched).
 (Owner phase naming. The write-separation-plan's original "2G-E — expenses +
 menu availability" is untouched and becomes the NEXT implementation phase.)
 
+**RESULT: PASSED (2026-07-08).** Test order `TP-S-20260708-152853`, on the
+deployed production app, writes still on n8n throughout:
+
+- `POST /api/staff/update-status` with `x-staff-secret` → `ok: true`,
+  status became `preparing`. ✅
+- `POST /api/staff/mark-paid` with `Cash` → ✅; then `Transfer`
+  (overwrite) → ✅.
+- `POST /api/staff/cancel-order` with reason "2G-E test cleanup" → ✅
+  (test order ends cancelled = excluded from owner money totals).
+- Staff / owner / customer pages all still loaded. ✅
+- `ACTIVE_WRITE_SOURCE` remained `"n8n"`; NO global write flip happened —
+  normal production writes went through n8n the whole time. ✅
+- **Production staff server writes are confirmed working end-to-end**
+  (auth → validation → Supabase PATCH by order_number → JSON result).
+- SECURITY: `STAFF_WRITE_SECRET` was ROTATED after the test because the
+  value appeared in a screenshot/chat; after redeploy, POST without the
+  secret still returns 401 (auth confirmed working with the new value).
+  Standing rule: rotate the secret any time it is displayed anywhere.
+
+**Next phase: the TARGETED staff write flip** (decision gate below):
+
+- Do NOT flip `ACTIVE_WRITE_SOURCE` globally — `submitOrder` (customer
+  checkout + staff manual order) still needs n8n; the global flag would
+  route it to the throwing Supabase stub and break order intake.
+- Rebind ONLY `updateOrderStatus` / `cancelOrder` / `updateOrderPayment` in
+  `src/lib/data/orderRepository.ts` to the Supabase route adapter.
+- `submitOrder` stays on n8n. n8n status/payment webhooks stay alive as the
+  instant fallback/rollback path.
+
 Production writes remain on n8n throughout — every test below targets ONE
 disposable test order, keyed by its `order_number`, through the deployed
 `/api/staff/*` functions.
