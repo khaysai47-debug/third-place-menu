@@ -249,7 +249,7 @@ What exists now:
   `STAFF_WRITE_SECRET`. Missing/wrong → 401. Missing env → safe 500.
 - Server-only env vars (`.env.example` has the names): `SUPABASE_SERVICE_ROLE_KEY`
   and `STAFF_WRITE_SECRET`, read via `process.env` inside
-  `src/lib/staffOrderWrites.server.ts` only — never `VITE_*`, never in the
+  `api/_lib/staffOrderWrites.server.ts` only — never `VITE_*`, never in the
   client bundle. The anon key remains read-only; the frontend never writes
   Supabase directly.
 - Supabase adapter (`supabaseOrdersAdapter`): the three staff write stubs are
@@ -317,13 +317,23 @@ pre-nitro build. Lesson recorded: always verify deploy-config changes with
 
 The actual fix — native Vercel functions, one shared implementation:
 
-- `src/lib/staffOrderWrites.server.ts` now contains the COMPLETE handlers as
+- `api/_lib/staffOrderWrites.server.ts` contains the COMPLETE handlers as
   web-standard `(Request) => Response` functions (`postUpdateStatus`,
-  `postCancelOrder`, `postMarkPaid`). It is deliberately self-contained (zod
-  + `process.env` only; no vite aliases, no `import.meta.env`) so it bundles
-  identically under vite and under Vercel's function builder.
+  `postCancelOrder`, `postMarkPaid`, plus `methodNotAllowed` → 405 JSON for
+  non-POST verbs). It is deliberately self-contained (zod + `process.env`
+  only; no vite aliases, no `import.meta.env`) so it bundles identically
+  under vite and under Vercel's function builder.
+- LOCATION MATTERS (second production crash, fixed 2026-07-08): the module
+  first lived in `src/lib/` and the function compiled to ESM with an
+  extensionless import of a file outside `api/` → runtime
+  ERR_MODULE_NOT_FOUND (`/var/task/src/lib/staffOrderWrites.server`).
+  Vercel's builder only reliably compiles TS inside `api/`, and Node ESM
+  does no extension resolution. Rules: shared function code lives under
+  `api/_lib/` (underscore = not exposed as a route), and `api/staff/*.ts`
+  imports it WITH the `.js` extension.
 - Two thin delegate surfaces, zero duplicated logic:
-  - `src/routes/api.staff.*.ts` — TanStack Start server routes (dev).
+  - `src/routes/api.staff.*.ts` — TanStack Start server routes (dev),
+    importing the same `api/_lib` module.
   - `api/staff/*.ts` — native Vercel functions (production). Vercel builds
     the `api/` directory alongside ANY framework output, so the static SPA
     deploy itself is byte-identical to what has been live for weeks.

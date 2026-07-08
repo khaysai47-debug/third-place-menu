@@ -3,11 +3,18 @@ import { z } from "zod";
 
 // Server-only staff order write handlers (Phase 2G-D/2G-D2).
 //
-// Each export is a complete web-standard (Request) => Response POST handler,
+// Each export is a complete web-standard (Request) => Response handler,
 // consumed by TWO thin delegate layers so there is ONE implementation:
 //   - src/routes/api.staff.*.ts — TanStack Start server routes (npm run dev)
 //   - api/staff/*.ts            — native Vercel functions (production; the
 //     Vercel deploy is a static SPA, so TanStack server routes don't run there)
+//
+// LIVES UNDER api/_lib (not src/) because Vercel's function builder only
+// reliably compiles TypeScript inside api/; importing into src/ shipped an
+// unresolvable extensionless ESM specifier and crashed at runtime
+// (ERR_MODULE_NOT_FOUND — runbook 2G-D2). The underscore prefix keeps this
+// from being exposed as a function route. api/staff/*.ts must import it
+// WITH the ".js" extension (Node ESM does no extension resolution).
 //
 // DELIBERATELY SELF-CONTAINED: no "@/" alias imports, no import.meta.env —
 // Vercel bundles api/*.ts outside vite, where neither exists. Only zod +
@@ -38,6 +45,11 @@ const statusToDb = (status: string): string => (status === "done" ? "completed" 
 /** Uniform JSON error body — never includes stack traces or env values. */
 function jsonError(status: number, error: string): Response {
   return Response.json({ ok: false, error }, { status });
+}
+
+/** 405 JSON for non-POST verbs — wired to GET/PUT/PATCH/DELETE on both surfaces. */
+export function methodNotAllowed(): Response {
+  return jsonError(405, "Method not allowed.");
 }
 
 /**
