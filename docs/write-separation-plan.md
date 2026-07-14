@@ -251,18 +251,20 @@ by definition; anything secret gets a bare name.
 ### Automation bridge — IMPLEMENTED for order intake (Phase 3A, 2026-07-14)
 
 The recommended option below is now live in code for `order.created`:
-after a successful non-duplicate order the intake route sends a signed
-(HMAC SHA-256) identifier-only event to `N8N_ORDER_AUTOMATION_WEBHOOK_URL`,
-delivered via Vercel `waitUntil` so it never blocks or fails the order;
-skipped entirely when `N8N_ORDER_AUTOMATION_WEBHOOK_URL` /
-`N8N_AUTOMATION_SECRET` are unset. Spec + n8n workflow plan + verification
-checklist: docs/backend-separation-runbook.md § Phase 3A. The receiving
-workflow must be a NEW automation-only webhook (no order writes) — never
+after a successful non-duplicate order the intake route sends an
+identifier-only event to `N8N_ORDER_AUTOMATION_WEBHOOK_URL`, authenticated
+with a short-lived HS256 JWT signed with `N8N_AUTOMATION_SECRET` (verified
+by n8n's built-in Webhook JWT Auth — the secret lives only in the n8n JWT
+credential, never in workflow code), delivered via Vercel `waitUntil` so it
+never blocks or fails the order; skipped entirely when either env var is
+unset. Spec + n8n workflow plan + verification checklist:
+docs/backend-separation-runbook.md § Phase 3A. The receiving workflow must
+be a NEW automation-only webhook (no order writes) — never
 `third-place-order-test`.
 
 | Approach | Notes |
 | --- | --- |
-| **Server route calls an n8n automation webhook after a successful write** | ✅ IMPLEMENTED for order intake (Phase 3A): explicit, no new infra, testable, HMAC auth via `N8N_AUTOMATION_SECRET`; `waitUntil`-backed so a slow n8n never blocks the write |
+| **Server route calls an n8n automation webhook after a successful write** | ✅ IMPLEMENTED for order intake (Phase 3A): explicit, no new infra, testable, short-lived-JWT auth via `N8N_AUTOMATION_SECRET` + n8n Webhook JWT Auth; `waitUntil`-backed so a slow n8n never blocks the write |
 | Supabase Database Webhooks (DB trigger → n8n) | Most robust (fires no matter who wrote); good second step; config lives in Supabase, mind auth + retries |
 | n8n scheduled polling | Simple but laggy and wasteful; only for non-urgent digests (daily summary) |
 | Supabase Realtime | Post-MVP; needs a persistent listener — n8n Cloud isn't one |

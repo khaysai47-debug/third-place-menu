@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
     "parity": "node scripts/run-parity.mjs",
+    "test:bridge": "node scripts/test-automation-bridge.mjs",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

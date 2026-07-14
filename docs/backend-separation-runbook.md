@@ -641,7 +641,8 @@ Architecture:
 7. **Automation bridge (optional, OFF by default)**: after a successful
    NON-duplicate insert the route emits a signed `order.created` event to
    `N8N_ORDER_AUTOMATION_WEBHOOK_URL` — upgraded in Phase 3A (next section)
-   to HMAC-signed + `waitUntil`-backed delivery. ⚠️ NEVER point this at the
+   to short-lived-JWT-authenticated + `waitUntil`-backed delivery. ⚠️ NEVER
+   point this at the
    old `third-place-order-test` webhook — its workflow INSERTS an order and
    every order would be duplicated. It needs a NEW automation-only workflow
    (no write nodes).
@@ -694,10 +695,13 @@ bots/notifications can react — WITHOUT n8n ever inserting an order again.
   and the long-lived process finishes the promise anyway.
 - 5 s `AbortSignal.timeout`. Any failure (down, timeout, 500) is logged as
   safe metadata only (event id, order number, status / error NAME — never
-  the URL, secret, body, or error message) and never changes the order
+  the URL, secret, JWT, body, or error message) and never changes the order
   response.
+- Standalone check: `npm run test:bridge`
+  (scripts/test-automation-bridge.mjs — JWT shape/signature + skip /
+  single-event / duplicate / failure behavior with stubbed fetch).
 
-**Event body (exact raw JSON, no whitespace — sign THIS string):**
+**Event body:**
 
 ```json
 {"eventId":"<uuid>","eventType":"order.created","occurredAt":"<ISO-8601>","orderNumber":"TP-...","channel":"customer|staff"}
@@ -706,74 +710,111 @@ bots/notifications can react — WITHOUT n8n ever inserting an order again.
 No customer data, no money fields, no secrets. n8n fetches the
 authoritative order from Supabase server-to-server using its own credential.
 
-**Headers:** `Content-Type: application/json`, `x-atlas-event-id` (= body
-eventId), `x-atlas-timestamp` (= body occurredAt), `x-atlas-signature`
-(`sha256=<hex>` — HMAC SHA-256 of the raw body with `N8N_AUTOMATION_SECRET`).
+**Auth — short-lived HS256 JWT** (built with node:crypto, no jwt library;
+verified by n8n's BUILT-IN Webhook JWT Auth + JWT node, so the secret lives
+only in an n8n credential, never in workflow Code nodes, Variables, or
+execution data). Signing input is
+`base64url(header) + "." + base64url(claims)`, HMAC SHA-256 keyed with
+`N8N_AUTOMATION_SECRET`, signature base64url-encoded. Header:
+`{"alg":"HS256","typ":"JWT"}`. Claims:
 
-**Verification recipe (n8n Code node, exact):**
-
-```js
-const crypto = require("crypto");
-const raw = /* the EXACT raw request body string — not re-serialized JSON */;
-const sent = headers["x-atlas-signature"] ?? "";
-const expected =
-  "sha256=" + crypto.createHmac("sha256", AUTOMATION_SECRET).update(raw, "utf8").digest("hex");
-const valid =
-  sent.length === expected.length &&
-  crypto.timingSafeEqual(Buffer.from(sent), Buffer.from(expected));
-const fresh = Math.abs(Date.now() - Date.parse(headers["x-atlas-timestamp"])) < 5 * 60 * 1000;
-if (!valid || !fresh) throw new Error("invalid signature");
+```json
+{
+  "iss": "atlas-order-bridge",
+  "aud": "n8n-order-automation",
+  "sub": "order.created",
+  "jti": "<eventId>",
+  "iat": <unix seconds>,
+  "nbf": <iat - 5>,
+  "exp": <iat + 120>,
+  "eventId": "<same eventId>",
+  "eventType": "order.created",
+  "occurredAt": "<same ISO timestamp>",
+  "orderNumber": "TP-...",
+  "channel": "customer|staff"
+}
 ```
 
-**Test vector** (secret `test-secret`) — verification implementations must
-reproduce this digest exactly:
+**Headers sent:** `Content-Type: application/json`,
+`Authorization: Bearer <jwt>` (checked by n8n Webhook JWT Auth BEFORE the
+workflow runs; the JWT Verify node reads the same header),
+`x-atlas-event-id` (= body eventId), `x-atlas-timestamp` (= body
+occurredAt).
+
+**Test vector** (secret `test-secret`, clock frozen at
+2026-07-14T12:00:00Z → iat 1784030400, nbf 1784030395, exp 1784030520;
+event fields as in the body example with orderNumber
+`TP-20260714-120000`, eventId `11111111-2222-3333-4444-555555555555`):
 
 ```
-body:      {"eventId":"11111111-2222-3333-4444-555555555555","eventType":"order.created","occurredAt":"2026-07-14T12:00:00.000Z","orderNumber":"TP-20260714-120000","channel":"customer"}
-signature: sha256=fc58ac15b47c5eadc4a410eedb7ed6cd25f439edbcb078330d9f8fd7e9ee77c2
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJhdGxhcy1vcmRlci1icmlkZ2UiLCJhdWQiOiJuOG4tb3JkZXItYXV0b21hdGlvbiIsInN1YiI6Im9yZGVyLmNyZWF0ZWQiLCJqdGkiOiIxMTExMTExMS0yMjIyLTMzMzMtNDQ0NC01NTU1NTU1NTU1NTUiLCJpYXQiOjE3ODQwMzA0MDAsIm5iZiI6MTc4NDAzMDM5NSwiZXhwIjoxNzg0MDMwNTIwLCJldmVudElkIjoiMTExMTExMTEtMjIyMi0zMzMzLTQ0NDQtNTU1NTU1NTU1NTU1IiwiZXZlbnRUeXBlIjoib3JkZXIuY3JlYXRlZCIsIm9jY3VycmVkQXQiOiIyMDI2LTA3LTE0VDEyOjAwOjAwLjAwMFoiLCJvcmRlck51bWJlciI6IlRQLTIwMjYwNzE0LTEyMDAwMCIsImNoYW5uZWwiOiJjdXN0b21lciJ9.vUwdYkl9mU2-49NCJt2Z8bYpw8LHuPO-aQqgMPcG-Vs
 ```
 
-Reproduce locally:
+Paste it into any offline JWT debugger with secret `test-secret` → signature
+valid (the token itself is long expired — that's the point of exp). Or:
 
 ```
-node -e "const{createHmac}=require('node:crypto');console.log('sha256='+createHmac('sha256','test-secret').update(process.argv[1]).digest('hex'))" '<raw body>'
+node -e "const{createHmac}=require('node:crypto');const[h,p,s]=process.argv[1].split('.');console.log(s===createHmac('sha256','test-secret').update(h+'.'+p).digest('base64url'))" '<jwt>'
 ```
 
-**Manual n8n workflow plan (build in Phase 3B — NOT built yet):**
+**Manual n8n workflow plan (build in Phase 3B — NOT built yet).**
+Hard rules first: NO raw HMAC/secret in any Code node, NO secret in n8n
+Variables or execution data, never log JWT values, ZERO insert/update nodes
+for `orders` / `order_items`, and never reuse or copy
+`third-place-order-test` (it inserts orders).
 
-1. Create a BRAND-NEW workflow with a Webhook node: method POST, a fresh
-   random path (e.g. `atlas-order-events-<random>`), respond immediately
-   with 200. ⚠️ Do NOT reuse or copy `third-place-order-test` — that
-   workflow inserts orders; this workflow must contain ZERO insert/update
-   nodes for `orders` / `order_items`, ever.
-2. Code node: verify timestamp freshness + HMAC exactly as above (secret
-   from an n8n credential/env — not hardcoded); throw on mismatch so the
+1. **JWT credential** (Credentials → New → JWT): Key Type **Passphrase**,
+   Algorithm **HS256**, Passphrase = the exact `N8N_AUTOMATION_SECRET`
+   value. This credential is the ONLY place the secret exists in n8n.
+2. **Webhook node**: method POST, a BRAND-NEW random path (e.g.
+   `atlas-order-events-<random>`), Authentication: **JWT Auth** with the
+   credential from step 1, Respond: **Immediately**. Invalid/missing
+   `Authorization: Bearer` tokens are rejected BEFORE the workflow executes.
+3. **JWT node**: Operation **Verify**, same JWT credential, token from the
+   Authorization header minus the Bearer prefix:
+   `{{ $json.headers.authorization.replace(/^Bearer\s+/i, '') }}`,
+   Ignore Expiration **false**, Ignore Not Before **false**, clock
+   tolerance **30 s**. Output = the signed claims.
+4. **Validation Code node** (claims and body only — no secret): require
+   `iss === "atlas-order-bridge"`, `aud === "n8n-order-automation"`,
+   `sub === "order.created"`; require the verified claims' `eventId`,
+   `eventType`, `occurredAt`, `orderNumber`, `channel` to EQUAL the parsed
+   request-body fields, and `jti === eventId`. Throw on any mismatch so the
    execution fails visibly.
-3. Deduplicate `eventId` (n8n static data or a lookup) — drop already-seen
-   ids so retries can't double-fire notifications.
-4. HTTP Request node: fetch the authoritative order from Supabase REST
+5. **Deduplicate via an n8n Data Table** (NOT workflow static data) named
+   `atlas_order_events`, columns: `event_id` string, `occurred_at` date,
+   `order_number` string, `channel` string. Look up `event_id`; if found →
+   stop (already processed); else insert the row, then continue.
+6. **HTTP Request node**: fetch the authoritative order from Supabase REST
    (`GET /rest/v1/orders?order_number=eq.{{orderNumber}}&select=...`) using
-   the existing n8n Supabase server credential.
-5. Attach bot/notification actions AFTER that fetch (Phase 3 work).
-6. Set `N8N_ORDER_AUTOMATION_WEBHOOK_URL` (the new path's production URL)
-   + `N8N_AUTOMATION_SECRET` (long random value, same one as the n8n
-   credential) in Vercel env → redeploy → bridge goes live.
+   the existing secured n8n Supabase credential.
+7. Attach bot/notification actions AFTER that fetch (Phase 3 work).
+8. Set `N8N_ORDER_AUTOMATION_WEBHOOK_URL` (the new path's production URL)
+   + `N8N_AUTOMATION_SECRET` (long random value, same as the credential
+   passphrase) in Vercel env → redeploy → bridge goes live.
 
 **Verification checklist (Preview deploy):**
 
+- [ ] `npm run test:bridge` passes locally (JWT shape, independent HS256
+      verification, exp = iat + 120, skip/duplicate/failure behavior).
 - [ ] Env vars unset: place a disposable order → succeeds; logs show
       `ORDER_INTAKE` but NO `ORDER_AUTOMATION` line; n8n shows no execution.
-- [ ] Both env vars set (point at a webhook.site or test n8n path): one
-      order → succeeds AND exactly one signed event arrives; recompute the
-      HMAC of the received raw body with the shared secret → matches
-      `x-atlas-signature`.
+- [ ] Both env vars set: one order → succeeds AND exactly one event
+      arrives; n8n Webhook JWT Auth accepted it; the JWT Verify node
+      returns claims matching the body.
+- [ ] Wrong-secret probe: POST to the webhook with an unsigned/garbage
+      Bearer token → n8n rejects it before the workflow runs (no execution
+      with data).
 - [ ] Idempotent replay (re-POST same requestId): `duplicate: true`, NO
       second event.
+- [ ] Event replay (re-deliver the same eventId to n8n): dropped by the
+      `atlas_order_events` Data Table lookup.
 - [ ] Receiver returns 500: order still succeeds; log line says
       `rejected` with the status.
 - [ ] Receiver hangs > 5 s: order still succeeds; log line says
       `failed: TimeoutError`.
-- [ ] Test vector above reproduces on the receiver's verification code.
+- [ ] Test vector above validates in an offline JWT debugger with
+      `test-secret`.
 
 **Rollback:** unset the two env vars (bridge off, orders unaffected) or
 revert the branch. No SQL, no data migration — the bridge is stateless.

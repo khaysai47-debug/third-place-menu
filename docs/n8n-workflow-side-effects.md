@@ -49,19 +49,25 @@ Phase 2H, the menu read moves in 2G-E).
 
 ## Phase 3A — order-created automation bridge (2026-07-14)
 
-The app now emits a signed `order.created` event (HMAC SHA-256,
-`x-atlas-signature`) to `N8N_ORDER_AUTOMATION_WEBHOOK_URL` after every
-successful non-duplicate order — full spec, n8n workflow plan, and
-verification checklist in docs/backend-separation-runbook.md § Phase 3A.
-Hard rules for the receiving workflow:
+The app now emits an `order.created` event authenticated by a short-lived
+HS256 JWT (`Authorization: Bearer`) to
+`N8N_ORDER_AUTOMATION_WEBHOOK_URL` after every successful non-duplicate
+order — full spec, n8n workflow plan, and verification checklist in
+docs/backend-separation-runbook.md § Phase 3A. Hard rules for the
+receiving workflow:
 
 - It must be a **brand-new automation-only webhook path** — never the old
   `third-place-order-test` webhook (row 1 above), which INSERTS an order
   and would duplicate every order.
 - The workflow must contain **NO insert/update nodes for `orders` or
-  `order_items`** — it verifies the signature, deduplicates `eventId`, then
+  `order_items`** — it authenticates via the webhook's built-in JWT Auth,
+  re-verifies with the JWT node, compares signed claims to the body,
+  deduplicates `eventId` in the `atlas_order_events` Data Table, then
   FETCHES the authoritative order from Supabase and runs bot/notification
   actions only.
+- The shared secret exists in n8n ONLY as the JWT credential's passphrase —
+  never in Code nodes, n8n Variables, or execution data; JWT values are
+  never logged.
 - The event body carries identifiers only (eventId, orderNumber, channel,
   timestamp) — n8n must not treat it as order data.
 

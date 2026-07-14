@@ -95,38 +95,71 @@ function mapRpcError(message: string, detail: string): Response {
 // long-lived dev server just lets the promise finish), and can never change
 // the order result. Payload carries identifiers only (no customer data, no
 // money, no secrets); n8n fetches the authoritative order from Supabase
-// itself. Signed with HMAC SHA-256 over the exact raw body; verification
-// recipe in docs/backend-separation-runbook.md § Phase 3A. Never log the
-// URL or secret — logs carry event id / order number / status only.
+// itself. Auth: a short-lived HS256 JWT (Authorization: Bearer) checked by
+// n8n's built-in Webhook JWT Auth — the secret is the JWT
+// credential's passphrase, never inside workflow code. Recipe in
+// docs/backend-separation-runbook.md § Phase 3A. Never log the URL, secret,
+// or JWT — logs carry event id / order number / status only.
 
 const AUTOMATION_TIMEOUT_MS = 5_000;
+
+export type OrderCreatedEvent = {
+  eventId: string;
+  eventType: "order.created";
+  occurredAt: string;
+  orderNumber: string;
+  channel: "customer" | "staff";
+};
+
+/**
+ * HS256 JWT over the order event, node:crypto only (no jwt dependency).
+ * 120 s lifetime, 5 s nbf backdate for clock skew. Exported for the
+ * standalone check (scripts/test-automation-bridge.mjs).
+ */
+export function buildOrderEventJwt(event: OrderCreatedEvent, secret: string): string {
+  const now = Math.floor(Date.now() / 1000);
+  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const payload = Buffer.from(
+    JSON.stringify({
+      iss: "atlas-order-bridge",
+      aud: "n8n-order-automation",
+      sub: "order.created",
+      jti: event.eventId,
+      iat: now,
+      nbf: now - 5,
+      exp: now + 120,
+      ...event,
+    }),
+  ).toString("base64url");
+  const signature = createHmac("sha256", secret).update(`${header}.${payload}`).digest("base64url");
+  return `${header}.${payload}.${signature}`;
+}
 
 function fireOrderAutomation(orderNumber: string, channel: "customer" | "staff"): void {
   const hook = process.env.N8N_ORDER_AUTOMATION_WEBHOOK_URL;
   const secret = process.env.N8N_AUTOMATION_SECRET;
   if (!hook || !secret) return;
 
-  const eventId = randomUUID();
-  const occurredAt = new Date().toISOString();
-  const body = JSON.stringify({
-    eventId,
+  const event: OrderCreatedEvent = {
+    eventId: randomUUID(),
     eventType: "order.created",
-    occurredAt,
+    occurredAt: new Date().toISOString(),
     orderNumber,
     channel,
-  });
-  const signature = `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
+  };
+  const eventId = event.eventId;
+  const jwt = buildOrderEventJwt(event, secret);
 
   waitUntil(
     fetch(hook, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        Authorization: `Bearer ${jwt}`,
         "x-atlas-event-id": eventId,
-        "x-atlas-timestamp": occurredAt,
-        "x-atlas-signature": signature,
+        "x-atlas-timestamp": event.occurredAt,
       },
-      body,
+      body: JSON.stringify(event),
       signal: AbortSignal.timeout(AUTOMATION_TIMEOUT_MS),
     }).then(
       (res) => {
