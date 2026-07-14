@@ -1,8 +1,8 @@
 import process from "node:process";
 import { z } from "zod";
 
-// Server-only staff write handlers — order actions (Phase 2G-D/2G-D2) and
-// add-expense (Phase 2G-G).
+// Server-only staff write handlers — order actions (Phase 2G-D/2G-D2),
+// add-expense (Phase 2G-G), and menu availability (Phase 2G-H).
 //
 // Each export is a complete web-standard (Request) => Response handler,
 // consumed by TWO thin delegate layers so there is ONE implementation:
@@ -67,21 +67,24 @@ function checkStaffSecret(request: Request): Response | null {
 }
 
 /**
- * PATCHes the `orders` row matched by order_number (the frontend orderId,
- * "TP-…") — NEVER by the row UUID; a client-sent UUID simply matches nothing.
- * Returns the number of rows updated, or a ready-to-send error Response.
+ * PATCHes the rows of `table` where `column` equals `value`. Returns the
+ * number of rows updated, or a ready-to-send error Response (`failMessage`
+ * is the safe client-facing error — never Supabase details).
  * VITE_SUPABASE_URL is public config; it reaches functions via process.env.
  */
-async function patchOrderByNumber(
-  orderNumber: string,
+async function patchRowsByColumn(
+  table: string,
+  column: string,
+  value: string,
   patch: Record<string, unknown>,
+  failMessage: string,
 ): Promise<number | Response> {
   const url = process.env.VITE_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return jsonError(500, "Server is not configured for staff writes.");
   try {
     const response = await fetch(
-      `${url.replace(/\/+$/, "")}/rest/v1/orders?order_number=eq.${encodeURIComponent(orderNumber)}`,
+      `${url.replace(/\/+$/, "")}/rest/v1/${table}?${column}=eq.${encodeURIComponent(value)}`,
       {
         method: "PATCH",
         headers: {
@@ -94,16 +97,26 @@ async function patchOrderByNumber(
       },
     );
     if (!response.ok) {
-      console.error(`Supabase staff write failed: orders responded ${response.status}`);
-      return jsonError(500, "Order update failed.");
+      console.error(`Supabase staff write failed: ${table} responded ${response.status}`);
+      return jsonError(500, failMessage);
     }
     const rows: unknown = await response.json();
     return Array.isArray(rows) ? rows.length : 0;
   } catch (error) {
     console.error("Supabase staff write failed", error);
-    return jsonError(500, "Order update failed.");
+    return jsonError(500, failMessage);
   }
 }
+
+/**
+ * PATCHes the `orders` row matched by order_number (the frontend orderId,
+ * "TP-…") — NEVER by the row UUID; a client-sent UUID simply matches nothing.
+ */
+const patchOrderByNumber = (
+  orderNumber: string,
+  patch: Record<string, unknown>,
+): Promise<number | Response> =>
+  patchRowsByColumn("orders", "order_number", orderNumber, patch, "Order update failed.");
 
 /**
  * Cancellation patch — mirrors the n8n Update Order Status workflow:
@@ -259,4 +272,53 @@ export async function postAddExpense(request: Request): Promise<Response> {
     console.error("Supabase expense insert failed", error);
     return jsonError(500, "Expense insert failed.");
   }
+}
+
+/* ── Update menu availability (Phase 2G-H) ──────────────────────────────── */
+
+// The app's frozen 3-state vocabulary (src/lib/menuAvailability.ts) and its
+// DB mapping. DUAL-WRITE during the transition: availability_status is the
+// new source of truth; the legacy is_available boolean is kept in sync so
+// the n8n workflows and any pre-migration reader keep working (runbook
+// 2G-H). Hidden intentionally maps to is_available=false — same as Sold Out
+// on the boolean; only availability_status can tell them apart.
+const updateMenuAvailabilityBody = z.object({
+  menuItemId: z.string().min(1),
+  availabilityStatus: z.enum(["Available", "Sold Out", "Hidden"]),
+});
+
+const AVAILABILITY_TO_DB = {
+  Available: "available",
+  "Sold Out": "sold_out",
+  Hidden: "hidden",
+} as const;
+
+/**
+ * POST /api/staff/update-menu-availability — sets availability_status AND
+ * is_available on the `menu_items` row matched by item_code (the frontend
+ * menuItemId, e.g. "B01"). REQUIRES the availability_status column (SQL
+ * migration docs/sql/2026-07-14-2G-H-menu-availability-status.sql) — before
+ * it exists, the PATCH fails with a safe 500 and no data is touched.
+ */
+export async function postUpdateMenuAvailability(request: Request): Promise<Response> {
+  const denied = checkStaffSecret(request);
+  if (denied) return denied;
+
+  const body = updateMenuAvailabilityBody.safeParse(await request.json().catch(() => null));
+  if (!body.success) return jsonError(400, "Invalid request body.");
+  const { menuItemId, availabilityStatus } = body.data;
+
+  const updated = await patchRowsByColumn(
+    "menu_items",
+    "item_code",
+    menuItemId,
+    {
+      availability_status: AVAILABILITY_TO_DB[availabilityStatus],
+      is_available: availabilityStatus === "Available",
+    },
+    "Menu update failed.",
+  );
+  if (updated instanceof Response) return updated;
+  if (updated === 0) return jsonError(404, "Menu item not found.");
+  return Response.json({ ok: true, menuItemId, availabilityStatus });
 }

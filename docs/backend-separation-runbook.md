@@ -538,40 +538,66 @@ row 4, rec. A) — safe to move.
 - Dev-verified: 401 without secret, 400 on bad paid_from and negative
   amount; order routes regression-checked (404 unknown order).
 
-### 2G-H — Menu availability: BLOCKED on schema (decision, 2026-07-08)
+### 2G-H — Menu availability: schema fix + migration (implemented 2026-07-14)
 
-DO NOT migrate the menu availability write yet, and note the READ (customer
-menu!) is also still on n8n. Confirmed state:
+Problem (decision recorded 2026-07-08): the app has three states —
+`Available` / `Sold Out` / `Hidden` (`src/lib/menuAvailability.ts`) — but
+the DB had only `menu_items.is_available` **boolean**. The n8n write
+collapses the states (`is_available ← status === "Available"`) and the n8n
+read maps the boolean back to only `Available`/`Sold Out` — **Hidden could
+not round-trip**: a hidden item came back as Sold Out.
 
-- App model: three states — `Available` / `Sold Out` / `Hidden`
-  (`src/lib/menuAvailability.ts`, MenuAvailabilityBoard).
-- DB: `menu_items.is_available` **boolean** only. The n8n write collapses
-  the three states (`is_available ← status === "Available"`), and the n8n
-  read maps the boolean back to only `Available`/`Sold Out` — **"Hidden"
-  cannot round-trip today**: a hidden item comes back as Sold Out.
-- DECISION: add a dedicated 3-state column. Text + CHECK beats an enum type
-  (no migration needed to extend later) and beats keeping booleans (the
-  whole problem is booleans can't hold 3 states):
+**Schema fix** — `menu_items.availability_status` text + CHECK
+(`available` / `sold_out` / `hidden`; text beats an enum type — extending
+later needs no type migration). REVIEW-FIRST SQL (backfill from the boolean,
+verification SELECTs, rollback, anon read policy per plan R1):
+`docs/sql/2026-07-14-2G-H-menu-availability-status.sql` — run MANUALLY in
+the Supabase SQL editor, never by tooling.
 
-```sql
--- Run in Supabase SQL editor — REVIEW FIRST, not run by any tool:
-ALTER TABLE public.menu_items
-  ADD COLUMN availability_status text NOT NULL DEFAULT 'available'
-  CHECK (availability_status IN ('available', 'sold_out', 'hidden'));
-UPDATE public.menu_items
-  SET availability_status = CASE WHEN is_available THEN 'available' ELSE 'sold_out' END;
-```
+- ⚠️ Backfill limitation: previously-hidden rows are `false` =
+  indistinguishable from Sold Out; they backfill to `sold_out` and must be
+  re-marked Hidden by hand (one-time manual review).
 
-- ⚠️ Backfill caveat: currently-hidden items are stored as `false` =
-  indistinguishable from Sold Out — after the migration the owner must
-  re-mark Hidden items by hand (one-time).
-- Until every consumer migrates: writers should set BOTH columns
-  (`is_available = availability_status === 'available'`) so the n8n
-  workflows and old reads keep working. Retire `is_available` only in the
-  Phase 2H cleanup.
-- After the schema change lands: menu-availability server route + read
-  migration (`menu_items` anon SELECT for the customer menu) in their own
-  phase, per plan W6/R1.
+**Code (W6 + R1 together, one switch)** — `MENU_AVAILABILITY_SOURCE` in
+`dataSource.ts` ("supabase") governs read AND write together so the two
+columns can't drift:
+
+- READ: `menu_items` via the anon key, EXPLICIT public columns only
+  (`item_code,name_en,category,price,is_available,availability_status`;
+  `sort_order` granted for ORDER BY) — never `select=*`. The SQL file grants
+  anon a COLUMN-LIMITED SELECT (RLS enabled, all rows readable, only those
+  columns; internal/cost/audit/future columns are unreadable by design;
+  200-with-zero-rows means the policy is missing). If the deploy somehow
+  precedes the migration, the read retries once without
+  `availability_status` → boolean mapping. Transitional mapping: prefer
+  `availability_status` when valid; else fall back `is_available` true→
+  Available / false→Sold Out (the boolean never invents Hidden). Consumers:
+  customer menu (drops Hidden, fails open to local data), staff Menu board
+  (shows Hidden; 2G-H added a Hidden action button + filter so staff can
+  hide/restore from the UI), manual-order picker (hides Hidden).
+- WRITE: `POST /api/staff/update-menu-availability` (same delegate pattern:
+  `api/staff/update-menu-availability.ts` production,
+  `src/routes/api.staff.update-menu-availability.ts` dev, one implementation
+  in `api/_lib/staffOrderWrites.server.ts`). Requires `x-staff-secret`
+  (device secret via ⚿, sent by the shared staffWriteClient); zod-validates
+  `menuItemId` + strict 3-value `availabilityStatus`; 404 on unknown
+  item_code. DUAL-WRITES `availability_status` + `is_available` so n8n
+  workflows/old readers keep working; retire the boolean in Phase 2H.
+- Unchanged: customer submitOrder + staff Add Order stay on n8n
+  (`ACTIVE_WRITE_SOURCE` untouched); n8n menu webhooks stay alive as the
+  rollback path.
+
+**Deployment order (2G-H):** 1. review code + SQL → 2. run the SQL file in
+Supabase SQL editor → 3. run its verification SELECTs → 4. build/typecheck →
+5. deploy → 6. controlled production test (below) → 7. commit. The SQL must
+land BEFORE the deploy: the new write route PATCHes `availability_status`
+and fails (a safe 500, no data touched) while the column is missing, and the
+read needs the anon policy.
+
+**Rollback:** set `MENU_AVAILABILITY_SOURCE` back to `"n8n"`, build, deploy
+— nothing else. Keep the column (dropping it discards hidden states — see
+the SQL file § 4); while writes are on n8n, `availability_status` goes stale
+and must be re-synced (SQL file § 5) before flipping forward again.
 
 ### NEXT — Customer order submit (plan only, DO NOT implement yet)
 

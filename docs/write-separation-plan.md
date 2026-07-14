@@ -287,11 +287,16 @@ writes, the options are:
       `/api/staff/add-expense` route + Supabase adapter write, following the
       same `STAFF_ACTION_WRITE_SOURCE` switch; pending the post-deploy
       production checklist (runbook 2G-F/G section).
-- [ ] **W6 + R1 — menu availability**: BLOCKED on schema — `is_available`
-      boolean cannot hold Hidden (it can't even round-trip today). Decision +
-      migration SQL prepared in runbook 2G-H; after the column lands:
-      update route (write both columns during transition) + `menu_items`
-      anon SELECT for the customer-menu read.
+- [x] **W6 + R1 — menu availability IMPLEMENTED** (2026-07-14, runbook
+      2G-H): `availability_status` text+CHECK column (review-first SQL in
+      docs/sql/2026-07-14-2G-H-menu-availability-status.sql — run manually
+      BEFORE deploy), `/api/staff/update-menu-availability` route
+      (dual-writes both columns during transition), COLUMN-LIMITED anon
+      SELECT on `menu_items` (public menu columns only, explicit column
+      list — never select=*) for the customer-menu read; staff board gained
+      a Hidden action/filter. Both read and write follow
+      the new `MENU_AVAILABILITY_SOURCE` switch (one-line rollback to n8n).
+      ⚠️ Historical Hidden items backfill as sold_out — re-mark by hand.
 - [ ] **2G-C / W1 — customer order submit** (LAST): server route with
       server-recomputed totals; plan refreshed in runbook § NEXT. Flip via
       `ACTIVE_WRITE_SOURCE` once it governs only submitOrder.

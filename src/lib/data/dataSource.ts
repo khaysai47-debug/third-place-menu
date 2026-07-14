@@ -42,3 +42,22 @@ export const ACTIVE_WRITE_SOURCE: DataSource = "n8n";
  * staff page) while this is "supabase".
  */
 export const STAFF_ACTION_WRITE_SOURCE: DataSource = "supabase";
+
+/**
+ * MENU AVAILABILITY source switch (Phase 2G-H) — governs BOTH the menu
+ * availability read (customer menu, staff Menu board, manual-order picker)
+ * and the staff availability write. Read and write flip TOGETHER on purpose:
+ * a Supabase write with an n8n read (or vice versa) would let
+ * availability_status and is_available drift apart mid-transition.
+ * "supabase" = anon-key read of menu_items + writes via the
+ * /api/staff/update-menu-availability server route (dual-writes
+ * availability_status + is_available).
+ * DEPLOYMENT ORDER: run docs/sql/2026-07-14-2G-H-menu-availability-status.sql
+ * in the Supabase SQL editor BEFORE deploying with this set to "supabase" —
+ * the write route PATCHes the new column and fails (safely) without it.
+ * ROLLBACK: set back to "n8n", build, deploy — the n8n menu webhooks are
+ * untouched. NOTE: n8n only writes is_available, so availability_status goes
+ * stale during a rollback; re-run the backfill UPDATE (in the same SQL file)
+ * before flipping forward again.
+ */
+export const MENU_AVAILABILITY_SOURCE: DataSource = "supabase";

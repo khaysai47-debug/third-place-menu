@@ -1,6 +1,8 @@
-// Staff menu availability board: fetches the menu from the n8n API and lets
-// staff mark items Available / Sold Out. Hidden is shown as a status only —
-// it's managed elsewhere, not a staff action here.
+// Staff menu availability board: fetches the menu via the active source
+// (MENU_AVAILABILITY_SOURCE — Supabase since 2G-H, n8n as rollback) and lets
+// staff mark items Available / Sold Out / Hidden. Hidden items stay visible
+// here (and can be restored) but disappear from the customer menu and the
+// manual-order picker.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   getMenuAvailability,
@@ -36,7 +38,7 @@ const AVAILABILITY_META: Record<MenuAvailabilityStatus, AvailabilityMeta> = {
   },
 };
 
-/** The two statuses staff can set from this board. */
+/** The three statuses staff can set from this board (2G-H added Hidden). */
 const STAFF_ACTIONS: { status: MenuAvailabilityStatus; labelZh: string; activeClass: string }[] = [
   {
     status: "Available",
@@ -49,15 +51,21 @@ const STAFF_ACTIONS: { status: MenuAvailabilityStatus; labelZh: string; activeCl
     activeClass:
       "bg-[var(--color-vermillion)] border-[var(--color-vermillion)] text-[var(--color-cream)]",
   },
+  {
+    status: "Hidden",
+    labelZh: "隱藏",
+    activeClass: "bg-[var(--color-ink)] border-[var(--color-ink)] text-[var(--color-cream)]",
+  },
 ];
 
 /** Quick filter for the availability list. */
-type StatusFilter = "all" | "Available" | "Sold Out";
+type StatusFilter = "all" | MenuAvailabilityStatus;
 
 const STATUS_FILTERS: { value: StatusFilter; labelEn: string; labelZh: string }[] = [
   { value: "all", labelEn: "All", labelZh: "全部" },
   { value: "Available", labelEn: "Available", labelZh: "供應" },
   { value: "Sold Out", labelEn: "Sold Out", labelZh: "售完" },
+  { value: "Hidden", labelEn: "Hidden", labelZh: "隱藏" },
 ];
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -290,7 +298,7 @@ export function MenuAvailabilityBoard() {
                           </span>
                         </div>
                       </div>
-                      <div className="flex shrink-0 gap-2">
+                      <div className="flex shrink-0 flex-wrap gap-2">
                         {STAFF_ACTIONS.map((action) => {
                           const isCurrent = item.availability === action.status;
                           return (
