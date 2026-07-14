@@ -44,7 +44,7 @@ const APP_STATUSES = [
 const statusToDb = (status: string): string => (status === "done" ? "completed" : status);
 
 /** Uniform JSON error body — never includes stack traces or env values. */
-function jsonError(status: number, error: string): Response {
+export function jsonError(status: number, error: string): Response {
   return Response.json({ ok: false, error }, { status });
 }
 
@@ -56,8 +56,9 @@ export function methodNotAllowed(): Response {
 /**
  * Checks the x-staff-secret header against STAFF_WRITE_SECRET.
  * Returns a Response to send (401/500) or null when authorized.
+ * Also used by the staff order-intake route (orderIntake.server.ts).
  */
-function checkStaffSecret(request: Request): Response | null {
+export function checkStaffSecret(request: Request): Response | null {
   const secret = process.env.STAFF_WRITE_SECRET;
   if (!secret) return jsonError(500, "Server is not configured for staff writes.");
   if (request.headers.get("x-staff-secret") !== secret) {

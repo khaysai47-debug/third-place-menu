@@ -21,7 +21,7 @@ the recommendation flips to B for that workflow.
 
 | # | Workflow | Webhook path | Method | Table(s) | Columns written | DB-only? | Bot/social/payment side effect | Breaks automation if moved? | Rec. | Confirm in n8n |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 1 | Order Intake API (Supabase Test) | `third-place-order-test` | POST | `orders` + `order_items` | orders: order_number, order_type, status("new"), table_number, customer_name/phone/address, customer_note, source("customer_menu"), subtotal, delivery_fee, total, payment_method(null) · items: order_id, item_code, item_name, quantity, unit_price, line_total, note(null) | ✅ per 2B discovery | none today; Phase 3 bots/notifications WILL attach here | No (today). Phase 3 must attach to the new path or the kept n8n webhook | **A** — safe to move now, but keep the n8n webhook alive for Phase 3 bots; plan the automation bridge (write-separation-plan § automation bridge) | [ ] |
+| 1 | Order Intake API (Supabase Test) | `third-place-order-test` | POST | `orders` + `order_items` | orders: order_number, order_type, status("new"), table_number, customer_name/phone/address, customer_note, source("customer_menu"), subtotal, delivery_fee, total, payment_method(null) · items: order_id, item_code, item_name, quantity, unit_price, line_total, note(null) | ✅ per 2B discovery | none today; Phase 3 bots/notifications WILL attach here | No (today). Phase 3 must attach to the new path or the kept n8n webhook | **A** — MOVED 2026-07-14 (runbook 2G-I): app intake → `/api/order/submit` + `/api/staff/add-order` → `create_order_with_items` RPC. Webhook stays alive ONLY as the rollback path. ⚠️ THIS WORKFLOW INSERTS AN ORDER — the app must never call it in addition to the Supabase path (instant duplicates), and it must NOT be reused as the Phase 3 automation hook unless its write nodes are removed and verified | [ ] |
 | 2 | Update Order Status API | `third-place-update-order-status` | POST | `orders` | status; if "cancelled": cancellation_reason (default "Other") + cancelled_at=now; else both reset to null. Match: order_number | ✅ per 2B discovery | none observed | No | **A** | [ ] |
 | 3 | Update Payment API | `third-place-update-payment` | POST | `orders` | payment_status (default "paid" lc), payment_method, paid_at=now ISO. Match: order_number | ✅ per 2B discovery | none observed | No | **A** | [ ] |
 | 4 | Add Expense API | `third-place-add-expense` | POST | `expenses` | expense_date (Bangkok yyyy-MM-dd), category (def "Other"), description (← item_name/note), amount (Number), payment_method (← paid_from, def "Other"), staff_name (def "Staff"), note | ✅ per 2B discovery | none observed | No | **A** | [ ] |
@@ -37,8 +37,8 @@ Phase 2H, the menu read moves in 2G-E).
 
 | Action | Caller → function | n8n webhook | Via repository layer? |
 | --- | --- | --- | --- |
-| Customer order submit | `CheckoutDrawer.tsx` → `submitOrder()` (orders.ts) | order-test | No (deliberate — intake documented as later phase) |
-| Staff manual order | `ManualOrderForm.tsx` → `submitOrder()` | order-test | No (same) |
+| Customer order submit | `CheckoutDrawer.tsx` → `submitOrder()` (orders.ts) | order-test only when `ORDER_INTAKE_SOURCE="n8n"` (rollback) — Supabase route `/api/order/submit` since 2G-I | No (deliberate — intake switches inside orders.ts) |
+| Staff manual order | `ManualOrderForm.tsx` → `submitOrder(payload, "staff")` | order-test only on rollback — Supabase route `/api/staff/add-order` since 2G-I | No (same) |
 | Staff status update | staff board → repo `updateOrderStatus` → `updateStaffOrderStatus()` | update-order-status | Yes |
 | Staff cancel | staff board → repo `cancelOrder` → same function, status "cancelled" | update-order-status | Yes |
 | Staff mark paid | staff board → repo `updateOrderPayment` → `updateOrderPayment()` | update-payment | Yes |

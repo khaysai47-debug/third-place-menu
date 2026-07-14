@@ -2,7 +2,8 @@
 // three STAFF WRITES (status/cancel/mark-paid) are the LIVE DEFAULT since
 // Phase 2G-F via STAFF_ACTION_WRITE_SOURCE (dataSource.ts), going through the
 // /api/staff/* server routes validated in 2G-E. submitOrder still throws —
-// order intake stays on n8n (ACTIVE_WRITE_SOURCE).
+// order intake bypasses the repository entirely (src/lib/orders.ts,
+// ORDER_INTAKE_SOURCE — Supabase server routes since 2G-I).
 //
 // Schema source of truth: docs/schema-discovery-notes.md (filled 2026-07-06).
 // Row shapes + field wiring live in ../mappers/orderMapper.ts.
@@ -17,8 +18,8 @@
 //   match rows by order_number, same as the n8n workflows.
 // - done→"completed" translation and cancellation-field resets happen inside
 //   the routes (n8n behavior replicated there).
-// - submitOrder stays stubbed — order intake migrates last (2G-C), n8n
-//   automations hang off it.
+// - submitOrder stays stubbed — intake moved in 2G-I via src/lib/orders.ts
+//   (never through the repository).
 //
 // Contract references: contracts/orderContract.ts (data shape),
 // contracts/adapterContract.ts (behavior rules), docs/backend-separation-runbook.md.
@@ -58,7 +59,8 @@ export const supabaseOrdersAdapter: OrderRepository = {
   updateOrderPayment: (orderKey, paymentMethod) =>
     staffWrite("/api/staff/mark-paid", { orderId: orderKey, paymentMethod }),
   submitOrder: async () => {
-    // TODO(last): order intake — most entangled with n8n automations; may stay on n8n.
+    // Intake never routes through the repository: checkout + manual order call
+    // src/lib/orders.ts submitOrder directly (ORDER_INTAKE_SOURCE, 2G-I).
     throw notImplemented("submitOrder");
   },
 };

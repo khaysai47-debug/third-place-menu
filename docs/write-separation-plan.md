@@ -1,14 +1,16 @@
 # Write Separation Plan — Phase 2G (audit + architecture)
 
-**Status (2026-07-08):** staff order actions (W2/W3/W4) AND expense add
-(W5) are LIVE on Supabase server routes via the targeted
-`STAFF_ACTION_WRITE_SOURCE` switch (runbook 2G-F/2G-G) — pending the
-post-deploy production checklist. `ACTIVE_READ_SOURCE = "supabase"`;
-`ACTIVE_WRITE_SOURCE = "n8n"` (governs submitOrder only in practice).
-Remaining normal-op migrations: menu availability (W6 — BLOCKED on the
-3-state schema, SQL prepared in runbook 2G-H), menu availability READ (R1,
-customer menu), customer order intake (W1, last — plan in runbook § NEXT).
-Payment proof add (W7) stays n8n long-term for bot/social automation.
+**Status (2026-07-14):** ALL normal-op writes are implemented on Supabase
+server routes. Staff order actions (W2/W3/W4) + expense add (W5) live since
+2G-F/2G-G; menu availability (W6+R1) live since 2G-H; customer + staff
+order intake (W1) implemented in 2G-I via the targeted
+`ORDER_INTAKE_SOURCE` switch (runbook § 2G-I — review-first SQL must run
+before deploy). `ACTIVE_READ_SOURCE = "supabase"`; `ACTIVE_WRITE_SOURCE`
+stays `"n8n"` but now governs nothing in practice (every real write has its
+own switch). Payment proof add (W7) stays n8n long-term for bot/social
+automation; the old order-intake webhook stays alive ONLY as the W1
+rollback and must never be called alongside the Supabase path (it inserts
+its own order → duplicates).
 
 **Business goal:** before real restaurant use, normal app operations must not
 depend on n8n. n8n becomes the automation layer only (bots, social chat,
@@ -297,9 +299,16 @@ writes, the options are:
       a Hidden action/filter. Both read and write follow
       the new `MENU_AVAILABILITY_SOURCE` switch (one-line rollback to n8n).
       ⚠️ Historical Hidden items backfill as sold_out — re-mark by hand.
-- [ ] **2G-C / W1 — customer order submit** (LAST): server route with
-      server-recomputed totals; plan refreshed in runbook § NEXT. Flip via
-      `ACTIVE_WRITE_SOURCE` once it governs only submitOrder.
+- [x] **2G-C / W1 — customer + staff order intake IMPLEMENTED** (2026-07-14,
+      runbook 2G-I): public `/api/order/submit` + protected
+      `/api/staff/add-order` → `create_order_with_items` RPC (single
+      transaction, server-recomputed prices/totals, server-generated
+      TP-/TP-S- numbers, client_request_id idempotency — review-first SQL in
+      docs/sql/2026-07-14-2G-I-order-intake.sql, run BEFORE deploy). Flip via
+      the new `ORDER_INTAKE_SOURCE` (NOT `ACTIVE_WRITE_SOURCE`); rollback is
+      one line back to "n8n". Post-order automation bridge is env-gated and
+      OFF (needs a new automation-only n8n workflow — never the old intake
+      webhook, which inserts its own order).
 - [ ] **W7 — automation stays in n8n** (payment proof intake, bots,
       notifications): document which n8n workflows remain and which retire
       at Phase 2H cleanup.

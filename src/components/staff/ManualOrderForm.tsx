@@ -1,6 +1,9 @@
 // Staff manual order form: builds a dine-in order from the live menu and
-// submits it through the same order intake webhook as customer checkout
-// (same OrderPayload shape — n8n sets the status to "new" itself).
+// submits it through submitOrder(payload, "staff") — on the Supabase intake
+// source (2G-I) that is the protected /api/staff/add-order route
+// (x-staff-secret; server recomputes all prices/totals and generates the
+// TP-S-… number); on the n8n rollback source it is the original intake
+// webhook (n8n sets the status to "new" itself).
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { getMenuAvailability, type MenuAvailabilityItem } from "@/lib/menuAvailability";
 import { submitOrder, type OrderPayload } from "@/lib/orders";
@@ -45,6 +48,9 @@ export function ManualOrderForm({ onSubmitted }: Props) {
   const [formError, setFormError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [successId, setSuccessId] = useState<string | null>(null);
+  // One idempotency key per intended order — reused on retries after a
+  // failure, replaced with a fresh one only after a successful submit.
+  const [requestId, setRequestId] = useState(() => crypto.randomUUID());
 
   const loadMenu = useCallback(async () => {
     setLoadState("loading");
@@ -128,6 +134,7 @@ export function ManualOrderForm({ onSubmitted }: Props) {
 
     const trimmedNote = note.trim();
     const payload: OrderPayload = {
+      requestId,
       orderId: makeStaffOrderId(),
       createdAt: new Date().toISOString(),
       customer: { name: null, phone: null },
@@ -153,11 +160,14 @@ export function ManualOrderForm({ onSubmitted }: Props) {
     setFormError(null);
     setSuccessId(null);
     setSubmitting(true);
-    const result = await submitOrder(payload);
+    const result = await submitOrder(payload, "staff");
     setSubmitting(false);
 
     if (result.success) {
+      // result.orderId is the server-returned order number on the Supabase
+      // intake path. Fresh idempotency key for the NEXT order.
       setSuccessId(result.orderId);
+      setRequestId(crypto.randomUUID());
       setTableNumber("");
       setLines([]);
       setNote("");

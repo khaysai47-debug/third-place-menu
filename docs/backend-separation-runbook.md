@@ -599,28 +599,81 @@ read needs the anon policy.
 the SQL file § 4); while writes are on n8n, `availability_status` goes stale
 and must be re-synced (SQL file § 5) before flipping forward again.
 
-### NEXT — Customer order submit (plan only, DO NOT implement yet)
+### Phase 2G-I — secure order intake (customer checkout + Staff Add Order, 2026-07-14)
 
-The last normal-op write. Server route design (plan § W1 + 2G-B decisions):
+The last normal-op write, IMPLEMENTED (code on branch; SQL review-first).
+Architecture:
 
-1. PUBLIC route (no staff secret — customers order), e.g.
-   `POST /api/order/submit`: receives cart lines (item codes + quantities),
-   order type, table number / customer info, note.
-2. Server fetches `menu_items` from Supabase and RE-COMPUTES unit prices,
-   line totals, subtotal, delivery fee, and total — client-sent money is a
-   display hint, never trusted; unknown item codes and insane quantities are
-   rejected (this closes today's trust-the-client n8n behavior).
-3. Server INSERTs `orders` + `order_items` (prefer a single Postgres RPC
-   `create_order(...)` for atomicity; n8n does two sequential inserts today,
-   so an RPC is an upgrade, not a regression).
-4. Returns the `order_number` the frontend uses everywhere.
-5. OPTIONAL bridge (Phase 3): after a successful insert, fire-and-forget an
-   n8n automation webhook (auth via `N8N_AUTOMATION_SECRET`) so future
-   bots/notifications keep working; the n8n intake webhook stays alive
-   regardless.
-6. Flip mechanism: implement Supabase `submitOrder` in the adapter → flip
-   `ACTIVE_WRITE_SOURCE` (by then it governs ONLY submitOrder). Rollback
-   stays one line.
+1. **Two server routes**, one shared implementation
+   (`api/_lib/orderIntake.server.ts`, same dual-surface pattern as 2G-D2):
+   - `POST /api/order/submit` — PUBLIC (customers aren't logged in);
+   - `POST /api/staff/add-order` — requires `x-staff-secret`.
+   Strict zod validation: request-id shape, order type, item-code format,
+   integer quantities (≤20/item, ≤30 lines, ≤60 items), field length caps,
+   JSON content type, 16 KB body cap, per-type required fields (dine_in →
+   table; pickup → name+phone; delivery → name+phone+address), duplicate
+   lines safely combined. dine_in never stores leftover customer data.
+2. **The browser is not trusted for money**: the body carries ONLY item
+   codes + quantities + order-type details. The route calls the
+   `create_order_with_items` Postgres function
+   (docs/sql/2026-07-14-2G-I-order-intake.sql) with the service-role key;
+   the function re-reads `menu_items`, rejects unknown / sold_out / hidden /
+   unpriced items, computes unit price, name snapshot, line totals,
+   subtotal, delivery fee (fixed 30 THB delivery / 0 otherwise —
+   delivery_zones holds demo rows and is deliberately not consulted), and
+   total, and inserts `orders` + `order_items` in ONE transaction (no
+   partial orders possible). EXECUTE is service_role-only.
+3. **Server-generated order numbers**: `TP-YYYYMMDD-HHMMSS` (customer) /
+   `TP-S-…` (staff) in Bangkok time, generated in the function with a
+   suffix-retry against the unique `orders.order_number` constraint. The UI
+   shows the RETURNED number (checkout success screen + manual-order form).
+4. **Idempotency**: new `orders.client_request_id` (partial unique index).
+   The frontend makes one `crypto.randomUUID()` per intended order and
+   reuses it on retries; the function returns the ORIGINAL order for a
+   replayed id (`duplicate: true`) — double-tap / network-retry safe.
+5. **Stored defaults** match n8n behavior: status `new`, payment_status
+   `unpaid`, payment_method null; source `customer_menu` (customer) /
+   `staff_manual` (staff manual — NEW value, previously n8n wrote
+   customer_menu for these; nothing reads `source` today).
+6. **Switch**: `ORDER_INTAKE_SOURCE` in dataSource.ts governs ONLY
+   submitOrder (checkout + manual order). `ACTIVE_WRITE_SOURCE` stays "n8n"
+   and now governs nothing in practice.
+7. **Automation bridge (optional, OFF by default)**: after a successful
+   NON-duplicate insert the route fire-and-forgets to
+   `N8N_ORDER_AUTOMATION_WEBHOOK_URL` (+ `x-automation-secret` from
+   `N8N_AUTOMATION_SECRET`) if configured. ⚠️ NEVER point this at the old
+   `third-place-order-test` webhook — its workflow INSERTS an order and
+   every order would be duplicated. It needs a NEW automation-only workflow
+   (no write nodes) in Phase 3.
+
+**Deployment order (2G-I):** 1. review code + SQL → 2. run
+docs/sql/2026-07-14-2G-I-order-intake.sql in the Supabase SQL editor →
+3. run its verification SELECTs (§ 4) → 4. typecheck/build → 5. deploy a
+Preview branch and run the controlled test (below) → 6. verify stored
+prices/totals in Table Editor came from menu_items → 7. check the n8n
+executions list shows NO new order-intake executions from app orders →
+8. clean up test orders (cancel or delete rows) → 9. merge to main.
+The SQL must land BEFORE the deploy: without the RPC the new routes fail
+with a safe 500 and write nothing.
+
+**Controlled test (Preview):**
+- Customer dine-in / pickup / delivery order (one each, disposable): success
+  screen shows the SERVER order number; row + items + totals correct in
+  Table Editor; delivery total = subtotal + 30.
+- Staff Add Order (needs ⚿ secret on the device): TP-S-… number returned,
+  board refreshes.
+- Price manipulation: POST to /api/order/submit with fake
+  unitPrice/totalPrice fields (they're not even in the schema — stripped)
+  and verify stored totals are menu prices; POST a sold_out item-code →
+  409, no row.
+- Idempotency: repeat an identical POST (same requestId) → same
+  order_number, `duplicate: true`, ONE row.
+
+**Rollback:** set `ORDER_INTAKE_SOURCE` back to `"n8n"`, build, deploy —
+intake returns to the untouched n8n webhook (client still sends the full
+legacy payload). The SQL objects are harmless to leave in place. n8n-created
+orders have NULL client_request_id, so idempotency simply doesn't apply to
+them.
 
 ### Production test checklist after the 2G-F/2G-G deploy
 

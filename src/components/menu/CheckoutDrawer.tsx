@@ -68,6 +68,11 @@ export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Prop
   const [success, setSuccess] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  // One idempotency key per drawer session (= per intended order): retries of
+  // a failed submit reuse it, so the server can never store the order twice.
+  const [requestId] = useState(() => crypto.randomUUID());
+  // Authoritative order number returned by the server (Supabase intake).
+  const [confirmedOrderId, setConfirmedOrderId] = useState<string | null>(null);
 
   const deliveryFee = orderType === "delivery" ? DELIVERY_FEE : 0;
   const finalTotal = total + deliveryFee;
@@ -102,6 +107,7 @@ export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Prop
 
     const now = new Date();
     const orderPayload: OrderPayload = {
+      requestId,
       orderId: makeOrderId(),
       createdAt: now.toISOString(),
       customer: {
@@ -134,8 +140,12 @@ export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Prop
     const result = await submitOrder(orderPayload);
     if (result.success) {
       setSubmitError(null);
+      // Server-returned order number is the authoritative one — never assume
+      // the client-generated id was stored.
+      setConfirmedOrderId(result.orderId);
       setSuccess(true);
     } else {
+      // Cart and form state stay intact — the customer can fix and retry.
       setSubmitError(result.error);
       setIsSubmitting(false);
     }
@@ -173,6 +183,11 @@ export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Prop
                 <div className="font-display text-[30px] text-[var(--color-gold-soft)]">
                   Order received · 訂單已送出
                 </div>
+                {confirmedOrderId && (
+                  <p className="mt-1 text-[12px] text-[var(--color-cream)]/55">
+                    Order <span className="staff-num text-[var(--color-cream)]/80">{confirmedOrderId}</span>
+                  </p>
+                )}
                 <p className="mt-2 text-[13px] text-[var(--color-cream)]/60 leading-relaxed">
                   {orderType === "dine-in"
                     ? "Staff will prepare it shortly."

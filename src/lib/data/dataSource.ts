@@ -7,12 +7,11 @@
 //   the flip gate passed: full-coverage parity (orders 38/38 incl. proof,
 //   expenses 1/1, strict timestamps) — see docs/adapter-parity-testing.md
 //   Run log. ROLLBACK: set it back to "n8n", build, deploy — nothing else.
-// - ACTIVE_WRITE_SOURCE — writes MUST stay "n8n" until Phase 2G. The
-//   Supabase write methods are throwing stubs, and the n8n automations
-//   (notifications, bot replies) trigger off n8n writes. NEVER set this to
-//   "supabase" until Supabase writes are implemented, tested, and every
-//   downstream automation is re-pointed (runbook Phase 2G, one write at a
-//   time).
+// - ACTIVE_WRITE_SOURCE — historical umbrella switch; every real write now
+//   has its own targeted switch below (STAFF_ACTION_WRITE_SOURCE,
+//   MENU_AVAILABILITY_SOURCE, ORDER_INTAKE_SOURCE). Stays "n8n": the
+//   repository's Supabase submitOrder is a throwing stub and nothing else
+//   follows it.
 //
 // Deliberately constants, NOT environment variables — production cannot
 // drift to an unimplemented adapter through config; every flip is a reviewed
@@ -26,7 +25,12 @@ export type DataSource = "n8n" | "supabase";
 /** Where dashboard READS come from. Supabase since Phase 2E (2026-07-06). */
 export const ACTIVE_READ_SOURCE: DataSource = "supabase";
 
-/** Where WRITES go. Stays "n8n" until Phase 2G — read the header first. */
+/**
+ * Where repository-level WRITES go. As of 2G-I this governs NOTHING in
+ * practice: staff actions follow STAFF_ACTION_WRITE_SOURCE, order intake
+ * follows ORDER_INTAKE_SOURCE, and no UI calls the repository's submitOrder.
+ * Kept as the documented default for any future repository write.
+ */
 export const ACTIVE_WRITE_SOURCE: DataSource = "n8n";
 
 /**
@@ -61,3 +65,22 @@ export const STAFF_ACTION_WRITE_SOURCE: DataSource = "supabase";
  * before flipping forward again.
  */
 export const MENU_AVAILABILITY_SOURCE: DataSource = "supabase";
+
+/**
+ * ORDER INTAKE source switch (Phase 2G-I) — governs ONLY customer checkout
+ * and Staff Add Order (submitOrder in src/lib/orders.ts; both call it
+ * directly, not via the repository). "supabase" sends intake to the app's
+ * own secure server routes (/api/order/submit public, /api/staff/add-order
+ * with x-staff-secret), which call the create_order_with_items RPC — the
+ * server recomputes ALL prices/totals from menu_items and generates the
+ * order number; client money fields are never trusted.
+ * DEPLOYMENT ORDER: run docs/sql/2026-07-14-2G-I-order-intake.sql in the
+ * Supabase SQL editor BEFORE deploying with this set to "supabase" — the
+ * routes call the RPC and fail (safely, no data written) without it.
+ * ROLLBACK: set back to "n8n", build, deploy — intake returns to the
+ * untouched third-place-order-test webhook (which does its own inserts).
+ * ⚠️ The old intake webhook INSERTS orders — never call it in addition to
+ * the Supabase path or every order is duplicated (see
+ * docs/n8n-workflow-side-effects.md row 1).
+ */
+export const ORDER_INTAKE_SOURCE: DataSource = "supabase";

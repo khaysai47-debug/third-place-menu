@@ -36,10 +36,10 @@ export interface OrderRepository {
     paymentMethod: StaffPaymentMethod,
   ): Promise<UpdateStaffOrderResult>;
   /**
-   * Customer/manual order intake. Defined here for completeness, but intake is
-   * the piece most entangled with n8n automations — the checkout and manual
-   * order form intentionally still call submitOrder() directly (see the map's
-   * migration order). Wire them through the repository only in a later phase.
+   * Customer/manual order intake. Defined here for completeness but UNUSED:
+   * the checkout and manual order form call submitOrder() in src/lib/orders.ts
+   * directly, which switches on ORDER_INTAKE_SOURCE (Phase 2G-I — secure
+   * server routes on "supabase", the original webhook on "n8n").
    */
   submitOrder(payload: OrderPayload): Promise<SubmitResult>;
 }
