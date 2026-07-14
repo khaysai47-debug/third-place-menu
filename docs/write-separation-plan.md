@@ -248,14 +248,21 @@ by definition; anything secret gets a bare name.
   (anon SELECT + `USING (true)` policy on `menu_items`) — the customer menu
   must not depend on n8n. Watch for the 200-but-empty RLS failure mode.
 
-### Automation bridge (design only — DO NOT implement now)
+### Automation bridge — IMPLEMENTED for order intake (Phase 3A, 2026-07-14)
 
-When Phase 3 adds notifications/bots that today would have hung off n8n
-writes, the options are:
+The recommended option below is now live in code for `order.created`:
+after a successful non-duplicate order the intake route sends a signed
+(HMAC SHA-256) identifier-only event to `N8N_ORDER_AUTOMATION_WEBHOOK_URL`,
+delivered via Vercel `waitUntil` so it never blocks or fails the order;
+skipped entirely when `N8N_ORDER_AUTOMATION_WEBHOOK_URL` /
+`N8N_AUTOMATION_SECRET` are unset. Spec + n8n workflow plan + verification
+checklist: docs/backend-separation-runbook.md § Phase 3A. The receiving
+workflow must be a NEW automation-only webhook (no order writes) — never
+`third-place-order-test`.
 
 | Approach | Notes |
 | --- | --- |
-| **Server route calls an n8n automation webhook after a successful write** | ✅ RECOMMENDED first: explicit, no new infra, testable, auth via `N8N_AUTOMATION_SECRET`; fire-and-forget so a slow n8n never blocks the write |
+| **Server route calls an n8n automation webhook after a successful write** | ✅ IMPLEMENTED for order intake (Phase 3A): explicit, no new infra, testable, HMAC auth via `N8N_AUTOMATION_SECRET`; `waitUntil`-backed so a slow n8n never blocks the write |
 | Supabase Database Webhooks (DB trigger → n8n) | Most robust (fires no matter who wrote); good second step; config lives in Supabase, mind auth + retries |
 | n8n scheduled polling | Simple but laggy and wasteful; only for non-urgent digests (daily summary) |
 | Supabase Realtime | Post-MVP; needs a persistent listener — n8n Cloud isn't one |

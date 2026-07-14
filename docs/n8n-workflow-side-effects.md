@@ -47,6 +47,24 @@ Phase 2H, the menu read moves in 2G-E).
 | Payment proof add | — none in app (display only) | add-payment-proof | n/a |
 | Menu availability READ | customer menu `index.tsx`, `MenuAvailabilityBoard`, `ManualOrderForm` → `getMenuAvailability()` | menu-availability (GET) | No — still n8n; moves in 2G-E |
 
+## Phase 3A — order-created automation bridge (2026-07-14)
+
+The app now emits a signed `order.created` event (HMAC SHA-256,
+`x-atlas-signature`) to `N8N_ORDER_AUTOMATION_WEBHOOK_URL` after every
+successful non-duplicate order — full spec, n8n workflow plan, and
+verification checklist in docs/backend-separation-runbook.md § Phase 3A.
+Hard rules for the receiving workflow:
+
+- It must be a **brand-new automation-only webhook path** — never the old
+  `third-place-order-test` webhook (row 1 above), which INSERTS an order
+  and would duplicate every order.
+- The workflow must contain **NO insert/update nodes for `orders` or
+  `order_items`** — it verifies the signature, deduplicates `eventId`, then
+  FETCHES the authoritative order from Supabase and runs bot/notification
+  actions only.
+- The event body carries identifiers only (eventId, orderNumber, channel,
+  timestamp) — n8n must not treat it as order data.
+
 ## Bottom line
 
 All five normal-op write workflows are DB-only today → recommendation **A**

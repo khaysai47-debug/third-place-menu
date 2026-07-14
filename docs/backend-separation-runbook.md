@@ -639,12 +639,12 @@ Architecture:
    submitOrder (checkout + manual order). `ACTIVE_WRITE_SOURCE` stays "n8n"
    and now governs nothing in practice.
 7. **Automation bridge (optional, OFF by default)**: after a successful
-   NON-duplicate insert the route fire-and-forgets to
-   `N8N_ORDER_AUTOMATION_WEBHOOK_URL` (+ `x-automation-secret` from
-   `N8N_AUTOMATION_SECRET`) if configured. ⚠️ NEVER point this at the old
-   `third-place-order-test` webhook — its workflow INSERTS an order and
+   NON-duplicate insert the route emits a signed `order.created` event to
+   `N8N_ORDER_AUTOMATION_WEBHOOK_URL` — upgraded in Phase 3A (next section)
+   to HMAC-signed + `waitUntil`-backed delivery. ⚠️ NEVER point this at the
+   old `third-place-order-test` webhook — its workflow INSERTS an order and
    every order would be duplicated. It needs a NEW automation-only workflow
-   (no write nodes) in Phase 3.
+   (no write nodes).
 
 **Deployment order (2G-I):** 1. review code + SQL → 2. run
 docs/sql/2026-07-14-2G-I-order-intake.sql in the Supabase SQL editor →
@@ -674,6 +674,109 @@ intake returns to the untouched n8n webhook (client still sends the full
 legacy payload). The SQL objects are harmless to leave in place. n8n-created
 orders have NULL client_request_id, so idempotency simply doesn't apply to
 them.
+
+### Phase 3A — signed order-created automation bridge (2026-07-14)
+
+Code on branch (`api/_lib/orderIntake.server.ts`, `fireOrderAutomation`).
+Purpose: after a successful NEW order transaction (customer OR staff), the
+Vercel route notifies a NEW automation-only n8n webhook so Phase 3
+bots/notifications can react — WITHOUT n8n ever inserting an order again.
+
+**Behavior:**
+
+- Fires only after `create_order_with_items` succeeded AND
+  `duplicate` is false (idempotent replays never re-fire).
+- Skipped silently unless BOTH `N8N_ORDER_AUTOMATION_WEBHOOK_URL` and
+  `N8N_AUTOMATION_SECRET` are set (server-only env, never `VITE_*`).
+- Delivery runs through Vercel `waitUntil` (`@vercel/functions`): the
+  customer response returns immediately; the function stays alive until the
+  webhook call finishes. Outside Vercel (dev server) `waitUntil` is a no-op
+  and the long-lived process finishes the promise anyway.
+- 5 s `AbortSignal.timeout`. Any failure (down, timeout, 500) is logged as
+  safe metadata only (event id, order number, status / error NAME — never
+  the URL, secret, body, or error message) and never changes the order
+  response.
+
+**Event body (exact raw JSON, no whitespace — sign THIS string):**
+
+```json
+{"eventId":"<uuid>","eventType":"order.created","occurredAt":"<ISO-8601>","orderNumber":"TP-...","channel":"customer|staff"}
+```
+
+No customer data, no money fields, no secrets. n8n fetches the
+authoritative order from Supabase server-to-server using its own credential.
+
+**Headers:** `Content-Type: application/json`, `x-atlas-event-id` (= body
+eventId), `x-atlas-timestamp` (= body occurredAt), `x-atlas-signature`
+(`sha256=<hex>` — HMAC SHA-256 of the raw body with `N8N_AUTOMATION_SECRET`).
+
+**Verification recipe (n8n Code node, exact):**
+
+```js
+const crypto = require("crypto");
+const raw = /* the EXACT raw request body string — not re-serialized JSON */;
+const sent = headers["x-atlas-signature"] ?? "";
+const expected =
+  "sha256=" + crypto.createHmac("sha256", AUTOMATION_SECRET).update(raw, "utf8").digest("hex");
+const valid =
+  sent.length === expected.length &&
+  crypto.timingSafeEqual(Buffer.from(sent), Buffer.from(expected));
+const fresh = Math.abs(Date.now() - Date.parse(headers["x-atlas-timestamp"])) < 5 * 60 * 1000;
+if (!valid || !fresh) throw new Error("invalid signature");
+```
+
+**Test vector** (secret `test-secret`) — verification implementations must
+reproduce this digest exactly:
+
+```
+body:      {"eventId":"11111111-2222-3333-4444-555555555555","eventType":"order.created","occurredAt":"2026-07-14T12:00:00.000Z","orderNumber":"TP-20260714-120000","channel":"customer"}
+signature: sha256=fc58ac15b47c5eadc4a410eedb7ed6cd25f439edbcb078330d9f8fd7e9ee77c2
+```
+
+Reproduce locally:
+
+```
+node -e "const{createHmac}=require('node:crypto');console.log('sha256='+createHmac('sha256','test-secret').update(process.argv[1]).digest('hex'))" '<raw body>'
+```
+
+**Manual n8n workflow plan (build in Phase 3B — NOT built yet):**
+
+1. Create a BRAND-NEW workflow with a Webhook node: method POST, a fresh
+   random path (e.g. `atlas-order-events-<random>`), respond immediately
+   with 200. ⚠️ Do NOT reuse or copy `third-place-order-test` — that
+   workflow inserts orders; this workflow must contain ZERO insert/update
+   nodes for `orders` / `order_items`, ever.
+2. Code node: verify timestamp freshness + HMAC exactly as above (secret
+   from an n8n credential/env — not hardcoded); throw on mismatch so the
+   execution fails visibly.
+3. Deduplicate `eventId` (n8n static data or a lookup) — drop already-seen
+   ids so retries can't double-fire notifications.
+4. HTTP Request node: fetch the authoritative order from Supabase REST
+   (`GET /rest/v1/orders?order_number=eq.{{orderNumber}}&select=...`) using
+   the existing n8n Supabase server credential.
+5. Attach bot/notification actions AFTER that fetch (Phase 3 work).
+6. Set `N8N_ORDER_AUTOMATION_WEBHOOK_URL` (the new path's production URL)
+   + `N8N_AUTOMATION_SECRET` (long random value, same one as the n8n
+   credential) in Vercel env → redeploy → bridge goes live.
+
+**Verification checklist (Preview deploy):**
+
+- [ ] Env vars unset: place a disposable order → succeeds; logs show
+      `ORDER_INTAKE` but NO `ORDER_AUTOMATION` line; n8n shows no execution.
+- [ ] Both env vars set (point at a webhook.site or test n8n path): one
+      order → succeeds AND exactly one signed event arrives; recompute the
+      HMAC of the received raw body with the shared secret → matches
+      `x-atlas-signature`.
+- [ ] Idempotent replay (re-POST same requestId): `duplicate: true`, NO
+      second event.
+- [ ] Receiver returns 500: order still succeeds; log line says
+      `rejected` with the status.
+- [ ] Receiver hangs > 5 s: order still succeeds; log line says
+      `failed: TimeoutError`.
+- [ ] Test vector above reproduces on the receiver's verification code.
+
+**Rollback:** unset the two env vars (bridge off, orders unaffected) or
+revert the branch. No SQL, no data migration — the bridge is stateless.
 
 ### Production test checklist after the 2G-F/2G-G deploy
 

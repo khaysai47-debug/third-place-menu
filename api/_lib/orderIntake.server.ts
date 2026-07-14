@@ -1,4 +1,7 @@
+import { createHmac, randomUUID } from "node:crypto";
 import process from "node:process";
+
+import { waitUntil } from "@vercel/functions";
 import { z } from "zod";
 
 import { checkStaffSecret, jsonError } from "./staffOrderWrites.server.js";
@@ -79,28 +82,67 @@ function mapRpcError(message: string, detail: string): Response {
   return jsonError(500, "Order could not be created. Please try again.");
 }
 
-/* ── Optional post-order automation bridge (Phase 3) ─────────────────────── */
+/* ── Optional post-order automation bridge (Phase 3A) ────────────────────── */
 
-// Fires ONLY when a dedicated automation-only n8n webhook is configured via
-// N8N_ORDER_AUTOMATION_WEBHOOK_URL. NEVER point this at the old order-intake
-// webhook (third-place-order-test) — its workflow INSERTS an order and would
-// duplicate every order. Fire-and-forget: runs after the DB transaction
-// succeeded and can never change the order result. No secrets in the payload.
-// ponytail: serverless may kill the in-flight fetch after the response is
-// sent; switch to waitUntil (@vercel/functions) if deliveries prove flaky.
+// Fires ONLY when BOTH N8N_ORDER_AUTOMATION_WEBHOOK_URL and
+// N8N_AUTOMATION_SECRET are set — otherwise skipped silently. NEVER point
+// the URL at the old order-intake webhook (third-place-order-test) — its
+// workflow INSERTS an order and would duplicate every order. It must be a
+// NEW automation-only workflow (docs/n8n-workflow-side-effects.md § Phase 3A).
+//
+// Best-effort by design: runs AFTER the DB transaction succeeded, kept alive
+// past the HTTP response via Vercel waitUntil (no-op outside Vercel — the
+// long-lived dev server just lets the promise finish), and can never change
+// the order result. Payload carries identifiers only (no customer data, no
+// money, no secrets); n8n fetches the authoritative order from Supabase
+// itself. Signed with HMAC SHA-256 over the exact raw body; verification
+// recipe in docs/backend-separation-runbook.md § Phase 3A. Never log the
+// URL or secret — logs carry event id / order number / status only.
+
+const AUTOMATION_TIMEOUT_MS = 5_000;
+
 function fireOrderAutomation(orderNumber: string, channel: "customer" | "staff"): void {
   const hook = process.env.N8N_ORDER_AUTOMATION_WEBHOOK_URL;
-  if (!hook) return;
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
   const secret = process.env.N8N_AUTOMATION_SECRET;
-  if (secret) headers["x-automation-secret"] = secret;
-  fetch(hook, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({ event: "order_created", orderNumber, channel }),
-  }).catch(() => {
-    // Automation is best-effort by design — the order already succeeded.
+  if (!hook || !secret) return;
+
+  const eventId = randomUUID();
+  const occurredAt = new Date().toISOString();
+  const body = JSON.stringify({
+    eventId,
+    eventType: "order.created",
+    occurredAt,
+    orderNumber,
+    channel,
   });
+  const signature = `sha256=${createHmac("sha256", secret).update(body).digest("hex")}`;
+
+  waitUntil(
+    fetch(hook, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-atlas-event-id": eventId,
+        "x-atlas-timestamp": occurredAt,
+        "x-atlas-signature": signature,
+      },
+      body,
+      signal: AbortSignal.timeout(AUTOMATION_TIMEOUT_MS),
+    }).then(
+      (res) => {
+        console.log(
+          `ORDER_AUTOMATION ${orderNumber} event=${eventId} status=${res.status} ${res.ok ? "delivered" : "rejected"}`,
+        );
+      },
+      (error: unknown) => {
+        // error.name only (TimeoutError/AbortError/TypeError) — fetch error
+        // messages/causes can contain the webhook hostname.
+        console.error(
+          `ORDER_AUTOMATION ${orderNumber} event=${eventId} failed: ${error instanceof Error ? error.name : "error"}`,
+        );
+      },
+    ),
+  );
 }
 
 /* ── The intake handler ──────────────────────────────────────────────────── */
