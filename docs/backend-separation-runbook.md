@@ -785,9 +785,11 @@ for `orders` / `order_items`, and never reuse or copy
    `atlas_order_events`, columns: `event_id` string, `occurred_at` date,
    `order_number` string, `channel` string. Look up `event_id`; if found →
    stop (already processed); else insert the row, then continue.
-6. **HTTP Request node**: fetch the authoritative order from Supabase REST
-   (`GET /rest/v1/orders?order_number=eq.{{orderNumber}}&select=...`) using
-   the existing secured n8n Supabase credential.
+6. **HTTP Request node**: ~~fetch the authoritative order from Supabase
+   REST using the existing secured n8n Supabase credential~~ — SUPERSEDED by
+   Phase 3B (next section): n8n forwards the SAME incoming Bearer JWT to
+   `POST /api/automation/order-details` and never holds a Supabase
+   credential for this flow at all.
 7. Attach bot/notification actions AFTER that fetch (Phase 3 work).
 8. Set `N8N_ORDER_AUTOMATION_WEBHOOK_URL` (the new path's production URL)
    + `N8N_AUTOMATION_SECRET` (long random value, same as the credential
@@ -818,6 +820,160 @@ for `orders` / `order_items`, and never reuse or copy
 
 **Rollback:** unset the two env vars (bridge off, orders unaffected) or
 revert the branch. No SQL, no data migration — the bridge is stateless.
+
+### Phase 3B — authoritative order fetch for n8n (2026-07-15)
+
+Code on branch (`api/_lib/orderDetails.server.ts` +
+`api/_lib/orderEventJwt.server.ts`). Purpose: after n8n validates and
+deduplicates a Phase 3A `order.created` event, it forwards the SAME
+short-lived Bearer JWT to a new read-only Vercel endpoint and receives the
+authoritative order + items as a deliberately mapped, safe payload. n8n
+never holds a Supabase key for this flow; the service-role key stays
+server-side in Vercel only.
+
+**Endpoint:** `POST /api/automation/order-details` — dual-surface like every
+other route (native Vercel function `api/automation/order-details.ts`,
+TanStack dev route `src/routes/api.automation.order-details.ts`, ONE shared
+handler in `api/_lib/orderDetails.server.ts`). Server-to-server only: no
+CORS headers, no OPTIONS handler, no browser auth. All non-POST verbs → 405.
+
+**Request contract:**
+
+- `Authorization: Bearer <jwt>` — the UNMODIFIED token from the Phase 3A
+  event delivery. Exact `Bearer ` scheme; missing/empty/malformed/repeated
+  headers → generic 401.
+- `Content-Type: application/json`; body ≤ 1024 bytes:
+
+```json
+{"eventId":"<uuid from the event>","orderNumber":"TP-..."}
+```
+
+- Strict zod validation: object only (arrays/null rejected), unknown fields
+  rejected, `eventId` 8–64 chars of `[A-Za-z0-9-]`, `orderNumber` 4–64 chars
+  of `[A-Za-z0-9-]` (charset admits no whitespace — padded values are
+  rejected, not trimmed). No column names, filters, table names, or query
+  text can be expressed in the body at all.
+
+**JWT verification** (`verifyOrderEventJwt`, orderEventJwt.server.ts — the
+same module Phase 3A signs with, so the two directions cannot drift):
+exactly 3 base64url segments, ≤ 4096 bytes; header must be valid JSON with
+`alg` EXACTLY `HS256` (`none` and everything else rejected); signature
+recomputed with HMAC-SHA256 over `header.payload` keyed by
+`N8N_AUTOMATION_SECRET` and compared with `crypto.timingSafeEqual`
+(constant-time; length checked first); claims must satisfy
+`iss=atlas-order-bridge`, `aud=n8n-order-automation`, `sub=order.created`,
+`jti` present and equal to the `eventId` claim, `eventType=order.created`,
+`channel` ∈ {customer, staff}, `occurredAt` a string; `exp`/`nbf`/`iat`
+must be numbers, checked against a documented **30 s clock tolerance**
+(`JWT_CLOCK_TOLERANCE_S`): expired, nbf-in-the-future, and
+iat-in-the-future tokens are rejected. THEN the token is bound to the body:
+`claims.eventId === body.eventId` AND
+`claims.orderNumber === body.orderNumber` — one token authorizes exactly
+one fetch of exactly one order. Every failure is the same generic
+`401 Unauthorized.` (no oracle for which check failed); tokens, headers,
+and secrets are never logged.
+
+**Supabase access (read-only guarantee):** two GETs with explicit column
+lists — `orders?order_number=eq.<n>&select=<fixed columns>&limit=1`, then
+`order_items?order_id=eq.<uuid>&select=<fixed columns>`. Server-only env:
+`VITE_SUPABASE_URL` (public project URL, same convention as every route) +
+`SUPABASE_SERVICE_ROLE_KEY` (never `VITE_*`, never client-side, never
+returned or logged). The handler contains NO insert/update/upsert/delete/
+RPC — `npm run test:order-details` asserts every outgoing call is a GET.
+
+**Response contract** (mapped field-by-field — never raw rows; `id`,
+`client_request_id`, and any unlisted column can never leak):
+
+```json
+{
+  "ok": true,
+  "data": {
+    "eventId": "...",
+    "order": {
+      "orderNumber": "TP-...", "channel": "customer|staff|null",
+      "orderType": "...", "status": "...(DB vocabulary, e.g. completed)",
+      "paymentStatus": "...", "paymentMethod": "...|null",
+      "customerName": "...|null", "customerPhone": "...|null",
+      "deliveryAddress": "...|null", "tableNumber": "...|null",
+      "customerNote": "...|null", "subtotal": 0, "deliveryFee": 0,
+      "total": 0, "createdAt": "ISO-8601"
+    },
+    "items": [
+      {"itemCode": "B01", "itemName": "...", "quantity": 1,
+       "unitPrice": 0, "lineTotal": 0}
+    ]
+  }
+}
+```
+
+Amounts are THB numbers (Postgres numeric strings coerced); `channel` is
+mapped from `orders.source` (`customer_menu`→customer,
+`staff_manual`→staff, anything else → null).
+
+**Errors:** 400 invalid body · 401 any auth failure (generic) · 404 order
+not found · 405 non-POST · 413 body too large · 415 wrong content type ·
+500 server not configured · 502 Supabase read failed. Bodies are always
+`{"ok":false,"error":"<generic message>"}` — no Supabase text, no stack, no
+claim/secret details.
+
+**n8n workflow update (do AFTER the endpoint is deployed):** insert one
+HTTP Request node ("Fetch Authoritative Order Details") into the existing
+Phase 3A receiver. Retry-safe node sequence — the dedup row is inserted
+ONLY after the fetch succeeded, so a transient Vercel/Supabase failure
+leaves no dedup row and the event can be safely retried; inserting first
+would permanently block a retry for an order that was never fetched:
+
+```
+Receive Order Event
+  → Validate Event Claims
+  → Look Up Event ID          (dedup LOOKUP: stop if already processed)
+  → Fetch Authoritative Order Details   (this endpoint)
+  → Insert Event Row          (dedup INSERT — only after a 200)
+```
+
+- Method POST, URL `https://third-place-menu.vercel.app/api/automation/order-details`
+  (for Preview testing, the Preview deployment URL instead).
+- Header `Authorization`: forward the incoming header verbatim —
+  `{{ $('Receive Order Event').item.json.headers.authorization }}`
+  ("Receive Order Event" is the webhook node's actual name; the normalized
+  lowercase `headers.authorization` shape is the same one the Phase 3A
+  JWT-node step already documents). ASSUMPTION to confirm during the first
+  Preview execution: header keys arrive lowercased on n8n Cloud.
+- JSON body: `{"eventId": "<validated eventId claim>", "orderNumber":
+  "<validated orderNumber claim>"}` — from the VERIFIED claims, not the raw
+  request body.
+- Never: put a Supabase key or `N8N_AUTOMATION_SECRET` in this node,
+  re-sign or reconstruct the JWT, send the token in query parameters, or
+  log/store the token in the Data Table. On non-200, stop the branch
+  (Continue On Fail OFF) — later bot/notification nodes only ever see the
+  safe response. The 120 s token lifetime means the fetch must stay
+  immediately after validation — never behind a Wait node.
+
+**Verification (Preview):** deploy the branch as a Preview → point ONE
+disposable n8n execution (or curl with a freshly generated test token) at
+`<preview-url>/api/automation/order-details` → place one disposable order →
+confirm n8n receives the mapped payload with correct totals/items, and that
+replaying the same call after ~2.5 min gets 401 (token expired). Probe:
+no Authorization → 401; garbage token → 401; valid token + mismatched
+orderNumber → 401; unknown order → 404. Then check Vercel logs show only
+`ORDER_DETAILS <order> event=<id> items=<n>` lines (no tokens). Promotion:
+merge to main, redeploy Production, flip the n8n node URL to the production
+domain. No SQL, no env changes (reuses `N8N_AUTOMATION_SECRET` +
+`SUPABASE_SERVICE_ROLE_KEY` + `VITE_SUPABASE_URL` already set for 3A/2G).
+
+**Rollback:** remove/disable the n8n HTTP Request node branch, then revert
+the endpoint commit (or leave it — with the secret unset it answers only
+safe 500s). Phase 3A validation/dedup keeps working unchanged; order intake
+and restaurant operations are untouched either way.
+
+**Remaining risks:** the JWT is bearer-forwardable within its 120 s + 30 s
+tolerance window — anyone holding a leaked token could fetch THAT one
+order's details (mitigation: n8n must not log/store tokens; HTTPS
+everywhere; short lifetime). No replay counter on this endpoint itself —
+n8n's Data Table dedup is the replay gate for the WORKFLOW, while repeated
+fetches of the same order within the window are read-only and idempotent.
+Endpoint enumerates nothing: order numbers not bound to a valid signed
+token are unreachable.
 
 ### Production test checklist after the 2G-F/2G-G deploy
 

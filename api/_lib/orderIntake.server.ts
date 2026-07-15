@@ -1,9 +1,10 @@
-import { createHmac, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import process from "node:process";
 
 import { waitUntil } from "@vercel/functions";
 import { z } from "zod";
 
+import { buildOrderEventJwt, type OrderCreatedEvent } from "./orderEventJwt.server.js";
 import { checkStaffSecret, jsonError } from "./staffOrderWrites.server.js";
 
 // Server-only ORDER INTAKE (Phase 2G-I) — customer checkout + Staff Add Order.
@@ -103,37 +104,11 @@ function mapRpcError(message: string, detail: string): Response {
 
 const AUTOMATION_TIMEOUT_MS = 5_000;
 
-export type OrderCreatedEvent = {
-  eventId: string;
-  eventType: "order.created";
-  occurredAt: string;
-  orderNumber: string;
-  channel: "customer" | "staff";
-};
-
-/**
- * HS256 JWT over the order event, node:crypto only (no jwt dependency).
- * 120 s lifetime, 5 s nbf backdate for clock skew. Exported for the
- * standalone check (scripts/test-automation-bridge.mjs).
- */
-export function buildOrderEventJwt(event: OrderCreatedEvent, secret: string): string {
-  const now = Math.floor(Date.now() / 1000);
-  const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
-  const payload = Buffer.from(
-    JSON.stringify({
-      iss: "atlas-order-bridge",
-      aud: "n8n-order-automation",
-      sub: "order.created",
-      jti: event.eventId,
-      iat: now,
-      nbf: now - 5,
-      exp: now + 120,
-      ...event,
-    }),
-  ).toString("base64url");
-  const signature = createHmac("sha256", secret).update(`${header}.${payload}`).digest("base64url");
-  return `${header}.${payload}.${signature}`;
-}
+// JWT constants + signing moved VERBATIM to orderEventJwt.server.ts in Phase
+// 3B (the order-details endpoint verifies against the same contract).
+// Re-exported so scripts/test-automation-bridge.mjs keeps importing from here.
+export { buildOrderEventJwt };
+export type { OrderCreatedEvent };
 
 function fireOrderAutomation(orderNumber: string, channel: "customer" | "staff"): void {
   const hook = process.env.N8N_ORDER_AUTOMATION_WEBHOOK_URL;

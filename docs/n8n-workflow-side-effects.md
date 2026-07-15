@@ -69,7 +69,11 @@ receiving workflow:
   never in Code nodes, n8n Variables, or execution data; JWT values are
   never logged.
 - The event body carries identifiers only (eventId, orderNumber, channel,
-  timestamp) — n8n must not treat it as order data.
+  timestamp) — n8n must not treat it as order data. Since Phase 3B the
+  workflow gets the authoritative order by forwarding the SAME Bearer JWT to
+  `POST /api/automation/order-details` (read-only, JWT-verified server
+  route) — n8n holds NO Supabase credential for this flow. Full contract in
+  docs/backend-separation-runbook.md § Phase 3B.
 
 ## Bottom line
 
