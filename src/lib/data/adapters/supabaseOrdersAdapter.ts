@@ -26,8 +26,8 @@
 
 import type { OrderRepository } from "./types";
 import { AdapterNotImplementedError } from "./types";
+import { staffRead } from "../staffReadClient";
 import { staffWrite } from "../staffWriteClient";
-import { supabaseSelect } from "../supabase";
 import {
   assembleSupabaseOrderRows,
   mapSupabaseOrderRows,
@@ -39,18 +39,27 @@ import {
 const notImplemented = (method: string) =>
   new AdapterNotImplementedError("supabaseOrdersAdapter", method);
 
+/** Wire shape of GET /api/staff/orders (staffDashboardReads.server.ts). */
+interface StaffOrdersSnapshot {
+  orders: SupabaseOrderRow[];
+  orderItems: SupabaseOrderItemRow[];
+  paymentProofs: SupabasePaymentProofRow[];
+}
+
 export const supabaseOrdersAdapter: OrderRepository = {
-  // Mirrors the n8n Staff Orders API (confirmed live 2026-07-06): ALL orders,
-  // no date filter; items from order_items; proof fields from payment_proofs;
-  // joined client-side by orders.id so we don't depend on PostgREST FK embeds.
-  // ponytail: three unbounded selects — add embeds/date filters when volume demands.
+  // Same data window as the n8n Staff Orders API (confirmed live 2026-07-06):
+  // ALL orders, no date filter; items + proofs joined client-side by
+  // orders.id. Since the Pre-Pilot Security Hardening phase the rows come
+  // from the protected GET /api/staff/orders route (x-staff-secret,
+  // service-role key server-side, explicit columns) — NEVER from a browser
+  // anon-key read; sensitive tables stop being anonymously readable.
+  // Throws StaffAccessError when the device has no/invalid secret — the
+  // staff/owner pages show the access gate for it.
   listOrders: async () => {
-    const [orders, items, proofs] = await Promise.all([
-      supabaseSelect<SupabaseOrderRow>("orders", "select=*"),
-      supabaseSelect<SupabaseOrderItemRow>("order_items", "select=*&order=created_at.asc"),
-      supabaseSelect<SupabasePaymentProofRow>("payment_proofs", "select=*"),
-    ]);
-    return mapSupabaseOrderRows(assembleSupabaseOrderRows(orders, items, proofs));
+    const snapshot = await staffRead<StaffOrdersSnapshot>("/api/staff/orders");
+    return mapSupabaseOrderRows(
+      assembleSupabaseOrderRows(snapshot.orders, snapshot.orderItems, snapshot.paymentProofs),
+    );
   },
   updateOrderStatus: (orderKey, status) =>
     staffWrite("/api/staff/update-status", { orderId: orderKey, status }),

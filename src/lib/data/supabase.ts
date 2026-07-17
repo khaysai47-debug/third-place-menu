@@ -1,5 +1,12 @@
 // Minimal Supabase PostgREST READ client (Phase 2C — reads only).
 //
+// Since the Pre-Pilot Security Hardening phase this is used ONLY for the
+// PUBLIC menu_items read (column-limited anon grant, 2G-H) — the menu is
+// public-by-nature data. Dashboard reads of sensitive tables (orders,
+// order_items, payment_proofs, expenses) go through the protected
+// /api/staff/* routes (staffReadClient.ts); never add a sensitive-table
+// read here.
+//
 // Deliberately NOT @supabase/supabase-js: the read path is two SELECTs over
 // Supabase's REST API, which plain fetch covers without a new dependency or
 // module-init side effects.

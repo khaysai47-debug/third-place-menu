@@ -12,6 +12,8 @@
     "parity": "node scripts/run-parity.mjs",
     "test:bridge": "node scripts/test-automation-bridge.mjs",
     "test:order-details": "node scripts/test-order-details.mjs",
+    "test:dashboard": "node scripts/test-staff-dashboard.mjs",
+    "test:dashboard-parity": "node scripts/test-dashboard-parity.mjs",
     "lint": "eslint .",
     "format": "prettier --write ."
   },

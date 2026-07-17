@@ -45,6 +45,9 @@ import { orderLocation } from "@/components/staff/StaffOrderCard";
 import { PAYMENT_META, STATUS_META } from "@/components/staff/orderStatus";
 import { getOrderRepository } from "@/lib/data/orderRepository";
 import { getExpenseRepository } from "@/lib/data/expenseRepository";
+import { StaffAccessError } from "@/lib/data/staffReadClient";
+import { getStaffWriteSecret } from "@/lib/staffWriteSecret";
+import { AccessGate } from "@/components/staff/AccessGate";
 import type { StaffOrder, StaffOrderStatus } from "@/lib/staffOrders";
 import {
   formatOrderType,
@@ -106,6 +109,13 @@ function itemsSummary(o: StaffOrder): string {
 function OwnerPage() {
   const [orders, setOrders] = useState<StaffOrder[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
+  // Pilot access gate (Pre-Pilot Security Hardening) — same shared secret as
+  // /staff. The SERVER enforces access on every /api/staff/* read; these
+  // states only drive the gate UX (see staff.tsx for the same pattern).
+  // Start gated so SSR/the first client render cannot flash dashboard content
+  // before the localStorage-backed key has been checked.
+  const [unlocked, setUnlocked] = useState(false);
+  const [accessDenied, setAccessDenied] = useState(false);
   // Stamped on every (re)load so the "today" window and header date stay correct
   // across midnight without a manual reload. `now` only changes when data does.
   const [nowTs, setNowTs] = useState(() => Date.now());
@@ -127,13 +137,21 @@ function OwnerPage() {
       setNowTs(Date.now());
       setLoadState("ready");
     } catch (error) {
+      // Access problems show the gate, not the generic error state.
+      if (error instanceof StaffAccessError) {
+        if (error.reason === "denied") setAccessDenied(true);
+        setUnlocked(false);
+        return;
+      }
       console.error("Failed to load owner dashboard orders", error);
       setLoadState("error");
     }
   }, []);
 
   useEffect(() => {
-    void loadOrders();
+    const has = Boolean(getStaffWriteSecret());
+    setUnlocked(has);
+    if (has) void loadOrders();
   }, [loadOrders]);
 
   const loadExpenses = useCallback(async () => {
@@ -142,13 +160,18 @@ function OwnerPage() {
       setExpenses(await expenseRepo.listExpenses());
       setExpLoadState("ready");
     } catch (err) {
+      if (err instanceof StaffAccessError) {
+        if (err.reason === "denied") setAccessDenied(true);
+        setUnlocked(false);
+        return;
+      }
       console.error("Owner expense fetch failed", err);
       setExpLoadState("error");
     }
   }, []);
 
   useEffect(() => {
-    void loadExpenses();
+    if (getStaffWriteSecret()) void loadExpenses();
   }, [loadExpenses]);
 
   // Silent background re-sync (read-only, no optimistic state to protect).
@@ -160,6 +183,12 @@ function OwnerPage() {
       setOrders(await orderRepo.listOrders());
       setNowTs(Date.now());
     } catch (error) {
+      // Secret cleared/rotated mid-session: fall back to the gate.
+      if (error instanceof StaffAccessError) {
+        if (error.reason === "denied") setAccessDenied(true);
+        setUnlocked(false);
+        return;
+      }
       console.error("Owner dashboard refresh failed", error);
     } finally {
       refreshingRef.current = false;
@@ -179,6 +208,18 @@ function OwnerPage() {
   // Auto-polling disabled — use the manual Refresh button to avoid burning n8n executions.
 
   // Auto-polling disabled — use the manual Refresh button.
+
+  // Gate unlock: after the prompt closes, re-check the stored secret and
+  // reload both feeds. The server re-validates on every request either way.
+  const handleSecretEntry = useCallback(() => {
+    setAccessDenied(false);
+    const has = Boolean(getStaffWriteSecret());
+    setUnlocked(has);
+    if (has) {
+      void loadOrders();
+      void loadExpenses();
+    }
+  }, [loadOrders, loadExpenses]);
 
   const summary = useMemo(() => summarizeToday(orders, now), [orders, now]);
   const today = useMemo(() => todaysOrders(orders, now), [orders, now]);
@@ -245,6 +286,10 @@ function OwnerPage() {
     () => orders.filter((o) => isSameLocalDay(o.createdAt, now)),
     [orders, now],
   );
+
+  if (!unlocked || accessDenied) {
+    return <AccessGate area="Owner" denied={accessDenied} onSubmitted={handleSecretEntry} />;
+  }
 
   return (
     <div

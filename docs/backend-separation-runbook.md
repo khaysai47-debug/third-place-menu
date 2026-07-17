@@ -1028,6 +1028,85 @@ data migration — the gate is stateless.
 **Next phase:** pre-pilot security hardening (dashboard reads off the anon
 key, `/staff`+`/owner` gating) — immediately after 3C, before bot sessions.
 
+### Pre-Pilot Security Hardening — protected dashboard reads (2026-07-17)
+
+Closes runbook QA-4 / schema-notes "revisit before real restaurant use":
+**orders, order_items, payment_proofs, and expenses were anonymously
+readable** (permissive anon SELECT policies + grants created during 2D/2E
+parity QA) with the anon key that ships in the client bundle — customer
+names/phones/addresses, proofs, and money data. `/staff` and `/owner` had
+no access gate beyond URL secrecy.
+
+**New read architecture (browser never reads sensitive tables again):**
+
+- `GET /api/staff/orders` — orders + order_items + payment_proofs snapshot;
+  `GET /api/staff/expenses` — today's (Bangkok) expenses. One shared
+  implementation `api/_lib/staffDashboardReads.server.ts` (dual-surface like
+  every route: `api/staff/*.ts` production, `src/routes/api.staff.*.ts`
+  dev). Both require the existing `x-staff-secret`; generic 401 otherwise;
+  GET-only (other verbs 405); explicit column lists (no `select=*`);
+  rows copied FIELD-BY-FIELD so unlisted columns can never leak; Supabase
+  failures → one generic 502; `Cache-Control: no-store`; no secrets logged.
+- Frontend: `src/lib/data/staffReadClient.ts` (GET + `x-staff-secret` from
+  the existing localStorage ⚿ slot; throws typed `StaffAccessError` on
+  missing/rejected secret). `supabaseOrdersAdapter.listOrders` and
+  `supabaseExpensesAdapter.listExpenses` now call the protected routes; all
+  existing mappers/joins are UNCHANGED, so dashboard data is byte-equivalent
+  (`npm run test:dashboard-parity` proves it on fixtures). Staff 5s poll,
+  chime/banner, optimistic writes, and owner manual-refresh behavior are
+  untouched.
+- `/staff` and `/owner` gate (`src/components/staff/AccessGate.tsx`): no
+  dashboard content renders until the shared secret is entered (same
+  ⚿ prompt + localStorage slot; owner uses the SAME shared secret for the
+  pilot). A rejected secret (server 401) shows the gate with a "key
+  rejected" message — never data, never a raw error. The gate is UX; the
+  SERVER check on every read/write is the enforcement. No secret in URLs,
+  HTML, or anywhere but the existing localStorage slot.
+- PUBLIC MENU UNCHANGED: `menu_items` keeps its 2G-H column-limited anon
+  read (7 public columns) — the customer menu needs no secret. The intake
+  routes, staff writes, and Phase 3C selective dispatch are untouched; n8n
+  is untouched.
+
+**Pilot limitation (accepted, replace after pilot):** one SHARED secret for
+staff + owner on trusted devices, compared server-side against
+`STAFF_WRITE_SECRET`. No per-user accounts, no roles, no revocation short of
+rotating the secret. Replace with real staff accounts (e.g. Supabase Auth)
+after the pilot. Rotate the secret whenever it is displayed anywhere
+(standing rule from 2G-E).
+
+**Migration (review-first, NOT yet applied):**
+`docs/sql/2026-07-17-pre-pilot-security-hardening.sql` — revokes
+anon/authenticated SELECT and drops the anon SELECT policies on the four
+sensitive tables (dynamic lookup — the QA policies were created ad hoc),
+keeps RLS enabled, preserves the menu_items public read and all
+service_role access. Includes verification SQL, live curl probes, and full
+rollback SQL. **Run order: deploy the hardened app code FIRST, then run the
+migration** (until it runs, the anon exposure remains open but the app
+already uses the protected routes; after it runs, stale cached frontends
+lose reads until hard-refreshed).
+
+**Preview verification checklist:**
+
+- [ ] `npm run test:dashboard` + `npm run test:dashboard-parity` green.
+- [ ] Preview deploy: `/staff` and `/owner` show the access gate; wrong key
+      → "key rejected", NO data; correct key → boards identical to
+      production (spot-check one delivery + one cancelled order + today's
+      totals).
+- [ ] `GET <preview>/api/staff/orders` without the header → 401 JSON;
+      `POST` → 405.
+- [ ] Customer menu loads with NO secret; checkout works.
+- [ ] Staff writes (status/paid/cancel/expense/availability) still work.
+- [ ] Vercel logs show `DASHBOARD_READ` lines with counts only.
+- [ ] AFTER merging + Production deploy: run the SQL file in the Supabase
+      SQL editor, run its § 3 verification (incl. the anon curl probes),
+      hard-refresh the staff iPad and owner device.
+
+**Rollback:** app — revert the branch (adapters return to anon reads),
+redeploy. DB — only if the migration was already applied, run its § 4
+rollback block (recreates the permissive anon policies + grants). The two
+must go together only for a FULL rollback; the app rollback alone is safe
+before the migration runs.
+
 ### Production test checklist after the 2G-F/2G-G deploy
 
 1. ⚿ on each staff device: enter the CURRENT rotated secret.

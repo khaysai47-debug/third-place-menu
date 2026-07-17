@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { AccessGate } from "@/components/staff/AccessGate";
 import { ExpenseView } from "@/components/staff/ExpenseView";
 import { ManualOrderForm } from "@/components/staff/ManualOrderForm";
 import { MenuAvailabilityBoard } from "@/components/staff/MenuAvailabilityBoard";
@@ -8,7 +9,8 @@ import { StaffOrderCard } from "@/components/staff/StaffOrderCard";
 import { STATUS_META, STATUS_ORDER } from "@/components/staff/orderStatus";
 import { isCancellableStatus } from "@/lib/orderRules";
 import { getOrderRepository } from "@/lib/data/orderRepository";
-import { getStaffWriteSecret, setStaffWriteSecret } from "@/lib/staffWriteSecret";
+import { StaffAccessError } from "@/lib/data/staffReadClient";
+import { getStaffWriteSecret, promptForSecret } from "@/lib/staffWriteSecret";
 import {
   nextStaffOrderStatus,
   type StaffOrder,
@@ -50,19 +52,6 @@ function playNewOrderChime(): void {
   } catch {
     // AudioContext unavailable or blocked — banner/title still show
   }
-}
-
-// Phase 2G-D: enter/clear the staff write secret used by the Supabase
-// server-route write path (stored in localStorage only, sent as x-staff-secret).
-// Inert while writes stay on n8n — needed only when a device opts into the
-// Supabase test path (see orderRepository.ts).
-function promptStaffWriteSecret(): void {
-  const next = window.prompt(
-    "員工密碼 · Staff write secret (leave empty to clear)",
-    getStaffWriteSecret() ?? "",
-  );
-  if (next === null) return;
-  setStaffWriteSecret(next.trim() || null);
 }
 
 export const Route = createFileRoute("/staff")({
@@ -143,6 +132,13 @@ function StaffPage() {
   const [view, setView] = useState<StaffView>("orders");
   const [orders, setOrders] = useState<StaffOrder[]>([]);
   const [loadState, setLoadState] = useState<LoadState>("loading");
+  // Pilot access gate (Pre-Pilot Security Hardening): no dashboard data
+  // renders until the shared secret is present AND accepted by the server.
+  // The SERVER enforces access on every /api/staff/* read — these states
+  // only drive the gate UX. Start gated so no dashboard shell flashes before
+  // localStorage can be checked on the client after hydration.
+  const [unlocked, setUnlocked] = useState(false);
+  const [accessDenied, setAccessDenied] = useState(false);
   const [activeTab, setActiveTab] = useState<StaffOrderStatus>("new");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [updatingIds, setUpdatingIds] = useState<ReadonlySet<string>>(new Set());
@@ -199,13 +195,22 @@ function StaffPage() {
       setOrders(await orderRepo.listOrders());
       setLoadState("ready");
     } catch (error) {
+      // Access problems show the gate, not the generic error state. No
+      // sensitive data was returned (the server answered 401 / was not called).
+      if (error instanceof StaffAccessError) {
+        if (error.reason === "denied") setAccessDenied(true);
+        setUnlocked(false);
+        return;
+      }
       console.error("Failed to load staff orders", error);
       setLoadState("error");
     }
   }, []);
 
   useEffect(() => {
-    void loadOrders();
+    const has = Boolean(getStaffWriteSecret());
+    setUnlocked(has);
+    if (has) void loadOrders();
   }, [loadOrders]);
 
   // Background re-sync; keeps local state on failure. Guarded at both ends:
@@ -218,6 +223,12 @@ function StaffPage() {
       const data = await orderRepo.listOrders();
       if (!refreshBlocked()) setOrders(data);
     } catch (error) {
+      // Secret cleared/rotated mid-session: fall back to the gate.
+      if (error instanceof StaffAccessError) {
+        if (error.reason === "denied") setAccessDenied(true);
+        setUnlocked(false);
+        return;
+      }
       console.error("Background refresh failed", error);
     } finally {
       refreshingRef.current = false;
@@ -228,12 +239,22 @@ function StaffPage() {
   // reload. Silent (reuses refreshOrders, no loading spinner); paused while
   // the tab is hidden; overlap-guarded inside refreshOrders.
   useEffect(() => {
+    if (!unlocked || accessDenied) return; // no polling while gated
     const id = window.setInterval(() => {
       if (document.hidden) return;
       void refreshOrders();
     }, 5000);
     return () => window.clearInterval(id);
-  }, [refreshOrders]);
+  }, [refreshOrders, unlocked, accessDenied]);
+
+  // Gate unlock / header ⚿: after the prompt closes, re-check the stored
+  // secret and reload. The server re-validates on every request either way.
+  const handleSecretEntry = useCallback(() => {
+    setAccessDenied(false);
+    const has = Boolean(getStaffWriteSecret());
+    setUnlocked(has);
+    if (has) void loadOrders();
+  }, [loadOrders]);
 
   const counts = useMemo(() => {
     const c: Record<StaffOrderStatus, number> = {
@@ -433,6 +454,10 @@ function StaffPage() {
     }
   };
 
+  if (!unlocked || accessDenied) {
+    return <AccessGate area="Staff" denied={accessDenied} onSubmitted={handleSecretEntry} />;
+  }
+
   return (
     <div className="min-h-screen ink-grain">
       <main className="mx-auto max-w-[1100px] pb-16">
@@ -442,9 +467,12 @@ function StaffPage() {
             <span>員工 · Staff</span>
             <span className="flex items-center gap-3">
               <button
-                onClick={promptStaffWriteSecret}
-                aria-label="Staff write secret 員工密碼"
-                title="Staff write secret 員工密碼"
+                onClick={() => {
+                  promptForSecret();
+                  handleSecretEntry();
+                }}
+                aria-label="Staff access key 員工密碼"
+                title="Staff access key 員工密碼"
                 className="text-[var(--color-gold-soft)]/50 hover:text-[var(--color-cream)] transition"
               >
                 ⚿

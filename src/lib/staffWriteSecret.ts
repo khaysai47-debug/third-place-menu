@@ -22,3 +22,17 @@ export function setStaffWriteSecret(value: string | null): void {
     // localStorage unavailable (private mode) — writes will fail with a clear error
   }
 }
+
+/**
+ * Prompts for the shared secret and stores it (empty clears). Used by the
+ * /staff + /owner access gates and the staff header ⚿ button (Pre-Pilot
+ * Security Hardening). The value never appears in URLs or rendered HTML.
+ */
+export function promptForSecret(): void {
+  const next = window.prompt(
+    "員工密碼 · Staff access key (leave empty to clear)",
+    getStaffWriteSecret() ?? "",
+  );
+  if (next === null) return;
+  setStaffWriteSecret(next.trim() || null);
+}
