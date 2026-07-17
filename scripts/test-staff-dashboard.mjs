@@ -314,6 +314,36 @@ assert.ok(
   migration.includes("array['anon', 'public']::text[]"),
   "migration covers policies inherited through PUBLIC",
 );
+for (const table of sensitiveTables) {
+  assert.ok(
+    migration.includes(
+      `revoke all privileges on table public.${table} from anon, authenticated;`,
+    ),
+    `migration revokes every anon/authenticated table privilege on ${table}`,
+  );
+}
+assert.ok(
+  !migration.includes("from anon, authenticated, service_role"),
+  "migration never revokes service_role",
+);
+assert.ok(!/revoke[^;]+public\.menu_items/i.test(migration), "migration never revokes menu_items");
+assert.ok(
+  migration.match(/and cmd = 'SELECT'/g)?.length === 2,
+  "policy removal and verification are both limited to SELECT policies",
+);
+const rollbackMarker = migration.indexOf("-- ── 4. ROLLBACK");
+assert.ok(rollbackMarker >= 0, "migration keeps an explicit rollback section");
+const rollback = migration.slice(rollbackMarker);
+const rollbackGrants = [...rollback.matchAll(/-- grant ([^;]+);/gi)].map((match) => match[1]);
+assert.equal(rollbackGrants.length, 4, "rollback restores one grant per sensitive table");
+assert.ok(
+  rollbackGrants.every((grant) => grant.toLowerCase().startsWith("select on ")),
+  "rollback grants only SELECT",
+);
+assert.ok(
+  !/grant\s+(insert|update|delete|truncate|trigger|references)/i.test(rollback),
+  "rollback restores no unnecessary privilege",
+);
 
 /* ── H. Access gate UI (source-level, matching the repo's test style) ────── */
 

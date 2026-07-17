@@ -1,16 +1,20 @@
 -- ============================================================================
--- Pre-Pilot Security Hardening — remove anonymous reads of sensitive tables
+-- Pre-Pilot Security Hardening — remove client access to sensitive tables
 -- (2026-07-17)
 -- ============================================================================
 -- REVIEW-FIRST MIGRATION: paste into the Supabase SQL Editor and run manually.
 -- Never executed by any tool in this repo. Non-destructive to DATA: this file
--- only revokes grants and drops SELECT policies — no table, column, or row is
+-- only revokes privileges and drops SELECT policies — no table, column, or row is
 -- altered, deleted, or rewritten. Order logic is untouched.
 --
--- WHY: during the Phase 2D/2E parity work, the anon role was granted SELECT
--- (with permissive USING (true) policies) on orders, order_items,
--- payment_proofs, and expenses so the dashboards could read Supabase from
--- the browser. That was enabled for testing, not decided for production
+-- WHY: during the Phase 2D/2E parity work, the anon role received permissive
+-- SELECT policies on orders, order_items, payment_proofs, and expenses so the
+-- dashboards could read Supabase from the browser. A verified live snapshot
+-- also found unnecessary table privileges for anon/authenticated (including
+-- write and administrative privileges). RLS currently blocks those operations
+-- because no matching write policies exist, but the grants are still needless
+-- privilege surface. The browser access was enabled for testing, not decided
+-- for production
 -- (schema-discovery-notes § Unknown/risky, runbook QA-4) — it makes customer
 -- names/phones/addresses, payment proofs, and expense data readable by
 -- anyone holding the anon key, WHICH SHIPS IN THE CLIENT BUNDLE. The app no
@@ -21,9 +25,10 @@
 -- WHAT THIS PRESERVES:
 -- - menu_items anon read (2G-H column-limited grant) — the public customer
 --   menu. NOT TOUCHED here.
--- - service_role access — it bypasses RLS and keeps its default grants; the
+-- - service_role access — REVOKE names only anon/authenticated, so service_role
+--   keeps its grants and RLS-bypass behavior; the
 --   app's server routes and every n8n workflow keep working unchanged.
--- - All write protections — anon never had write grants; nothing changes.
+-- - Server/RPC order creation and all real data/table structures — untouched.
 --
 -- ⚠️ DEPLOYMENT ORDER: deploy the hardened app code (protected read routes +
 -- frontend using them) BEFORE running this file. Old still-cached frontends
@@ -44,22 +49,25 @@
 --     from information_schema.role_table_grants
 --     where table_schema = 'public'
 --       and table_name in ('orders','order_items','payment_proofs','expenses')
---       and grantee in ('anon', 'authenticated');
+--       and grantee in ('anon', 'authenticated', 'service_role');
 --
 -- Save both outputs into the runbook notes before continuing.
 
--- ── 1. Revoke anonymous SELECT on the four sensitive tables ─────────────────
--- Revoking the GRANT alone already closes access (RLS requires grant AND
--- policy) — the policy drops in § 2 are belt and braces. authenticated is
--- revoked too: the app has no Supabase Auth users, so any such grant is
--- unused surface. Idempotent: revoking an absent grant is a no-op.
+-- ── 1. Revoke all anon/authenticated table privileges ────────────────────────
+-- The live grant snapshot found unnecessary privileges beyond SELECT. RLS
+-- currently blocks writes because no matching policies exist, but least
+-- privilege removes the grants as well. service_role is deliberately NOT a
+-- grantee here, so protected server APIs, RPC order creation, and n8n retain
+-- their access. PostgreSQL also removes the corresponding column privileges
+-- when table privileges are revoked (§ 3b verifies the result). Idempotent:
+-- revoking absent privileges is a no-op.
 
 begin;
 
-revoke select on public.orders from anon, authenticated;
-revoke select on public.order_items from anon, authenticated;
-revoke select on public.payment_proofs from anon, authenticated;
-revoke select on public.expenses from anon, authenticated;
+revoke all privileges on table public.orders from anon, authenticated;
+revoke all privileges on table public.order_items from anon, authenticated;
+revoke all privileges on table public.payment_proofs from anon, authenticated;
+revoke all privileges on table public.expenses from anon, authenticated;
 
 -- ── 2. Drop the permissive anon SELECT policies ──────────────────────────────
 -- The QA policies were created ad hoc (names not recorded in the repo), so
@@ -77,6 +85,7 @@ begin
       from pg_policies
       where schemaname = 'public'
         and tablename in ('orders', 'order_items', 'payment_proofs', 'expenses')
+        and cmd = 'SELECT'
         and roles::text[] && array['anon', 'public']::text[]
   loop
     execute format('drop policy %I on %I.%I', p.policyname, p.schemaname, p.tablename);
@@ -97,37 +106,48 @@ notify pgrst, 'reload schema';
 
 -- ── 3. Verification (run after; read-only) ──────────────────────────────────
 
--- a) No anon/authenticated SELECT grants remain on the four tables — expect 0 rows:
+-- a) No table privileges of any kind remain for anon or authenticated on the
+--    four tables — expect 0 rows:
 select table_name, grantee, privilege_type
   from information_schema.role_table_grants
   where table_schema = 'public'
     and table_name in ('orders', 'order_items', 'payment_proofs', 'expenses')
-    and grantee in ('anon', 'authenticated')
-    and privilege_type = 'SELECT';
+    and grantee in ('anon', 'authenticated');
 
--- b) No column-level anon/authenticated SELECT grants either — expect 0 rows:
-select table_name, grantee, column_name
+-- b) No column privileges of any kind remain for anon or authenticated either
+--    — expect 0 rows:
+select table_name, grantee, column_name, privilege_type
   from information_schema.column_privileges
   where table_schema = 'public'
     and table_name in ('orders', 'order_items', 'payment_proofs', 'expenses')
-    and grantee in ('anon', 'authenticated')
-    and privilege_type = 'SELECT';
+    and grantee in ('anon', 'authenticated');
 
--- c) No policies applicable to anon (directly or through PUBLIC) remain on
---    the four tables — expect 0 rows:
+-- c) service_role table privileges remain unchanged — compare these rows with
+--    the saved pre-run snapshot. Protected /api/staff/* reads and server/RPC
+--    order creation provide the end-to-end verification after deployment:
+select table_name, grantee, privilege_type
+  from information_schema.role_table_grants
+  where table_schema = 'public'
+    and table_name in ('orders', 'order_items', 'payment_proofs', 'expenses')
+    and grantee = 'service_role'
+  order by table_name, privilege_type;
+
+-- d) No SELECT policies applicable to anon (directly or through PUBLIC)
+--    remain on the four tables — expect 0 rows:
 select tablename, policyname, roles
   from pg_policies
   where schemaname = 'public'
     and tablename in ('orders', 'order_items', 'payment_proofs', 'expenses')
+    and cmd = 'SELECT'
     and roles::text[] && array['anon', 'public']::text[];
 
--- d) RLS still enabled on all four — expect 4 rows, all true:
+-- e) RLS still enabled on all four — expect 4 rows, all true:
 select relname, relrowsecurity
   from pg_class
   where relnamespace = 'public'::regnamespace
     and relname in ('orders', 'order_items', 'payment_proofs', 'expenses');
 
--- e) PUBLIC MENU UNTOUCHED — menu_items anon grant still exactly the 2G-H
+-- f) PUBLIC MENU UNTOUCHED — menu_items anon grant still exactly the 2G-H
 --    7 columns (item_code, name_en, category, price, is_available,
 --    availability_status, sort_order) and its anon read policy still present:
 select column_name, privilege_type
@@ -139,7 +159,7 @@ select policyname, cmd, roles
   from pg_policies
   where schemaname = 'public' and tablename = 'menu_items';
 
--- f) LIVE PROBES (from any terminal — uses only the PUBLIC anon key, never
+-- g) LIVE PROBES (from any terminal — uses only the PUBLIC anon key, never
 --    paste the service key):
 --    - anon read of orders must now FAIL or return zero rows:
 --        curl -s "https://<project>.supabase.co/rest/v1/orders?select=order_number&limit=1" \
@@ -158,7 +178,10 @@ select policyname, cmd, roles
 -- rollback is harmless but pointless (nothing uses it).
 -- The recreated policies use canonical names; the ad-hoc originals may have
 -- differed (see the pre-run snapshot you saved) — behavior is identical
--- (permissive SELECT USING (true) for anon).
+-- (permissive SELECT USING (true) for anon). This intentionally restores ONLY
+-- the minimum anonymous SELECT behavior the old dashboards needed. It does
+-- not restore authenticated access or any INSERT, UPDATE, DELETE, TRUNCATE,
+-- TRIGGER, or REFERENCES privilege found in the live snapshot.
 --
 -- begin;
 -- create policy "orders anon read"         on public.orders         for select to anon using (true);
@@ -172,4 +195,4 @@ select policyname, cmd, roles
 -- commit;
 -- notify pgrst, 'reload schema';
 --
--- (authenticated grants are NOT restored — none were relied on.)
+-- (authenticated and non-SELECT grants are NOT restored — none were relied on.)

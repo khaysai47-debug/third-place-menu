@@ -102,9 +102,11 @@ tracks which scenarios are still unexercised.
       at flip time (2026-07-06): full same-day coverage was judged
       sufficient; re-run `npm run parity` on a later service day during 2F
       (n8n read webhooks stay alive, so the comparison remains meaningful).
-- [x] **QA-4 RLS/security review** — recorded 2026-07-06: anon = read-only
-      SELECT + `USING (true)` policies on all four read tables, NO anon
-      writes, service_role only inside n8n. ⚠️ Full auth/RLS hardening is a
+- [x] **QA-4 RLS/security review** — corrected by the verified 2026-07-17 live
+      snapshot: the four read tables had permissive anon SELECT policies plus
+      unnecessary anon/authenticated table privileges. RLS blocked writes
+      because no matching write policies existed. service_role stayed
+      server-side. ⚠️ Full auth/RLS hardening is a
       separate pre-production task (parity doc QA-4) — still open, but not a
       flip blocker.
 - [x] One `{ strictTimestamps: true }` run passing — multiple strict runs
@@ -1033,7 +1035,9 @@ key, `/staff`+`/owner` gating) — immediately after 3C, before bot sessions.
 Closes runbook QA-4 / schema-notes "revisit before real restaurant use":
 **orders, order_items, payment_proofs, and expenses were anonymously
 readable** (permissive anon SELECT policies + grants created during 2D/2E
-parity QA) with the anon key that ships in the client bundle — customer
+parity QA), and the verified live snapshot also found unnecessary broader
+anon/authenticated table privileges (blocked by RLS but still needless
+surface). The anon key ships in the client bundle, exposing customer
 names/phones/addresses, proofs, and money data. `/staff` and `/owner` had
 no access gate beyond URL secrecy.
 
@@ -1075,9 +1079,9 @@ after the pilot. Rotate the secret whenever it is displayed anywhere
 (standing rule from 2G-E).
 
 **Migration (review-first, NOT yet applied):**
-`docs/sql/2026-07-17-pre-pilot-security-hardening.sql` — revokes
-anon/authenticated SELECT and drops the anon SELECT policies on the four
-sensitive tables (dynamic lookup — the QA policies were created ad hoc),
+`docs/sql/2026-07-17-pre-pilot-security-hardening.sql` — revokes all
+anon/authenticated table privileges and drops the anon SELECT policies on
+the four sensitive tables (dynamic lookup — the QA policies were created ad hoc),
 keeps RLS enabled, preserves the menu_items public read and all
 service_role access. Includes verification SQL, live curl probes, and full
 rollback SQL. **Run order: deploy the hardened app code FIRST, then run the
@@ -1103,7 +1107,8 @@ lose reads until hard-refreshed).
 
 **Rollback:** app — revert the branch (adapters return to anon reads),
 redeploy. DB — only if the migration was already applied, run its § 4
-rollback block (recreates the permissive anon policies + grants). The two
+rollback block (recreates only the permissive anon SELECT policies + grants,
+never the unnecessary broader privileges). The two
 must go together only for a FULL rollback; the app rollback alone is safe
 before the migration runs.
 
