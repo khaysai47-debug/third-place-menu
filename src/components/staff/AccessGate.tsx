@@ -87,7 +87,7 @@ export function AccessGate({ area, denied, onSubmitted, onCancel }: Props) {
         </div>
 
         {denied && !submitting && (
-          <p role="alert" className="mt-2 text-[12px] text-[var(--color-vermillion)]">
+          <p role="alert" className="mt-2 text-[13px] font-medium text-[#E2564B]">
             Incorrect access key.
           </p>
         )}
@@ -95,7 +95,7 @@ export function AccessGate({ area, denied, onSubmitted, onCancel }: Props) {
         <button
           type="submit"
           disabled={!key.trim() || submitting}
-          className="mt-5 h-12 w-full rounded-xl bg-[var(--color-gold)] text-[15px] font-semibold tracking-[0.02em] text-[var(--color-charcoal)] transition hover:brightness-105 active:scale-[0.99] disabled:opacity-40 focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-gold-soft)]/60"
+          className="mt-5 h-12 w-full rounded-xl bg-[var(--color-vermillion)] text-[15px] font-semibold tracking-[0.02em] text-[var(--color-cream)] shadow-lg shadow-[var(--color-vermillion)]/30 transition hover:bg-[#E24A3F] active:scale-[0.99] disabled:opacity-40 disabled:shadow-none focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-gold)]/60 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--color-charcoal-soft)]"
         >
           {submitting ? "Checking…" : "Continue"}
         </button>
