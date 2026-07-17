@@ -309,13 +309,48 @@ for (const file of ["src/routes/staff.tsx", "src/routes/owner.tsx"]) {
 
 // A policy declared TO PUBLIC also applies to anon. The migration must remove
 // both forms so a future grant cannot silently reopen the sensitive tables.
-const migration = readFileSync(
-  "docs/sql/2026-07-17-pre-pilot-security-hardening.sql",
-  "utf8",
-);
+const migration = readFileSync("docs/sql/2026-07-17-pre-pilot-security-hardening.sql", "utf8");
 assert.ok(
   migration.includes("array['anon', 'public']::text[]"),
   "migration covers policies inherited through PUBLIC",
 );
+
+/* ── H. Access gate UI (source-level, matching the repo's test style) ────── */
+
+// The browser-native prompt is gone from the whole access flow.
+for (const file of [
+  "src/components/staff/AccessGate.tsx",
+  "src/lib/staffWriteSecret.ts",
+  "src/routes/staff.tsx",
+  "src/routes/owner.tsx",
+]) {
+  assert.ok(!readFileSync(file, "utf8").includes("window.prompt"), `${file}: no window.prompt`);
+}
+
+const gateSource = readFileSync("src/components/staff/AccessGate.tsx", "utf8");
+// Real password field with show/hide, submitted through a form (Enter works),
+// one primary submit button, inline rejection error.
+assert.ok(gateSource.includes('"password"'), "gate renders a password input");
+assert.ok(gateSource.includes("<form"), "gate submits via a form");
+assert.ok(gateSource.includes('type="submit"'), "gate has a submit button");
+assert.ok(gateSource.includes("Hide access key"), "gate has a show/hide toggle");
+assert.ok(gateSource.includes("Incorrect access key."), "inline rejected-key error");
+// Copy contract: distinct staff/owner titles, minimal bilingual labels.
+assert.ok(gateSource.includes("Staff Access"), "staff title");
+assert.ok(gateSource.includes("员工专用"), "staff label");
+assert.ok(gateSource.includes("Owner Access"), "owner title");
+assert.ok(gateSource.includes("店主专用"), "owner label");
+// The entered key is stored ONLY through the existing localStorage helper —
+// never read/written directly, never placed in a URL.
+assert.ok(gateSource.includes("setStaffWriteSecret"), "gate stores via the secret helper");
+assert.ok(!gateSource.includes("localStorage."), "no direct localStorage access in the gate");
+
+// Both dashboards keep the gate-before-content rule and use the right area.
+const staffPage = readFileSync("src/routes/staff.tsx", "utf8");
+const ownerPage = readFileSync("src/routes/owner.tsx", "utf8");
+assert.ok(staffPage.includes("!unlocked || accessDenied"), "staff page stays gated");
+assert.ok(staffPage.includes('area="staff"'), "staff page uses staff copy");
+assert.ok(ownerPage.includes("!unlocked || accessDenied"), "owner page stays gated");
+assert.ok(ownerPage.includes('area="owner"'), "owner page uses owner copy");
 
 console.log("test-staff-dashboard: all assertions passed");

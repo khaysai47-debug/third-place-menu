@@ -10,7 +10,7 @@ import { STATUS_META, STATUS_ORDER } from "@/components/staff/orderStatus";
 import { isCancellableStatus } from "@/lib/orderRules";
 import { getOrderRepository } from "@/lib/data/orderRepository";
 import { StaffAccessError } from "@/lib/data/staffReadClient";
-import { getStaffWriteSecret, promptForSecret } from "@/lib/staffWriteSecret";
+import { getStaffWriteSecret } from "@/lib/staffWriteSecret";
 import {
   nextStaffOrderStatus,
   type StaffOrder,
@@ -194,6 +194,10 @@ function StaffPage() {
     try {
       setOrders(await orderRepo.listOrders());
       setLoadState("ready");
+      // A successful protected read IS the key validation — the gate (if
+      // shown) unmounts only here.
+      setUnlocked(true);
+      setAccessDenied(false);
     } catch (error) {
       // Access problems show the gate, not the generic error state. No
       // sensitive data was returned (the server answered 401 / was not called).
@@ -202,8 +206,11 @@ function StaffPage() {
         setUnlocked(false);
         return;
       }
+      // Non-auth failure (server/network down): show the dashboard's normal
+      // error + retry state — there is no data to protect in it.
       console.error("Failed to load staff orders", error);
       setLoadState("error");
+      setUnlocked(true);
     }
   }, []);
 
@@ -247,13 +254,12 @@ function StaffPage() {
     return () => window.clearInterval(id);
   }, [refreshOrders, unlocked, accessDenied]);
 
-  // Gate unlock / header ⚿: after the prompt closes, re-check the stored
-  // secret and reload. The server re-validates on every request either way.
+  // Gate submit (the gate already stored the entered key): validate it by
+  // loading — the gate stays up until the server accepts the read
+  // (loadOrders flips unlocked on success / non-auth failure).
   const handleSecretEntry = useCallback(() => {
     setAccessDenied(false);
-    const has = Boolean(getStaffWriteSecret());
-    setUnlocked(has);
-    if (has) void loadOrders();
+    if (getStaffWriteSecret()) void loadOrders();
   }, [loadOrders]);
 
   const counts = useMemo(() => {
@@ -455,7 +461,16 @@ function StaffPage() {
   };
 
   if (!unlocked || accessDenied) {
-    return <AccessGate area="Staff" denied={accessDenied} onSubmitted={handleSecretEntry} />;
+    return (
+      <AccessGate
+        area="staff"
+        denied={accessDenied}
+        onSubmitted={handleSecretEntry}
+        // "Change key" escape hatch: when a stored key exists and wasn't
+        // rejected (the header ⚿ path), Cancel just re-validates it.
+        onCancel={!accessDenied && getStaffWriteSecret() ? () => handleSecretEntry() : undefined}
+      />
+    );
   }
 
   return (
@@ -467,12 +482,14 @@ function StaffPage() {
             <span>員工 · Staff</span>
             <span className="flex items-center gap-3">
               <button
+                // Change-key flow: reopen the themed gate (no browser prompt).
+                // The stored key is kept — Cancel on the gate returns here.
                 onClick={() => {
-                  promptForSecret();
-                  handleSecretEntry();
+                  setAccessDenied(false);
+                  setUnlocked(false);
                 }}
-                aria-label="Staff access key 員工密碼"
-                title="Staff access key 員工密碼"
+                aria-label="Change access key 更換密碼"
+                title="Change access key 更換密碼"
                 className="text-[var(--color-gold-soft)]/50 hover:text-[var(--color-cream)] transition"
               >
                 ⚿

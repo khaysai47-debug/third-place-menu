@@ -136,6 +136,10 @@ function OwnerPage() {
       setOrders(await orderRepo.listOrders());
       setNowTs(Date.now());
       setLoadState("ready");
+      // A successful protected read IS the key validation — the gate (if
+      // shown) unmounts only here.
+      setUnlocked(true);
+      setAccessDenied(false);
     } catch (error) {
       // Access problems show the gate, not the generic error state.
       if (error instanceof StaffAccessError) {
@@ -143,8 +147,11 @@ function OwnerPage() {
         setUnlocked(false);
         return;
       }
+      // Non-auth failure (server/network down): show the dashboard's normal
+      // error + retry state — there is no data to protect in it.
       console.error("Failed to load owner dashboard orders", error);
       setLoadState("error");
+      setUnlocked(true);
     }
   }, []);
 
@@ -209,13 +216,12 @@ function OwnerPage() {
 
   // Auto-polling disabled — use the manual Refresh button.
 
-  // Gate unlock: after the prompt closes, re-check the stored secret and
-  // reload both feeds. The server re-validates on every request either way.
+  // Gate submit (the gate already stored the entered key): validate it by
+  // loading — the gate stays up until the server accepts the read
+  // (loadOrders flips unlocked on success / non-auth failure).
   const handleSecretEntry = useCallback(() => {
     setAccessDenied(false);
-    const has = Boolean(getStaffWriteSecret());
-    setUnlocked(has);
-    if (has) {
+    if (getStaffWriteSecret()) {
       void loadOrders();
       void loadExpenses();
     }
@@ -288,7 +294,7 @@ function OwnerPage() {
   );
 
   if (!unlocked || accessDenied) {
-    return <AccessGate area="Owner" denied={accessDenied} onSubmitted={handleSecretEntry} />;
+    return <AccessGate area="owner" denied={accessDenied} onSubmitted={handleSecretEntry} />;
   }
 
   return (
