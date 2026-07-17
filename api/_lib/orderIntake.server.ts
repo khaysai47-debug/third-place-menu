@@ -4,7 +4,12 @@ import process from "node:process";
 import { waitUntil } from "@vercel/functions";
 import { z } from "zod";
 
-import { buildOrderEventJwt, type OrderCreatedEvent } from "./orderEventJwt.server.js";
+import {
+  buildOrderEventJwt,
+  isAutomationChannel,
+  type OrderCreatedEvent,
+  type OrderEventChannel,
+} from "./orderEventJwt.server.js";
 import { checkStaffSecret, jsonError } from "./staffOrderWrites.server.js";
 
 // Server-only ORDER INTAKE (Phase 2G-I) — customer checkout + Staff Add Order.
@@ -83,10 +88,19 @@ function mapRpcError(message: string, detail: string): Response {
   return jsonError(500, "Order could not be created. Please try again.");
 }
 
-/* ── Optional post-order automation bridge (Phase 3A) ────────────────────── */
+/* ── Optional post-order automation bridge (Phase 3A, gated in Phase 3C) ── */
 
+// SELECTIVE DISPATCH (Phase 3C): only server-resolved BOT channels
+// (AUTOMATION_DISPATCH_CHANNELS: instagram/messenger) dispatch to n8n.
+// Normal restaurant orders — customer checkout, dine-in QR, staff manual —
+// never do: ordinary operations cost zero n8n executions. No intake route
+// can produce a bot channel yet (trusted bot sessions arrive in Phase 3D),
+// so today NOTHING dispatches. Channel eligibility is decided here on the
+// server only — never from a query parameter or any client-sent field.
+//
 // Fires ONLY when BOTH N8N_ORDER_AUTOMATION_WEBHOOK_URL and
-// N8N_AUTOMATION_SECRET are set — otherwise skipped silently. NEVER point
+// N8N_AUTOMATION_SECRET are set — otherwise skipped silently (unsetting
+// them remains the global emergency dispatch-off switch). NEVER point
 // the URL at the old order-intake webhook (third-place-order-test) — its
 // workflow INSERTS an order and would duplicate every order. It must be a
 // NEW automation-only workflow (docs/n8n-workflow-side-effects.md § Phase 3A).
@@ -110,7 +124,13 @@ const AUTOMATION_TIMEOUT_MS = 5_000;
 export { buildOrderEventJwt };
 export type { OrderCreatedEvent };
 
-function fireOrderAutomation(orderNumber: string, channel: "customer" | "staff"): void {
+// Exported for scripts/test-automation-bridge.mjs (no intake route can
+// produce a bot channel until Phase 3D — the test drives this directly).
+export function fireOrderAutomation(orderNumber: string, channel: OrderEventChannel): void {
+  // Defense in depth: the intake call site already gates on
+  // isAutomationChannel, but the policy is re-checked here so no future
+  // caller can dispatch a non-bot channel by accident.
+  if (!isAutomationChannel(channel)) return;
   const hook = process.env.N8N_ORDER_AUTOMATION_WEBHOOK_URL;
   const secret = process.env.N8N_AUTOMATION_SECRET;
   if (!hook || !secret) return;
@@ -266,7 +286,11 @@ async function handleIntake(request: Request, channel: "customer" | "staff"): Pr
     `ORDER_INTAKE ${channel} ${result.order_number} type=${orderType} lines=${items.length} total=${result.total}${result.duplicate ? " (idempotent replay)" : ""}`,
   );
 
-  if (!result.duplicate) fireOrderAutomation(result.order_number, channel);
+  // Phase 3C: dispatch only server-resolved bot channels — customer/staff
+  // intake never reaches n8n. (Duplicate replays never dispatch either.)
+  if (!result.duplicate && isAutomationChannel(channel)) {
+    fireOrderAutomation(result.order_number, channel);
+  }
 
   return Response.json({
     ok: true,

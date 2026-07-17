@@ -200,7 +200,10 @@ for (const [token, label] of [
   ["..", "empty segments"],
   ["!!!.@@@.###", "invalid base64url characters"],
   [`${Buffer.from("not json").toString("base64url")}.${jwt.split(".")[1]}.x`, "non-JSON header"],
-  [`${b64u({ alg: "HS256" })}.${Buffer.from("not json").toString("base64url")}.x`, "non-JSON payload"],
+  [
+    `${b64u({ alg: "HS256" })}.${Buffer.from("not json").toString("base64url")}.x`,
+    "non-JSON payload",
+  ],
   ["x".repeat(5000) + ".a.b", "oversized token"],
 ]) {
   await expectStatus(401, { auth: `Bearer ${token}` }, label);
@@ -223,7 +226,11 @@ await expectStatus(
 );
 await expectStatus(401, { auth: `Bearer ${makeJwt({ claims: { exp: undefined } })}` }, "no exp");
 await expectStatus(401, { auth: `Bearer ${makeJwt({ claims: { nbf: undefined } })}` }, "no nbf");
-await expectStatus(401, { auth: `Bearer ${makeJwt({ secret: "wrong-secret" })}` }, "wrong signature");
+await expectStatus(
+  401,
+  { auth: `Bearer ${makeJwt({ secret: "wrong-secret" })}` },
+  "wrong signature",
+);
 await expectStatus(
   401,
   { auth: `Bearer ${makeJwt({ signature: "" })}` },
@@ -251,11 +258,65 @@ await expectStatus(
   { auth: `Bearer ${makeJwt({ claims: { jti: "some-other-id" } })}` },
   "jti != eventId",
 );
+// Channel vocabulary (Phase 3C: customer/staff/instagram/messenger) — the
+// verifier still rejects anything outside it, wrong casing, empty, missing.
 await expectStatus(
   401,
-  { auth: `Bearer ${makeJwt({ claims: { channel: "instagram" } })}` },
+  { auth: `Bearer ${makeJwt({ claims: { channel: "line" } })}` },
   "unknown channel claim",
 );
+await expectStatus(
+  401,
+  { auth: `Bearer ${makeJwt({ claims: { channel: "Instagram" } })}` },
+  "wrong-cased channel claim",
+);
+await expectStatus(
+  401,
+  { auth: `Bearer ${makeJwt({ claims: { channel: "" } })}` },
+  "empty channel claim",
+);
+await expectStatus(
+  401,
+  { auth: `Bearer ${makeJwt({ claims: { channel: 7 } })}` },
+  "non-string channel claim",
+);
+await expectStatus(
+  401,
+  { auth: `Bearer ${makeJwt({ claims: { channel: undefined } })}` },
+  "missing channel claim",
+);
+
+/* ── Phase 3C: bot channels are valid vocabulary; source → channel mapping ── */
+
+// instagram/messenger tokens verify (future trusted callers). The response
+// channel still comes from orders.source — never from the token.
+const igToken = await expectStatus(
+  200,
+  { auth: `Bearer ${makeJwt({ claims: { channel: "instagram" } })}` },
+  "instagram channel accepted",
+);
+trackCalls();
+assert.equal(igToken.data.order.channel, "customer", "response channel comes from orders.source");
+await expectStatus(
+  200,
+  { auth: `Bearer ${makeJwt({ claims: { channel: "messenger" } })}` },
+  "messenger channel accepted",
+);
+trackCalls();
+
+// SOURCE_TO_CHANNEL forward mappings (no current writer produces these
+// source values — Phase 3D bot sessions will, server-side).
+for (const [source, expected] of [
+  ["instagram", "instagram"],
+  ["messenger", "messenger"],
+  ["tiktok", null], // unknown sources still map to null, never leak raw
+]) {
+  orderRowOverride = { source };
+  const mapped = await expectStatus(200, { auth: `Bearer ${makeJwt()}` }, `source ${source}`);
+  trackCalls();
+  assert.equal(mapped.data.order.channel, expected, `source ${source} → channel ${expected}`);
+}
+orderRowOverride = null;
 
 /* ── 13–14. Token↔body binding ───────────────────────────────────────────── */
 
@@ -277,8 +338,16 @@ await expectStatus(
 /* ── 15–17. Body validation ──────────────────────────────────────────────── */
 
 const authed = { auth: `Bearer ${makeJwt()}` };
-await expectStatus(400, { ...authed, body: JSON.stringify({ orderNumber: ORDER_NUMBER }) }, "missing eventId");
-await expectStatus(400, { ...authed, body: JSON.stringify({ eventId: EVENT_ID }) }, "missing orderNumber");
+await expectStatus(
+  400,
+  { ...authed, body: JSON.stringify({ orderNumber: ORDER_NUMBER }) },
+  "missing eventId",
+);
+await expectStatus(
+  400,
+  { ...authed, body: JSON.stringify({ eventId: EVENT_ID }) },
+  "missing orderNumber",
+);
 await expectStatus(400, { ...authed, body: "null" }, "null body");
 await expectStatus(400, { ...authed, body: "[]" }, "array body");
 await expectStatus(400, { ...authed, body: '"a-string"' }, "string body");
@@ -303,7 +372,10 @@ await expectStatus(
 );
 await expectStatus(
   413,
-  { ...authed, body: JSON.stringify({ eventId: EVENT_ID, orderNumber: ORDER_NUMBER, pad: "x".repeat(2000) }) },
+  {
+    ...authed,
+    body: JSON.stringify({ eventId: EVENT_ID, orderNumber: ORDER_NUMBER, pad: "x".repeat(2000) }),
+  },
   "oversized body",
 );
 
@@ -321,11 +393,23 @@ await expectStatus(413, { ...authed, body: multibyteBody }, "multibyte body over
 /* ── Content-Type: exact media type, parameters allowed ──────────────────── */
 
 await expectStatus(415, { ...authed, contentType: "text/plain" }, "wrong content type");
-await expectStatus(415, { ...authed, contentType: "text/application/json" }, "media type with json substring");
+await expectStatus(
+  415,
+  { ...authed, contentType: "text/application/json" },
+  "media type with json substring",
+);
 await expectStatus(415, { ...authed, contentType: "application/jsonp" }, "application/jsonp");
-await expectStatus(200, { auth: `Bearer ${makeJwt()}`, contentType: "application/json; charset=utf-8" }, "json with charset parameter");
+await expectStatus(
+  200,
+  { auth: `Bearer ${makeJwt()}`, contentType: "application/json; charset=utf-8" },
+  "json with charset parameter",
+);
 trackCalls();
-await expectStatus(200, { auth: `Bearer ${makeJwt()}`, contentType: "Application/JSON" }, "case-insensitive media type");
+await expectStatus(
+  200,
+  { auth: `Bearer ${makeJwt()}`, contentType: "Application/JSON" },
+  "case-insensitive media type",
+);
 trackCalls();
 
 /* ── 18–19. Supabase not-found and failures ──────────────────────────────── */

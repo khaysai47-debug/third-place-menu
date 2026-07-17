@@ -25,12 +25,36 @@ export const JWT_CLOCK_TOLERANCE_S = 30;
 const MAX_JWT_LENGTH = 4096;
 const B64URL_SEGMENT = /^[A-Za-z0-9_-]+$/;
 
+/**
+ * The signed event-channel vocabulary. customer/staff are the two real
+ * intake surfaces (kept for verification + backward compatibility);
+ * instagram/messenger are the future trusted bot channels (Phase 3D bot
+ * sessions) — NO public route can produce them yet. Anything outside this
+ * list fails verification.
+ */
+export const ORDER_EVENT_CHANNELS = ["customer", "staff", "instagram", "messenger"] as const;
+export type OrderEventChannel = (typeof ORDER_EVENT_CHANNELS)[number];
+
+/**
+ * Phase 3C dispatch policy — the ONLY channels whose order.created events
+ * are sent to n8n. Normal restaurant orders (customer/staff) never dispatch:
+ * ordinary operations must cost zero n8n executions. Server-side vocabulary
+ * only — never derived from a query parameter or any client-sent value.
+ */
+export const AUTOMATION_DISPATCH_CHANNELS: readonly OrderEventChannel[] = [
+  "instagram",
+  "messenger",
+];
+
+export const isAutomationChannel = (channel: OrderEventChannel): boolean =>
+  AUTOMATION_DISPATCH_CHANNELS.includes(channel);
+
 export type OrderCreatedEvent = {
   eventId: string;
   eventType: "order.created";
   occurredAt: string;
   orderNumber: string;
-  channel: "customer" | "staff";
+  channel: OrderEventChannel;
 };
 
 /**
@@ -106,7 +130,12 @@ export function verifyOrderEventJwt(token: string, secret: string): Record<strin
   if (typeof claims.orderNumber !== "string" || claims.orderNumber.length === 0) return null;
   if (claims.eventType !== JWT_SUBJECT) return null;
   if (typeof claims.occurredAt !== "string") return null;
-  if (claims.channel !== "customer" && claims.channel !== "staff") return null;
+  if (
+    typeof claims.channel !== "string" ||
+    !(ORDER_EVENT_CHANNELS as readonly string[]).includes(claims.channel)
+  ) {
+    return null;
+  }
 
   if (!isSeconds(claims.exp) || !isSeconds(claims.nbf) || !isSeconds(claims.iat)) return null;
   const now = Math.floor(Date.now() / 1000);

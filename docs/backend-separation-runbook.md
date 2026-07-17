@@ -975,6 +975,59 @@ fetches of the same order within the window are read-only and idempotent.
 Endpoint enumerates nothing: order numbers not bound to a valid signed
 token are unreachable.
 
+### Phase 3C — selective automation dispatch (2026-07-17)
+
+Code on branch (`api/_lib/orderEventJwt.server.ts`,
+`api/_lib/orderIntake.server.ts`, `api/_lib/orderDetails.server.ts`).
+Purpose: **normal restaurant orders cost zero n8n executions.** Dine-in QR,
+ordinary website checkout, and staff manual orders no longer emit the Phase
+3A `order.created` event at all; only server-resolved BOT channels dispatch.
+
+**Dispatch policy (server-side only, one auditable place):**
+
+- `ORDER_EVENT_CHANNELS` (orderEventJwt.server.ts) — the full signed
+  vocabulary: `customer`, `staff`, `instagram`, `messenger`. The JWT
+  verifier rejects anything else (unknown values, wrong casing, empty,
+  missing, non-string).
+- `AUTOMATION_DISPATCH_CHANNELS` / `isAutomationChannel()` — ONLY
+  `instagram` and `messenger` are dispatch-eligible. Enforced at the intake
+  call site AND re-checked inside `fireOrderAutomation` (no future caller
+  can bypass it).
+- Eligibility is never derived from a query parameter, body field, order
+  type, or any other client-controlled value. **No public route can create
+  a bot-channel order yet** — trusted bot sessions are a LATER phase, so
+  after 3C the bridge is silent in production until then.
+- `SOURCE_TO_CHANNEL` (orderDetails.server.ts) gained forward mappings
+  `instagram`/`messenger` for `orders.source` values that only the future
+  bot-session intake will write. Current rows (`customer_menu`,
+  `staff_manual`) map exactly as before.
+
+**Unchanged (verified by `npm run test:bridge`):** order creation, order
+numbers, price computation, `client_request_id` idempotency (duplicate
+replays never dispatched before and still don't), customer/staff responses,
+`waitUntil` best-effort delivery + 5 s timeout for eligible dispatches,
+failure isolation (n8n down never fails an order), safe logging (no
+secrets/JWTs/hostnames). JWT validation is unweakened: HS256 pinned,
+iss/aud/sub/jti/exp/nbf/iat, timingSafeEqual, generic 401s, claim↔body
+binding.
+
+**Requires:** NO database migration, NO n8n workflow change, NO env change,
+NO frontend change. Existing `N8N_ORDER_AUTOMATION_WEBHOOK_URL` +
+`N8N_AUTOMATION_SECRET` semantics keep working — unsetting them remains the
+global emergency dispatch-off switch.
+
+**Verification (Preview):** place one disposable customer order and one
+staff order → both succeed, Vercel logs show `ORDER_INTAKE` but NO
+`ORDER_AUTOMATION` line, n8n executions list shows nothing new.
+`npm run test:bridge` + `npm run test:order-details` green.
+
+**Rollback:** revert the Phase 3C commit (restores dispatch-on-every-order),
+or unset the two automation env vars (dispatch off entirely). No SQL, no
+data migration — the gate is stateless.
+
+**Next phase:** pre-pilot security hardening (dashboard reads off the anon
+key, `/staff`+`/owner` gating) — immediately after 3C, before bot sessions.
+
 ### Production test checklist after the 2G-F/2G-G deploy
 
 1. ⚿ on each staff device: enter the CURRENT rotated secret.

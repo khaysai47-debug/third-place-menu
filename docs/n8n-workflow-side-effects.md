@@ -49,11 +49,16 @@ Phase 2H, the menu read moves in 2G-E).
 
 ## Phase 3A — order-created automation bridge (2026-07-14)
 
-The app now emits an `order.created` event authenticated by a short-lived
+The app emits an `order.created` event authenticated by a short-lived
 HS256 JWT (`Authorization: Bearer`) to
-`N8N_ORDER_AUTOMATION_WEBHOOK_URL` after every successful non-duplicate
-order — full spec, n8n workflow plan, and verification checklist in
-docs/backend-separation-runbook.md § Phase 3A. Hard rules for the
+`N8N_ORDER_AUTOMATION_WEBHOOK_URL` after a successful non-duplicate
+order — **since Phase 3C (2026-07-17) only for server-resolved BOT channels
+(instagram/messenger)**. Customer checkout, dine-in QR, and staff manual
+orders never dispatch: normal restaurant operations cost zero n8n
+executions. No public route can create a bot-channel order yet (trusted
+bot sessions are a later phase), so the bridge is currently silent. Full
+spec, n8n workflow plan, and verification checklist in
+docs/backend-separation-runbook.md § Phase 3A + § Phase 3C. Hard rules for the
 receiving workflow:
 
 - It must be a **brand-new automation-only webhook path** — never the old

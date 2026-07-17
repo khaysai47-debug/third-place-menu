@@ -2,7 +2,7 @@ import process from "node:process";
 
 import { z } from "zod";
 
-import { verifyOrderEventJwt } from "./orderEventJwt.server.js";
+import { verifyOrderEventJwt, type OrderEventChannel } from "./orderEventJwt.server.js";
 import { jsonError } from "./staffOrderWrites.server.js";
 
 // Server-only AUTHORITATIVE ORDER FETCH (Phase 3B) — n8n automation only.
@@ -80,9 +80,14 @@ const parseQuantity = (value: unknown): number | null =>
 // orders.source → the bridge's channel vocabulary (intake SQL: customer_menu
 // for /api/order/submit, staff_manual for /api/staff/add-order). Legacy or
 // unknown sources map to null rather than leaking the raw column value.
-const SOURCE_TO_CHANNEL: Record<string, "customer" | "staff"> = {
+// instagram/messenger are Phase 3C forward mappings: NO current writer
+// produces those source values — trusted bot sessions (Phase 3D) will set
+// them server-side. Nothing client-controlled can reach this column.
+const SOURCE_TO_CHANNEL: Record<string, OrderEventChannel> = {
   customer_menu: "customer",
   staff_manual: "staff",
+  instagram: "instagram",
+  messenger: "messenger",
 };
 
 // Explicit column lists — the response contract starts at the SELECT. No
