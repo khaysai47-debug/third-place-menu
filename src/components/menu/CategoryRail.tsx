@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ReactElement } from "react";
 import { CATEGORIES, type MenuCategoryId } from "@/data/menu";
-import { IconTile, TILE_PX } from "./IconTile";
 import {
   NoodleBowlIcon,
   SkewerFlameIcon,
@@ -33,20 +32,34 @@ interface Props {
   onChange: (id: MenuCategoryId) => void;
 }
 
+/** Shared by the chip and the buttons so the moving panel lands exactly on
+ *  the label it is covering. Any padding change has to happen in one place. */
+const CELL = "flex flex-col items-center gap-1.5 px-3 pb-4 pt-3";
+
 /**
- * The approved icon-tile section nav, with the redesign's travelling
- * indicator: one thin gold frame with a vermillion seal slides between
- * category tiles instead of six fills switching on and off. Same selection
- * language as the service rail above it.
+ * Sections as one shared tray with a parchment chip that slides beneath the
+ * current one.
  *
- * Tile widths vary with their labels, so the chip's position is measured
- * rather than derived. Rect maths (not offsetLeft) keeps it correct inside a
- * horizontally scrolled, padded container.
+ * Parchment rather than vermillion, deliberately: the service selector above
+ * already carries a vermillion panel, and stacking two red blocks turns the
+ * top of the page into a warning light. Parchment-on-charcoal is the
+ * approved menu's core motif, and it separates "how you are eating" (a
+ * decision, in red) from "where you are in the menu" (a position, in paper).
+ * A short vermillion underline inside the chip keeps the accent present.
+ *
+ * The chip rides IN FRONT and carries its own copy of the active icon and
+ * labels in ink. Behind the buttons it would slide under cream text on
+ * parchment during travel, which is unreadable; in front it simply covers
+ * what it crosses and reads as a physical button gliding along the tray.
+ *
+ * Widths follow the real label lengths, so the chip is measured rather than
+ * derived, and animates `width` alongside `transform`. It is one absolutely
+ * positioned element, so nothing else reflows.
  */
 export function CategoryRail({ active, onChange }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
-  const itemsRef = useRef<Partial<Record<MenuCategoryId, HTMLDivElement>>>({});
-  const [chipX, setChipX] = useState(0);
+  const itemsRef = useRef<Partial<Record<MenuCategoryId, HTMLButtonElement>>>({});
+  const [chip, setChip] = useState({ x: 0, w: 0 });
   // The chip must not slide in from x=0 on first paint; it only animates once
   // it has been placed.
   const placedRef = useRef(false);
@@ -58,7 +71,7 @@ export function CategoryRail({ active, onChange }: Props) {
     if (!scroller || !el) return;
     const a = el.getBoundingClientRect();
     const b = scroller.getBoundingClientRect();
-    setChipX(a.left - b.left + scroller.scrollLeft + (a.width - TILE_PX.sm) / 2);
+    setChip({ x: a.left - b.left + scroller.scrollLeft, w: a.width });
     if (!placedRef.current) {
       placedRef.current = true;
       setPlaced(true);
@@ -72,14 +85,14 @@ export function CategoryRail({ active, onChange }: Props) {
     if (!scroller || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(scroller);
-    // The labels are set in a webfont, so tile widths change once it swaps
-    // in. Without this the chip keeps its fallback-metric offset until the
+    // The labels are set in a webfont, so cell widths change once it swaps
+    // in. Without this the chip keeps its fallback-metric size until the
     // customer happens to change section.
     void document.fonts?.ready.then(measure);
     return () => observer.disconnect();
   }, [measure]);
 
-  // Keep the active section reachable when it sits off-screen in the rail.
+  // Keep the active section reachable when it sits off-screen in the tray.
   // scrollLeft is set directly rather than via scrollIntoView, which would
   // also scroll the page vertically.
   useEffect(() => {
@@ -101,7 +114,7 @@ export function CategoryRail({ active, onChange }: Props) {
       className="sticky top-0 z-30 border-y border-[var(--color-gold)]/15 bg-[var(--color-charcoal)]/95 backdrop-blur supports-[backdrop-filter]:bg-[var(--color-charcoal)]/85"
     >
       <div className="px-5 py-3">
-        <div className="mb-2 flex items-center justify-between">
+        <div className="mb-2.5 flex items-center justify-between">
           <p className="font-display text-[13px] uppercase tracking-[0.3em] text-[var(--color-gold-soft)]">
             Menu · 菜譜
           </p>
@@ -111,40 +124,63 @@ export function CategoryRail({ active, onChange }: Props) {
           </p>
         </div>
 
-        <div
-          ref={scrollerRef}
-          className="relative -mx-1 flex gap-3 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-        >
-          <span
-            aria-hidden
-            className={`pointer-events-none absolute left-0 top-0 z-10 h-14 w-14 rounded-2xl border-2 border-[var(--color-gold)]/75 shadow-[0_0_0_3px_oklch(0.72_0.11_75/0.10)] ${
-              placed
-                ? "transition-transform duration-[420ms] ease-[var(--ease-fluid)] motion-reduce:transition-none"
-                : ""
-            }`}
-            style={{ transform: `translateX(${chipX}px)` }}
+        <div className="rounded-2xl border border-[var(--color-gold)]/25 bg-[var(--color-ink)] p-1.5">
+          <div
+            ref={scrollerRef}
+            className="relative flex overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
-            <span className="absolute -right-1.5 -top-1.5 h-3 w-3 rotate-12 rounded-[2px] bg-[var(--color-vermillion)]" />
-          </span>
-
-          {CATEGORIES.map((c) => (
-            <div
-              key={c.id}
-              ref={(el) => {
-                if (el) itemsRef.current[c.id] = el;
-              }}
-              className="shrink-0"
+            <span
+              aria-hidden
+              className={`pointer-events-none absolute inset-y-0 left-0 z-20 ${
+                placed
+                  ? "transition-[transform,width] duration-[420ms] ease-[var(--ease-fluid)] motion-reduce:transition-none"
+                  : ""
+              }`}
+              style={{ transform: `translateX(${chip.x}px)`, width: `${chip.w}px` }}
             >
-              <IconTile
-                size="sm"
-                icon={ICONS[c.id]}
-                label={c.nameEn}
-                sublabel={CATEGORY_ZH[c.id]}
-                active={active === c.id}
-                onClick={() => onChange(c.id)}
-              />
-            </div>
-          ))}
+              <span
+                className={`paper-grain relative h-full w-full rounded-xl border border-[var(--color-gold)]/45 text-[var(--color-ink)] shadow-[0_8px_20px_-12px_oklch(0_0_0/0.8)] ${CELL}`}
+              >
+                <span className="h-7 w-7">{ICONS[active]}</span>
+                <span className="flex flex-col items-center leading-none">
+                  <span className="whitespace-nowrap text-[11px] font-medium uppercase tracking-wide">
+                    {CATEGORIES.find((c) => c.id === active)?.nameEn}
+                  </span>
+                  <span className="mt-1 text-[10px] text-[var(--color-ink)]/60">
+                    {CATEGORY_ZH[active]}
+                  </span>
+                </span>
+                <span className="absolute bottom-1.5 left-1/2 h-[2px] w-5 -translate-x-1/2 rounded-full bg-[var(--color-vermillion)]" />
+              </span>
+            </span>
+
+            {CATEGORIES.map((c) => {
+              const isActive = active === c.id;
+              return (
+                <button
+                  key={c.id}
+                  ref={(el) => {
+                    if (el) itemsRef.current[c.id] = el;
+                  }}
+                  onClick={() => onChange(c.id)}
+                  aria-current={isActive ? "true" : undefined}
+                  className={`${CELL} shrink-0 rounded-xl transition-[transform,color] duration-200 ease-[var(--ease-fluid)] active:scale-[0.96] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--color-gold)] ${
+                    isActive ? "text-[var(--color-cream)]" : "text-[var(--color-cream)]/70"
+                  }`}
+                >
+                  <span className="h-7 w-7">{ICONS[c.id]}</span>
+                  <span className="flex flex-col items-center leading-none">
+                    <span className="whitespace-nowrap text-[11px] font-medium uppercase tracking-wide">
+                      {c.nameEn}
+                    </span>
+                    <span className="mt-1 text-[10px] text-[var(--color-cream)]/45">
+                      {CATEGORY_ZH[c.id]}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
     </nav>

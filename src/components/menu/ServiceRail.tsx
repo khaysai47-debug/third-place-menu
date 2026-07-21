@@ -1,5 +1,4 @@
 import type { ReactElement } from "react";
-import { IconTile } from "./IconTile";
 import { ScooterIcon, ShopBagIcon, StampStarIcon, TableChopsticksIcon } from "./Icons";
 import { ORDER_TYPES, ORDER_TYPE_LABELS, ORDER_TYPE_ZH, type OrderType } from "./orderType";
 
@@ -12,57 +11,92 @@ const ORDER_ICONS: Record<OrderType, ReactElement> = {
 interface Props {
   orderType: OrderType;
   onOrderTypeChange: (type: OrderType) => void;
-  /** Popular is a jump to the Signature section, not a fourth order type. */
+  /** Popular jumps to the Signature section. It is not an order type. */
   onPopularClick: () => void;
 }
 
 /**
- * The approved four-up service row: Dine In, Pick Up, Delivery, Popular.
+ * Order type as one shared selector: a dark lacquered tray with a vermillion
+ * panel that slides beneath the chosen option. The panel is the active state
+ * — a real filled button that moves — rather than an outline drawn around a
+ * tile.
  *
- * Selection is a thin gold frame that slides across the first three tiles,
- * with a small vermillion seal pinned to its corner. Because the frame is
- * transparent it rides ABOVE the parchment boxes without hiding them — the
- * tile keeps its parchment surface and dark ink icon throughout, and the
- * frame stays visible as it travels past the tile in between.
+ * Popular sits OUTSIDE the tray as its own parchment shortcut, because it
+ * answers a different question ("show me the good stuff") from the three
+ * inside it ("how are you eating"). Putting it in the same container would
+ * imply tapping it changes your order type; it never does.
  *
- * Geometry: the grid carries no gap, so its cells and the chip's `w-1/4`
- * resolve against the same box and `translateX(index * 100%)` lands exactly.
- * The visual gutter comes from the 64px box being narrower than its cell.
+ * Geometry: the tray carries no padding, so its three grid cells and the
+ * panel's `w-1/3` resolve against the same box and `translateX(index*100%)`
+ * lands exactly. The panel's inset comes from padding on its own wrapper,
+ * which does not affect that maths.
+ *
+ * The panel sits BEHIND the labels. Cream reads acceptably on both the ink
+ * tray and the vermillion panel, so a label crossed mid-travel stays legible
+ * and the colour shift happens naturally as the fill arrives.
  */
 export function ServiceRail({ orderType, onOrderTypeChange, onPopularClick }: Props) {
   const index = ORDER_TYPES.indexOf(orderType);
 
   return (
     <section className="px-5">
-      <div className="relative grid grid-cols-4">
-        <span
-          aria-hidden
-          className="pointer-events-none absolute left-0 top-0 z-10 flex w-1/4 justify-center transition-transform duration-[380ms] ease-[var(--ease-fluid)] motion-reduce:transition-none"
-          style={{ transform: `translateX(${index * 100}%)` }}
+      <div className="flex items-stretch gap-3">
+        <div
+          role="radiogroup"
+          aria-label="Order type"
+          className="relative grid flex-1 grid-cols-3 rounded-2xl border border-[var(--color-gold)]/30 bg-[var(--color-ink)]"
         >
-          <span className="relative h-16 w-16 rounded-2xl border-2 border-[var(--color-gold)]/75 shadow-[0_0_0_3px_oklch(0.72_0.11_75/0.10)]">
-            {/* Seal, echoing the stamp corners on the hero quote card. */}
-            <span className="absolute -right-1.5 -top-1.5 h-3 w-3 rotate-12 rounded-[2px] bg-[var(--color-vermillion)]" />
+          <span
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 left-0 w-1/3 p-1.5 transition-transform duration-[380ms] ease-[var(--ease-fluid)] motion-reduce:transition-none"
+            style={{ transform: `translateX(${index * 100}%)` }}
+          >
+            <span className="block h-full w-full rounded-xl border border-[var(--color-vermillion-deep)] bg-[var(--color-vermillion)] shadow-[0_8px_20px_-10px_oklch(0.45_0.18_27/0.75)]" />
           </span>
-        </span>
 
-        {ORDER_TYPES.map((type) => (
-          <IconTile
-            key={type}
-            icon={ORDER_ICONS[type]}
-            label={ORDER_TYPE_LABELS[type]}
-            sublabel={ORDER_TYPE_ZH[type]}
-            active={orderType === type}
-            onClick={() => onOrderTypeChange(type)}
-          />
-        ))}
+          {ORDER_TYPES.map((type) => {
+            const active = orderType === type;
+            return (
+              <button
+                key={type}
+                type="button"
+                role="radio"
+                aria-checked={active}
+                onClick={() => onOrderTypeChange(type)}
+                className={`relative z-10 flex flex-col items-center gap-1.5 rounded-xl py-3.5 transition-[transform,color] duration-200 ease-[var(--ease-fluid)] active:scale-[0.96] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--color-gold)] ${
+                  active ? "text-[var(--color-cream)]" : "text-[var(--color-cream)]/70"
+                }`}
+              >
+                <span className="h-7 w-7">{ORDER_ICONS[type]}</span>
+                <span className="flex flex-col items-center leading-none">
+                  <span className="text-[11px] font-medium uppercase tracking-wide">
+                    {ORDER_TYPE_LABELS[type]}
+                  </span>
+                  <span
+                    className={`mt-1 text-[10px] transition-colors duration-200 ease-[var(--ease-fluid)] ${
+                      active ? "text-[var(--color-cream)]/75" : "text-[var(--color-cream)]/45"
+                    }`}
+                  >
+                    {ORDER_TYPE_ZH[type]}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
 
-        <IconTile
-          icon={<StampStarIcon className="h-full w-full" />}
-          label="Popular"
-          sublabel="人氣"
+        <button
           onClick={onPopularClick}
-        />
+          className="paper-grain flex w-[78px] shrink-0 flex-col items-center justify-center gap-1.5 rounded-2xl border border-[var(--color-gold)]/40 text-[var(--color-ink)] shadow-[inset_0_-2px_0_oklch(0.7_0.05_75/0.25)] transition-transform duration-150 ease-[var(--ease-fluid)] active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-gold)]"
+        >
+          <span className="h-7 w-7">
+            <StampStarIcon className="h-full w-full" />
+          </span>
+          <span className="flex flex-col items-center leading-none">
+            <span className="text-[11px] font-medium uppercase tracking-wide">Popular</span>
+            <span className="mt-1 text-[10px] text-[var(--color-ink)]/60">人氣</span>
+          </span>
+        </button>
       </div>
     </section>
   );
