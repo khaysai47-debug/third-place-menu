@@ -18,12 +18,13 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "A warm table after class, work, and everything in between. Premium Chinese BBQ & lounge near Assumption University.",
+          "Chinese BBQ made for sharing. Browse the menu and order for dine-in, pickup, or delivery from The Third Place.",
       },
       { property: "og:title", content: "The Third Place — Chinese BBQ & Lounge" },
       {
         property: "og:description",
-        content: "A warm table after class, work, and everything in between.",
+        content:
+          "Chinese BBQ made for sharing. Browse the menu and order for dine-in, pickup, or delivery from The Third Place.",
       },
     ],
   }),

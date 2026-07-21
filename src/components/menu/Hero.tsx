@@ -49,14 +49,11 @@ export function Hero() {
           </div>
 
           <div className="tp-rise flex-1 pt-1" style={{ ["--i" as string]: 2 }}>
-            {/* Tracking is tightened from the original 0.3em/0.22em so both
-                lines survive the narrow column at 375 without wrapping. */}
-            <p className="font-display text-xs uppercase tracking-[0.22em] text-[var(--color-vermillion)]">
-              Est. — A Warm Table
-            </p>
             <h1 className="tp-display text-balance text-[34px] text-[var(--color-cream)]">
               The <span className="text-[var(--color-vermillion)]">Third</span> Place
             </h1>
+            {/* Tracking is tightened from the original 0.22em so this line
+                survives the narrow column at 375 without wrapping. */}
             <p className="mt-1 text-[11.5px] uppercase tracking-[0.14em] text-[var(--color-gold-soft)]">
               Chinese BBQ &amp; Lounge
             </p>
@@ -81,8 +78,10 @@ export function Hero() {
             className="absolute -bottom-2 -right-2 h-4 w-4 -rotate-12 rounded-sm bg-[var(--color-vermillion)]"
           />
 
-          <p className="font-display text-balance text-[21px] font-semibold italic leading-snug">
-            “A warm table after class, work, and everything in between.”
+          {/* A statement, not a quotation: no quote marks, no italic, and a
+              lighter weight than the old slogan carried. */}
+          <p className="font-display text-balance text-[22px] font-medium leading-snug tracking-[-0.01em]">
+            Chinese BBQ made for sharing.
           </p>
           <div className="mt-4 flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-[var(--color-ink)]/70">
             <span className="flex items-center gap-1.5">
