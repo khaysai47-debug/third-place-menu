@@ -15,7 +15,8 @@ export function IconTile({ icon, label, sublabel, active, onClick, size = "md" }
     <button
       onClick={onClick}
       className={[
-        "group flex flex-col items-center gap-2 transition-transform active:scale-95",
+        "group flex flex-col items-center gap-2 transition-transform duration-150 ease-out active:scale-95",
+        "rounded-2xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-gold)]",
       ].join(" ")}
     >
       <span

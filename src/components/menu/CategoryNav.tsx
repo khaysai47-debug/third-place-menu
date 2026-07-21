@@ -19,7 +19,11 @@ interface Props {
 
 export function CategoryNav({ active, onChange }: Props) {
   return (
-    <nav className="sticky top-0 z-30 ink-grain/95 backdrop-blur supports-[backdrop-filter]:bg-[var(--color-charcoal)]/85 border-y border-[var(--color-gold)]/15">
+    // `ink-grain/95` was inert: the opacity modifier only applies to colour
+    // utilities, and .ink-grain is a plain custom utility, so the nav had no
+    // background at all without backdrop-filter support. Opaque base + the
+    // translucent supports- override is the standard pairing.
+    <nav className="sticky top-0 z-30 bg-[var(--color-charcoal)]/95 backdrop-blur supports-[backdrop-filter]:bg-[var(--color-charcoal)]/85 border-y border-[var(--color-gold)]/15">
       <div className="px-5 py-3">
         <div className="flex items-center justify-between mb-2">
           <p className="font-display text-[13px] tracking-[0.3em] uppercase text-[var(--color-gold-soft)]">

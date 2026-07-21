@@ -47,11 +47,13 @@ function AddButton({ onClick, disabled }: { onClick: () => void; disabled?: bool
       </span>
     );
   }
+  // Visual circle stays 36px; the transparent ::before lifts the hit area to
+  // 44x44 without changing card layout or rhythm.
   return (
     <button
       onClick={onClick}
       aria-label="Add to cart"
-      className="h-9 w-9 rounded-full bg-[var(--color-ink)] text-[var(--color-cream)] flex items-center justify-center shadow-[0_6px_14px_-6px_oklch(0_0_0/0.6)] active:scale-95 transition border border-[var(--color-gold)]/30 hover:bg-[var(--color-vermillion)]"
+      className="relative h-9 w-9 rounded-full bg-[var(--color-ink)] text-[var(--color-cream)] flex items-center justify-center shadow-[0_6px_14px_-6px_oklch(0_0_0/0.6)] active:scale-95 transition-[transform,background-color] duration-150 ease-out border border-[var(--color-gold)]/30 hover:bg-[var(--color-vermillion)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-gold)] before:absolute before:-inset-1 before:content-['']"
     >
       <PlusIcon className="h-4 w-4" />
     </button>
@@ -72,7 +74,7 @@ export function MenuItemCard({ item, variant = "compact", onAdd }: Props) {
         <div className="p-5 flex flex-col">
           {/* Eyebrow row: category on left, popular badge on right */}
           <div className="flex items-center justify-between gap-2">
-            <span className="text-[11px] uppercase tracking-[0.2em] text-[var(--color-ink)]/55">
+            <span className="text-[11px] uppercase tracking-[0.2em] text-[var(--color-ink)]/70">
               {item.category.replace("-", " ")}
             </span>
             {item.popular && (
@@ -102,7 +104,7 @@ export function MenuItemCard({ item, variant = "compact", onAdd }: Props) {
           )}
 
           {/* Description */}
-          <p className="mt-2.5 text-[13px] leading-relaxed text-[var(--color-ink)]/65 line-clamp-3">
+          <p className="mt-2.5 text-[13px] leading-relaxed text-[var(--color-ink)]/75 line-clamp-3">
             {item.descriptionEn}
           </p>
 
@@ -110,7 +112,7 @@ export function MenuItemCard({ item, variant = "compact", onAdd }: Props) {
           <div className="mt-4 flex items-center justify-between">
             <div className="flex items-baseline gap-2">
               <Price value={item.price} />
-              <span className="text-[10px] uppercase tracking-wider text-[var(--color-ink)]/45">
+              <span className="text-[11px] uppercase tracking-wider text-[var(--color-ink)]/70">
                 {item.unit}
               </span>
             </div>
@@ -138,7 +140,7 @@ export function MenuItemCard({ item, variant = "compact", onAdd }: Props) {
             <span className="flex-1 mx-1 border-b border-dotted border-[var(--color-ink)]/25 translate-y-[-3px]" />
             <Price value={item.price} />
           </div>
-          <div className="mt-0.5 flex items-center gap-2 text-[11px] text-[var(--color-ink)]/65">
+          <div className="mt-0.5 flex items-center gap-2 text-[11px] text-[var(--color-ink)]/75">
             <span className="uppercase tracking-wider">{item.unit}</span>
             {item.tags?.slice(0, 2).map((t) => (
               <span key={t} className={`px-1.5 py-px rounded-sm border text-[10px] ${tagColor(t)}`}>
@@ -174,13 +176,13 @@ export function MenuItemCard({ item, variant = "compact", onAdd }: Props) {
             </span>
           )}
         </div>
-        <p className="mt-0.5 text-[12px] leading-snug text-[var(--color-ink)]/55 line-clamp-1">
+        <p className="mt-0.5 text-[12px] leading-snug text-[var(--color-ink)]/70 line-clamp-1">
           {item.descriptionEn}
         </p>
         <div className="mt-1 flex items-center gap-1.5">
           <Price value={item.price} />
           {item.unit && (
-            <span className="text-[10px] uppercase tracking-wider text-[var(--color-ink)]/40">
+            <span className="text-[11px] uppercase tracking-wider text-[var(--color-ink)]/70">
               {item.unit}
             </span>
           )}

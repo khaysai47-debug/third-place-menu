@@ -44,10 +44,31 @@ function MenuPage() {
   const [orderType, setOrderType] = useState<OrderType>("dine-in");
   const menuSectionRef = useRef<HTMLDivElement>(null);
 
+  // Single scrolling pattern reused by the Popular tile and by category
+  // selection, so both behave identically. Honours reduced-motion.
+  const scrollToMenu = useCallback(() => {
+    menuSectionRef.current?.scrollIntoView({
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
+        ? "auto"
+        : "smooth",
+      block: "start",
+    });
+  }, []);
+
   const handlePopularClick = useCallback(() => {
     setActive("signature");
-    menuSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, []);
+    scrollToMenu();
+  }, [scrollToMenu]);
+
+  const handleCategoryChange = useCallback(
+    (id: MenuCategoryId) => {
+      setActive(id);
+      scrollToMenu();
+    },
+    [scrollToMenu],
+  );
+
+  const closeCheckout = useCallback(() => setCheckoutOpen(false), []);
   // Live "Availability Status" by menu item id; null until fetched.
   const [availability, setAvailability] = useState<ReadonlyMap<
     string,
@@ -145,6 +166,14 @@ function MenuPage() {
       return next;
     });
 
+  // One-tap removal — used by the sold-out row, which has no working stepper.
+  const removeItem = (id: string) =>
+    setCart((c) => {
+      const next = { ...c };
+      delete next[id];
+      return next;
+    });
+
   const clearCart = () => setCart({});
 
   // Cart rows resolve against the full local MENU so an item that went
@@ -169,8 +198,13 @@ function MenuPage() {
   const items = menu.filter((m) => m.category === active).sort((a, b) => a.order - b.order);
 
   return (
-    <div className="min-h-screen ink-grain">
-      <main className="mx-auto max-w-[680px] pb-32">
+    <div className="min-h-dvh ink-grain">
+      {/* The sticky cart is ~290px tall with a full preview, so the reserve
+          grows while it is on screen — otherwise it covers the last cards and
+          the footer, and covers more of them the more the customer orders. */}
+      <main
+        className={`mx-auto max-w-[680px] ${cartItems.length > 0 ? "pb-[19rem]" : "pb-32"}`}
+      >
         <Hero />
         <div className="mt-2">
           <ServiceTiles
@@ -188,7 +222,7 @@ function MenuPage() {
         )}
 
         <div className="mt-6" ref={menuSectionRef}>
-          <CategoryNav active={active} onChange={setActive} />
+          <CategoryNav active={active} onChange={handleCategoryChange} />
         </div>
 
         <SectionHeading
@@ -197,6 +231,20 @@ function MenuPage() {
           zh={CATEGORY_ZH[active]}
           blurb={activeCategory.blurb}
         />
+
+        {/* Every category block below renders nothing when a section is fully
+            sold out or hidden — without this the customer just gets a heading
+            over blank space, which reads as a failed load. */}
+        {items.length === 0 && (
+          <div className="px-5">
+            <p className="paper-grain rounded-xl border border-[var(--color-gold)]/25 px-4 py-5 text-center text-[13px] leading-relaxed text-[var(--color-ink)]/75">
+              暫時售罄 · Nothing in this section is available right now.
+              <span className="mt-1 block text-[12px] text-[var(--color-ink)]/60">
+                Please try another section, or ask our staff.
+              </span>
+            </p>
+          </div>
+        )}
 
         {active === "signature" && (
           <div className="px-5 space-y-4">
@@ -251,6 +299,7 @@ function MenuPage() {
         items={cartItems}
         onIncrease={increaseQty}
         onDecrease={decreaseQty}
+        onRemove={removeItem}
         onClear={clearCart}
         onCheckout={() => {
           if (!cartHasSoldOut) setCheckoutOpen(true);
@@ -260,7 +309,7 @@ function MenuPage() {
         <CheckoutDrawer
           items={cartItems}
           total={total}
-          onClose={() => setCheckoutOpen(false)}
+          onClose={closeCheckout}
           initialOrderType={orderType}
         />
       )}

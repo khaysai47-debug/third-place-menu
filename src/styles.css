@@ -44,6 +44,7 @@
   --color-cream: var(--cream);
   --color-vermillion: var(--vermillion);
   --color-vermillion-deep: var(--vermillion-deep);
+  --color-vermillion-text: var(--vermillion-text);
   --color-gold: var(--gold);
   --color-gold-soft: var(--gold-soft);
   --color-charcoal: var(--charcoal);
@@ -66,6 +67,11 @@
   --cream: oklch(0.96 0.018 85);
   --vermillion: oklch(0.55 0.19 27);          /* deep chinese red */
   --vermillion-deep: oklch(0.45 0.18 27);
+  /* Same hue as --vermillion, lifted for SMALL TEXT on the dark shell only.
+     --vermillion at 11-12px reads ~3.0:1 on charcoal, under WCAG AA; this
+     lands ~5.5:1. Fills and badges keep --vermillion so the accent is
+     unchanged — use this for validation/error copy, never as a background. */
+  --vermillion-text: oklch(0.72 0.15 27);
   --gold: oklch(0.72 0.11 75);                /* muted tan/gold */
   --gold-soft: oklch(0.82 0.06 78);
 

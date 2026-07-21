@@ -1,4 +1,4 @@
-import { type ReactElement, useState } from "react";
+import { type ReactElement, useEffect, useState } from "react";
 import { type OrderPayload, submitOrder } from "@/lib/orders";
 
 interface CartItem {
@@ -42,17 +42,37 @@ function makeOrderId(): string {
   return `TP-${date}-${time}`;
 }
 
-function Field({ error, children }: { error?: string; children: ReactElement }) {
+/** Persistent visible label + input + inline error. The label stays after the
+ *  field is filled — placeholders are examples only, never the label. */
+function Field({
+  label,
+  htmlFor,
+  error,
+  children,
+}: {
+  label: string;
+  htmlFor: string;
+  error?: string;
+  children: ReactElement;
+}) {
   return (
     <div>
+      <label
+        htmlFor={htmlFor}
+        className="mb-1.5 block text-[11px] uppercase tracking-[0.18em] text-[var(--color-cream)]/75"
+      >
+        {label}
+      </label>
       {children}
-      {error && <p className="mt-1 text-[11px] text-[var(--color-vermillion)]">{error}</p>}
+      {error && (
+        <p className="mt-1 text-[11px] text-[var(--color-vermillion-text)]">{error}</p>
+      )}
     </div>
   );
 }
 
 const inputClass =
-  "w-full bg-[var(--color-ink)] border border-[var(--color-gold)]/20 rounded-xl px-4 py-3 text-[14px] text-[var(--color-cream)] placeholder:text-[var(--color-cream)]/30 focus:outline-none focus:border-[var(--color-gold)]/50 transition";
+  "w-full bg-[var(--color-ink)] border border-[var(--color-gold)]/20 rounded-xl px-4 py-3 text-[14px] text-[var(--color-cream)] placeholder:text-[var(--color-cream)]/45 focus:outline-none focus:border-[var(--color-gold)]/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-gold)] transition-colors duration-150 ease-out";
 
 export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Props) {
   const [name, setName] = useState("");
@@ -76,6 +96,22 @@ export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Prop
 
   const deliveryFee = orderType === "delivery" ? DELIVERY_FEE : 0;
   const finalTotal = total + deliveryFee;
+
+  // Lock the page behind the sheet and wire Escape to close. Escape is ignored
+  // while a submit is in flight so the customer can't lose the confirmation
+  // for an order the server is already storing.
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !isSubmitting) onClose();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onClose, isSubmitting]);
 
   const clearError = (key: string) =>
     setErrors((e) => {
@@ -153,18 +189,21 @@ export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Prop
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end">
-      {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+      {/* Backdrop — entry only; closing stays instant. */}
+      <div
+        className="absolute inset-0 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200 motion-reduce:animate-none"
+        onClick={onClose}
+      />
 
       {/* Panel */}
-      <div className="relative mx-auto w-full max-w-[680px] bg-[var(--color-charcoal-soft)] rounded-t-3xl border-t border-x border-[var(--color-gold)]/20 max-h-[92vh] flex flex-col overflow-hidden shadow-[0_-20px_60px_-20px_oklch(0_0_0/0.7)]">
+      <div className="relative mx-auto w-full max-w-[680px] bg-[var(--color-charcoal-soft)] rounded-t-3xl border-t border-x border-[var(--color-gold)]/20 max-h-[92dvh] flex flex-col overflow-hidden shadow-[0_-20px_60px_-20px_oklch(0_0_0/0.7)] animate-in slide-in-from-bottom duration-300 ease-out motion-reduce:animate-none">
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-5 pb-4 border-b border-[var(--color-gold)]/15 shrink-0">
           <h2 className="font-display text-[22px] text-[var(--color-cream)]">Review Order</h2>
           <button
             onClick={onClose}
             aria-label="Close"
-            className="h-8 w-8 rounded-full bg-[var(--color-cream)]/10 text-[var(--color-cream)]/60 flex items-center justify-center text-[16px] hover:bg-[var(--color-cream)]/20 transition"
+            className="relative h-8 w-8 rounded-full bg-[var(--color-cream)]/10 text-[var(--color-cream)]/60 flex items-center justify-center text-[16px] hover:bg-[var(--color-cream)]/20 transition-colors duration-150 ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-gold)] before:absolute before:-inset-1.5 before:content-['']"
           >
             ✕
           </button>
@@ -271,7 +310,7 @@ export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Prop
 
               <button
                 onClick={onClose}
-                className="text-[12px] uppercase tracking-[0.2em] text-[var(--color-cream)]/40 hover:text-[var(--color-cream)]/70 transition"
+                className="relative text-[12px] uppercase tracking-[0.2em] text-[var(--color-cream)]/65 hover:text-[var(--color-cream)]/85 transition-colors duration-150 ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-gold)] before:absolute before:-inset-y-2.5 before:-inset-x-2 before:content-['']"
               >
                 Close
               </button>
@@ -343,7 +382,7 @@ export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Prop
                         setOrderType(type);
                         setErrors({});
                       }}
-                      className={`flex-1 py-2.5 rounded-xl text-[12px] uppercase tracking-[0.14em] border transition ${
+                      className={`flex-1 py-2.5 rounded-xl text-[12px] uppercase tracking-[0.14em] border transition-colors duration-150 ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-gold)] ${
                         orderType === type
                           ? "bg-[var(--color-vermillion)] border-[var(--color-vermillion)] text-[var(--color-cream)]"
                           : "bg-[var(--color-ink)] border-[var(--color-gold)]/20 text-[var(--color-cream)]/55 hover:border-[var(--color-gold)]/40"
@@ -356,10 +395,11 @@ export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Prop
 
                 {/* Table number — Dine In only */}
                 {orderType === "dine-in" && (
-                  <Field error={errors.tableNumber}>
+                  <Field label="Table number" htmlFor="checkout-table" error={errors.tableNumber}>
                     <input
+                      id="checkout-table"
                       type="text"
-                      placeholder="Table number"
+                      placeholder="e.g. 12"
                       value={tableNumber}
                       onChange={(e) => {
                         setTableNumber(e.target.value);
@@ -373,10 +413,11 @@ export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Prop
                 {/* Name & Phone — not shown for dine-in (table number is enough) */}
                 {orderType !== "dine-in" && (
                   <>
-                    <Field error={errors.name}>
+                    <Field label="Name" htmlFor="checkout-name" error={errors.name}>
                       <input
+                        id="checkout-name"
                         type="text"
-                        placeholder="Name"
+                        placeholder="e.g. Somchai"
                         value={name}
                         onChange={(e) => {
                           setName(e.target.value);
@@ -386,10 +427,11 @@ export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Prop
                       />
                     </Field>
 
-                    <Field error={errors.phone}>
+                    <Field label="Phone number" htmlFor="checkout-phone" error={errors.phone}>
                       <input
+                        id="checkout-phone"
                         type="tel"
-                        placeholder="Phone number"
+                        placeholder="e.g. 081 234 5678"
                         value={phone}
                         onChange={(e) => {
                           setPhone(e.target.value);
@@ -403,10 +445,15 @@ export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Prop
 
                 {/* Delivery address — Delivery only */}
                 {orderType === "delivery" && (
-                  <Field error={errors.address}>
+                  <Field
+                    label="Delivery address"
+                    htmlFor="checkout-address"
+                    error={errors.address}
+                  >
                     <input
+                      id="checkout-address"
                       type="text"
-                      placeholder="Delivery address"
+                      placeholder="e.g. 88 Soi Bangna 12, Bang Na"
                       value={address}
                       onChange={(e) => {
                         setAddress(e.target.value);
@@ -418,13 +465,16 @@ export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Prop
                 )}
 
                 {/* Notes */}
-                <textarea
-                  placeholder="Order notes (optional)"
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  rows={2}
-                  className={`${inputClass} resize-none`}
-                />
+                <Field label="Order notes (optional)" htmlFor="checkout-notes">
+                  <textarea
+                    id="checkout-notes"
+                    placeholder="e.g. less spicy, no peanuts"
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    rows={2}
+                    className={`${inputClass} resize-none`}
+                  />
+                </Field>
               </section>
             </>
           )}
@@ -434,14 +484,14 @@ export function CheckoutDrawer({ items, total, onClose, initialOrderType }: Prop
         {!success && (
           <div className="px-5 py-4 border-t border-[var(--color-gold)]/15 shrink-0 space-y-2">
             {submitError && (
-              <p className="text-[12px] text-[var(--color-vermillion)] text-center">
+              <p className="text-[12px] text-[var(--color-vermillion-text)] text-center">
                 {submitError}
               </p>
             )}
             <button
               onClick={handlePlaceOrder}
               disabled={isSubmitting}
-              className="w-full rounded-2xl bg-[var(--color-vermillion)] text-[var(--color-cream)] py-4 text-[18px] font-semibold shadow-[0_20px_40px_-18px_oklch(0.45_0.18_27/0.7)] border border-[var(--color-vermillion-deep)] active:scale-[0.99] transition disabled:opacity-60 disabled:cursor-not-allowed disabled:active:scale-100"
+              className="w-full rounded-2xl bg-[var(--color-vermillion)] text-[var(--color-cream)] py-4 text-[18px] font-semibold shadow-[0_20px_40px_-18px_oklch(0.45_0.18_27/0.7)] border border-[var(--color-vermillion-deep)] active:scale-[0.98] transition-transform duration-150 ease-out focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-gold)] disabled:opacity-60 disabled:cursor-not-allowed disabled:active:scale-100"
             >
               {isSubmitting ? "Sending Order…" : `Place Order · ฿${finalTotal.toLocaleString("en-US")}`}
             </button>
