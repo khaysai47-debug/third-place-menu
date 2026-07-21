@@ -35,8 +35,9 @@ interface Props {
 
 /**
  * The approved icon-tile section nav, with the redesign's travelling
- * indicator: one vermillion chip slides between category tiles instead of
- * six fills switching on and off.
+ * indicator: one thin gold frame with a vermillion seal slides between
+ * category tiles instead of six fills switching on and off. Same selection
+ * language as the service rail above it.
  *
  * Tile widths vary with their labels, so the chip's position is measured
  * rather than derived. Rect maths (not offsetLeft) keeps it correct inside a
@@ -116,14 +117,14 @@ export function CategoryRail({ active, onChange }: Props) {
         >
           <span
             aria-hidden
-            className={`pointer-events-none absolute left-0 top-0 z-10 flex h-14 w-14 items-center justify-center rounded-2xl border border-[var(--color-vermillion-deep)] bg-[var(--color-vermillion)] text-[var(--color-cream)] shadow-[0_6px_18px_-8px_oklch(0.45_0.18_27/0.6)] ${
+            className={`pointer-events-none absolute left-0 top-0 z-10 h-14 w-14 rounded-2xl border-2 border-[var(--color-gold)]/75 shadow-[0_0_0_3px_oklch(0.72_0.11_75/0.10)] ${
               placed
                 ? "transition-transform duration-[420ms] ease-[var(--ease-fluid)] motion-reduce:transition-none"
                 : ""
             }`}
             style={{ transform: `translateX(${chipX}px)` }}
           >
-            <span className="h-7 w-7">{ICONS[active]}</span>
+            <span className="absolute -right-1.5 -top-1.5 h-3 w-3 rotate-12 rounded-[2px] bg-[var(--color-vermillion)]" />
           </span>
 
           {CATEGORIES.map((c) => (

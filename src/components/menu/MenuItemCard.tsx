@@ -135,12 +135,16 @@ export function MenuItemCard({
     />
   ) : null;
 
-  // A vermillion hairline on the left edge marks everything already on the
-  // order, so the customer can scan what they have picked without opening
-  // the cart.
+  // A hairline on the left edge marks everything already on the order, so
+  // the customer can scan what they have picked without opening the cart.
+  // It rests in muted gold — a column of bright vermillion edges down a long
+  // section reads as alarm rather than confirmation — and flashes vermillion
+  // only for the moment the item joins the order before settling back.
   const cartEdge =
     qty > 0
-      ? " before:absolute before:inset-y-3 before:left-0 before:z-10 before:w-[3px] before:rounded-r-full before:bg-[var(--color-vermillion)] before:content-['']"
+      ? ` before:absolute before:inset-y-3 before:left-0 before:z-10 before:w-[2px] before:rounded-r-full before:transition-colors before:duration-[600ms] before:content-[''] ${
+          pulsing ? "before:bg-[var(--color-vermillion)]" : "before:bg-[var(--color-gold)]/50"
+        }`
       : "";
 
   const control = (

@@ -313,7 +313,9 @@ function MenuPage() {
         </footer>
       </main>
 
-      <CartTray count={cartCount} total={total} hasSoldOut={cartHasSoldOut} onOpen={openCheckout} />
+      {/* No total here on purpose: prices stay on the cards while browsing
+          and the full breakdown lives in the checkout sheet. */}
+      <CartTray count={cartCount} hasSoldOut={cartHasSoldOut} onOpen={openCheckout} />
 
       <CheckoutSheet
         open={checkoutOpen}

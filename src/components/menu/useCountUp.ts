@@ -13,8 +13,13 @@ export function useCountUp(value: number, duration = 420): number {
     const from = fromRef.current;
     if (from === value) return;
 
+    // Snap instead of tweening when there is nobody to watch it. rAF does
+    // not run in a hidden tab, so a tween started there would leave the
+    // figure frozen at a stale value — which matters more now that this
+    // drives an item count rather than a decorative total.
     if (
       typeof window === "undefined" ||
+      document.hidden ||
       window.matchMedia("(prefers-reduced-motion: reduce)").matches
     ) {
       fromRef.current = value;

@@ -19,10 +19,11 @@ interface Props {
 /**
  * The approved four-up service row: Dine In, Pick Up, Delivery, Popular.
  *
- * Selection is a vermillion chip that slides across the first three tiles.
- * It rides ABOVE the parchment boxes and carries a copy of the active icon,
- * so it stays visible while it travels past the tile in between — a chip
- * sliding underneath would be occluded by the opaque parchment it crosses.
+ * Selection is a thin gold frame that slides across the first three tiles,
+ * with a small vermillion seal pinned to its corner. Because the frame is
+ * transparent it rides ABOVE the parchment boxes without hiding them — the
+ * tile keeps its parchment surface and dark ink icon throughout, and the
+ * frame stays visible as it travels past the tile in between.
  *
  * Geometry: the grid carries no gap, so its cells and the chip's `w-1/4`
  * resolve against the same box and `translateX(index * 100%)` lands exactly.
@@ -39,8 +40,9 @@ export function ServiceRail({ orderType, onOrderTypeChange, onPopularClick }: Pr
           className="pointer-events-none absolute left-0 top-0 z-10 flex w-1/4 justify-center transition-transform duration-[380ms] ease-[var(--ease-fluid)] motion-reduce:transition-none"
           style={{ transform: `translateX(${index * 100}%)` }}
         >
-          <span className="flex h-16 w-16 items-center justify-center rounded-2xl border border-[var(--color-vermillion-deep)] bg-[var(--color-vermillion)] text-[var(--color-cream)] shadow-[0_6px_18px_-8px_oklch(0.45_0.18_27/0.6)]">
-            <span className="h-8 w-8">{ORDER_ICONS[orderType]}</span>
+          <span className="relative h-16 w-16 rounded-2xl border-2 border-[var(--color-gold)]/75 shadow-[0_0_0_3px_oklch(0.72_0.11_75/0.10)]">
+            {/* Seal, echoing the stamp corners on the hero quote card. */}
+            <span className="absolute -right-1.5 -top-1.5 h-3 w-3 rotate-12 rounded-[2px] bg-[var(--color-vermillion)]" />
           </span>
         </span>
 
