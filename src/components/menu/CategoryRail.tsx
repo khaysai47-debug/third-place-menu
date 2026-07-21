@@ -1,5 +1,23 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import type { ReactElement } from "react";
 import { CATEGORIES, type MenuCategoryId } from "@/data/menu";
+import { IconTile, TILE_PX } from "./IconTile";
+import {
+  NoodleBowlIcon,
+  SkewerFlameIcon,
+  SoupBowlIcon,
+  StarChopsticksIcon,
+  WokIcon,
+} from "./Icons";
+
+const ICONS: Record<MenuCategoryId, ReactElement> = {
+  signature: <StarChopsticksIcon className="h-full w-full" />,
+  skewers: <SkewerFlameIcon className="h-full w-full" />,
+  "skewers-veg": <SkewerFlameIcon className="h-full w-full" />,
+  "stir-fried": <WokIcon className="h-full w-full" />,
+  "rice-noodles": <NoodleBowlIcon className="h-full w-full" />,
+  soup: <SoupBowlIcon className="h-full w-full" />,
+};
 
 const CATEGORY_ZH: Record<MenuCategoryId, string> = {
   signature: "招牌",
@@ -16,26 +34,30 @@ interface Props {
 }
 
 /**
- * Chapter rail. One vermillion bar travels between chapters rather than six
- * underlines fading in and out — the movement is what says "you are here".
+ * The approved icon-tile section nav, with the redesign's travelling
+ * indicator: one vermillion chip slides between category tiles instead of
+ * six fills switching on and off.
  *
- * The bar is a 1px element scaled and translated, so both the position and
- * the width change ride on `transform` alone and stay on the compositor.
- * Widths are measured because the labels are real words, not equal cells.
+ * Tile widths vary with their labels, so the chip's position is measured
+ * rather than derived. Rect maths (not offsetLeft) keeps it correct inside a
+ * horizontally scrolled, padded container.
  */
 export function CategoryRail({ active, onChange }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
-  const itemsRef = useRef<Partial<Record<MenuCategoryId, HTMLButtonElement>>>({});
-  const [bar, setBar] = useState({ x: 0, w: 0 });
-  // The bar must not slide in from x=0 on first paint; it only animates once
+  const itemsRef = useRef<Partial<Record<MenuCategoryId, HTMLDivElement>>>({});
+  const [chipX, setChipX] = useState(0);
+  // The chip must not slide in from x=0 on first paint; it only animates once
   // it has been placed.
   const placedRef = useRef(false);
   const [placed, setPlaced] = useState(false);
 
   const measure = useCallback(() => {
+    const scroller = scrollerRef.current;
     const el = itemsRef.current[active];
-    if (!el) return;
-    setBar({ x: el.offsetLeft, w: el.offsetWidth });
+    if (!scroller || !el) return;
+    const a = el.getBoundingClientRect();
+    const b = scroller.getBoundingClientRect();
+    setChipX(a.left - b.left + scroller.scrollLeft + (a.width - TILE_PX.sm) / 2);
     if (!placedRef.current) {
       placedRef.current = true;
       setPlaced(true);
@@ -49,14 +71,14 @@ export function CategoryRail({ active, onChange }: Props) {
     if (!scroller || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(measure);
     observer.observe(scroller);
-    // The labels are set in a webfont, so their widths change once it swaps
-    // in. Without this the bar keeps its fallback-metric width until the
-    // customer happens to change chapter.
+    // The labels are set in a webfont, so tile widths change once it swaps
+    // in. Without this the chip keeps its fallback-metric offset until the
+    // customer happens to change section.
     void document.fonts?.ready.then(measure);
     return () => observer.disconnect();
   }, [measure]);
 
-  // Keep the active chapter reachable when it sits off-screen in the rail.
+  // Keep the active section reachable when it sits off-screen in the rail.
   // scrollLeft is set directly rather than via scrollIntoView, which would
   // also scroll the page vertically.
   useEffect(() => {
@@ -70,54 +92,59 @@ export function CategoryRail({ active, onChange }: Props) {
   }, [active]);
 
   return (
-    // Translucent chrome: the menu scrolls under it instead of the bar
-    // claiming an opaque strip. Opaque base first, because the opacity
-    // modifier alone does nothing without backdrop-filter support.
+    // Opaque base first: the opacity modifier alone does nothing without
+    // backdrop-filter support, which is what left the original nav
+    // transparent on browsers that lack it.
     <nav
       aria-label="Menu sections"
-      className="sticky top-0 z-30 border-b border-[var(--color-gold)]/15 bg-[var(--color-lacquer)] supports-[backdrop-filter]:bg-[var(--color-lacquer)]/80 supports-[backdrop-filter]:backdrop-blur-xl"
+      className="sticky top-0 z-30 border-y border-[var(--color-gold)]/15 bg-[var(--color-charcoal)]/95 backdrop-blur supports-[backdrop-filter]:bg-[var(--color-charcoal)]/85"
     >
-      <div
-        ref={scrollerRef}
-        className="relative flex gap-7 overflow-x-auto px-5 pt-3.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-      >
-        {CATEGORIES.map((c) => {
-          const isActive = active === c.id;
-          return (
-            <button
+      <div className="px-5 py-3">
+        <div className="mb-2 flex items-center justify-between">
+          <p className="font-display text-[13px] uppercase tracking-[0.3em] text-[var(--color-gold-soft)]">
+            Menu · 菜譜
+          </p>
+          <span className="divider-stamp mx-3 flex-1" />
+          <p className="text-[10px] uppercase tracking-[0.2em] text-[var(--color-muted-foreground)]">
+            {CATEGORIES.length} sections
+          </p>
+        </div>
+
+        <div
+          ref={scrollerRef}
+          className="relative -mx-1 flex gap-3 overflow-x-auto px-1 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          <span
+            aria-hidden
+            className={`pointer-events-none absolute left-0 top-0 z-10 flex h-14 w-14 items-center justify-center rounded-2xl border border-[var(--color-vermillion-deep)] bg-[var(--color-vermillion)] text-[var(--color-cream)] shadow-[0_6px_18px_-8px_oklch(0.45_0.18_27/0.6)] ${
+              placed
+                ? "transition-transform duration-[420ms] ease-[var(--ease-fluid)] motion-reduce:transition-none"
+                : ""
+            }`}
+            style={{ transform: `translateX(${chipX}px)` }}
+          >
+            <span className="h-7 w-7">{ICONS[active]}</span>
+          </span>
+
+          {CATEGORIES.map((c) => (
+            <div
               key={c.id}
               ref={(el) => {
                 if (el) itemsRef.current[c.id] = el;
               }}
-              onClick={() => onChange(c.id)}
-              aria-current={isActive ? "true" : undefined}
-              className={`shrink-0 pb-3 text-left transition-colors duration-200 ease-[var(--ease-fluid)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--color-gold)] ${
-                isActive ? "text-[var(--color-cream)]" : "text-[var(--color-cream)]/45"
-              }`}
+              className="shrink-0"
             >
-              <span className="block font-display text-[17px] leading-none whitespace-nowrap">
-                {c.nameEn}
-              </span>
-              <span
-                className={`mt-1.5 block text-[11px] leading-none tracking-[0.2em] transition-colors duration-200 ease-[var(--ease-fluid)] ${
-                  isActive
-                    ? "text-[var(--color-vermillion-text)]"
-                    : "text-[var(--color-gold-soft)]/35"
-                }`}
-              >
-                {CATEGORY_ZH[c.id]}
-              </span>
-            </button>
-          );
-        })}
-
-        <span
-          aria-hidden
-          className={`pointer-events-none absolute bottom-0 left-0 h-[2px] w-px origin-left bg-[var(--color-vermillion)] ${
-            placed ? "transition-transform duration-[420ms] ease-[var(--ease-fluid)]" : ""
-          }`}
-          style={{ transform: `translateX(${bar.x}px) scaleX(${bar.w})` }}
-        />
+              <IconTile
+                size="sm"
+                icon={ICONS[c.id]}
+                label={c.nameEn}
+                sublabel={CATEGORY_ZH[c.id]}
+                active={active === c.id}
+                onClick={() => onChange(c.id)}
+              />
+            </div>
+          ))}
+        </div>
       </div>
     </nav>
   );

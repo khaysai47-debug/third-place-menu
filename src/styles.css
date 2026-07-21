@@ -50,11 +50,6 @@
   --color-charcoal: var(--charcoal);
   --color-charcoal-soft: var(--charcoal-soft);
 
-  /* Customer-menu only. Added rather than retuning --charcoal, which the
-     staff and owner dashboards are built on. */
-  --color-lacquer: var(--lacquer);
-  --color-lacquer-deep: var(--lacquer-deep);
-
   /* Motion curves. The built-in CSS easings are too weak to read as
      intentional; ease-in is never used because it delays the first frame —
      exactly the moment the customer is watching. */
@@ -86,11 +81,6 @@
   --vermillion-text: oklch(0.72 0.15 27);
   --gold: oklch(0.72 0.11 75);                /* muted tan/gold */
   --gold-soft: oklch(0.82 0.06 78);
-
-  /* Lacquer box — the customer shell sits below --charcoal so parchment
-     reads as lit paper rather than another grey panel. */
-  --lacquer: oklch(0.145 0.014 45);
-  --lacquer-deep: oklch(0.105 0.012 45);
 
   /* Shadcn semantic mapping (dark-ish app shell) */
   --background: var(--charcoal);
@@ -210,22 +200,8 @@
    ═══════════════════════════════════════════════════════════════════════ */
 
 @layer utilities {
-  /* Deep lacquer shell for the customer route. */
-  .tp-shell {
-    background-color: var(--color-lacquer);
-    background-image:
-      radial-gradient(oklch(1 0 0 / 0.022) 1px, transparent 1px),
-      radial-gradient(oklch(1 0 0 / 0.018) 1px, transparent 1px);
-    background-size: 4px 4px, 9px 9px;
-  }
-
-  /* Charcoal fill for elements that sit ON parchment (buttons, tiles). */
-  .tp-ink {
-    background-color: var(--color-ink);
-  }
-
-  /* Letterpress item codes and figures. Lining + tabular so a column of
-     prices aligns; the brand serif ships old-style figures that don't. */
+  /* Figures. Lining + tabular so a column of prices aligns; the brand serif
+     ships old-style figures that don't. */
   .tp-num {
     font-family: var(--font-sans);
     font-variant-numeric: lining-nums tabular-nums;
@@ -240,16 +216,15 @@
   }
 }
 
-/* ── Ember field ────────────────────────────────────────────────────────
-   Fixed, pointer-events-none layer. Fixed (not background-attachment,
-   which iOS Safari does not honour) so the glow stays put while the menu
-   scrolls over it, and so the gradients repaint once instead of per frame. */
+/* ── Ember glow ─────────────────────────────────────────────────────────
+   A warm charcoal-on-charcoal wash behind the hero only. It is absolutely
+   positioned at the top of the page rather than fixed, so everything below
+   the fold stays the plain charcoal of the approved design instead of
+   sitting on a permanently tinted backdrop. Vermillion and gold hues only. */
 .tp-ember {
   background-image:
-    radial-gradient(115% 55% at 50% -8%, oklch(0.46 0.14 33 / 0.34), transparent 64%),
-    radial-gradient(75% 42% at 90% 6%, oklch(0.66 0.10 78 / 0.14), transparent 72%),
-    radial-gradient(95% 55% at 6% 26%, oklch(0.40 0.10 28 / 0.16), transparent 74%),
-    radial-gradient(120% 70% at 50% 108%, oklch(0.34 0.08 30 / 0.28), transparent 70%);
+    radial-gradient(105% 46% at 50% -12%, oklch(0.48 0.13 33 / 0.20), transparent 64%),
+    radial-gradient(70% 34% at 88% 4%, oklch(0.66 0.10 78 / 0.07), transparent 72%);
 }
 
 /* ── Keyframes ─────────────────────────────────────────────────────────── */
@@ -344,8 +319,11 @@
 @keyframes tp-parallax-slow {
   to { transform: translateY(9%); opacity: 0.35; }
 }
+/* Tuned down from the taller editorial hero: the compact hero is roughly
+   half the height, so the same percentage drift would sink its quote card
+   into the clip edge almost immediately. */
 @keyframes tp-parallax-fast {
-  to { transform: translateY(26%); opacity: 0; }
+  to { transform: translateY(16%); opacity: 0; }
 }
 
 /* ── Reduced motion ────────────────────────────────────────────────────

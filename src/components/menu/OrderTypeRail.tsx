@@ -34,7 +34,7 @@ export function OrderTypeRail({ value, onChange, size = "lg" }: Props) {
     <div
       role="radiogroup"
       aria-label="Order type"
-      className="relative grid grid-cols-3 rounded-2xl border border-[var(--color-gold)]/20 bg-[var(--color-lacquer-deep)]/70"
+      className="relative grid grid-cols-3 rounded-2xl border border-[var(--color-gold)]/20 bg-[var(--color-ink)]"
     >
       <span
         aria-hidden

@@ -5,9 +5,11 @@ export type OrderType = "dine-in" | "pickup" | "delivery";
 
 export const ORDER_TYPES: readonly OrderType[] = ["dine-in", "pickup", "delivery"];
 
+/** Display labels only — the payload uses its own mapping, so wording here
+ *  is free to follow the approved menu ("Pick Up", not "Pickup"). */
 export const ORDER_TYPE_LABELS: Record<OrderType, string> = {
   "dine-in": "Dine In",
-  pickup: "Pickup",
+  pickup: "Pick Up",
   delivery: "Delivery",
 };
 

@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Hero } from "@/components/menu/Hero";
-import { OrderTypeRail } from "@/components/menu/OrderTypeRail";
+import { ServiceRail } from "@/components/menu/ServiceRail";
 import { CategoryRail } from "@/components/menu/CategoryRail";
 import { SectionHeading } from "@/components/menu/SectionHeading";
 import { MenuItemCard } from "@/components/menu/MenuItemCard";
@@ -48,7 +48,7 @@ function MenuPage() {
   const [orderType, setOrderType] = useState<OrderType>("dine-in");
   const menuSectionRef = useRef<HTMLDivElement>(null);
 
-  // Single scrolling pattern reused by the hero CTA and by category
+  // Single scrolling pattern reused by the Popular tile and by category
   // selection, so both behave identically. Honours reduced-motion.
   const scrollToMenu = useCallback(() => {
     menuSectionRef.current?.scrollIntoView({
@@ -57,8 +57,14 @@ function MenuPage() {
     });
   }, []);
 
-  // Changing chapter also returns to the top of the menu — otherwise a tap
-  // made while deep in a long chapter drops the customer into the middle of
+  // Popular is a shortcut into the Signature section, not an order type.
+  const handlePopularClick = useCallback(() => {
+    setActive("signature");
+    scrollToMenu();
+  }, [scrollToMenu]);
+
+  // Changing section also returns to the top of the menu — otherwise a tap
+  // made while deep in a long section drops the customer into the middle of
   // a shorter one.
   const handleCategoryChange = useCallback(
     (id: MenuCategoryId) => {
@@ -202,59 +208,71 @@ function MenuPage() {
   const activeCategory = CATEGORIES.find((c) => c.id === active)!;
   const items = menu.filter((m) => m.category === active).sort((a, b) => a.order - b.order);
 
+  // Skewers read as a price list, everything else as description-led cards.
+  // Signature leads with two feature plates.
+  const variantFor = (idx: number): "feature" | "row" | "compact" => {
+    if (active === "signature") return idx < 2 ? "feature" : "compact";
+    return active === "skewers" ? "row" : "compact";
+  };
+
   return (
-    <div className="relative min-h-dvh tp-shell">
-      {/* Ember field. Fixed and inert, so the glow stays put while the menu
-          travels over it and never repaints per scroll frame. */}
-      <div aria-hidden className="tp-ember pointer-events-none fixed inset-0 z-0" />
+    <div className="relative min-h-dvh ink-grain">
+      {/* Warm glow behind the hero only. Absolute rather than fixed, so
+          everything past the fold sits on plain charcoal instead of a
+          permanently tinted backdrop. */}
+      <div
+        aria-hidden
+        className="tp-ember pointer-events-none absolute inset-x-0 top-0 z-0 h-[70vh]"
+      />
 
-      {/* pb-32 clears the order tray (~76px plus the safe area) in every
-          state, so the footer is never hidden behind it. */}
+      {/* pb-32 clears the cart bar (~64px plus the safe area) in every state,
+          so the footer is never hidden behind it. */}
       <main className="relative z-10 mx-auto max-w-[680px] pb-32">
-        <Hero onEnter={scrollToMenu} />
+        <Hero />
 
-        <section className="px-5">
-          <p className="mb-3 text-[10.5px] uppercase tracking-[0.24em] text-[var(--color-gold-soft)]/55">
-            How are you eating with us?
-          </p>
-          <OrderTypeRail value={orderType} onChange={setOrderType} />
-        </section>
+        <div className="mt-2">
+          <ServiceRail
+            orderType={orderType}
+            onOrderTypeChange={setOrderType}
+            onPopularClick={handlePopularClick}
+          />
+        </div>
 
         {availabilityWarning && (
-          <p className="tp-rise-sm mx-5 mt-5 rounded-xl border border-[var(--color-gold)]/25 bg-[var(--color-lacquer-deep)]/70 px-4 py-2.5 text-center text-[12px] leading-relaxed text-[var(--color-gold-soft)]/80">
+          <p className="tp-rise-sm mx-5 mt-4 rounded-xl border border-[var(--color-gold)]/25 bg-[var(--color-charcoal-soft)]/60 px-4 py-2.5 text-center text-[12px] leading-relaxed text-[var(--color-gold-soft)]/80">
             即時供應狀態暫時無法更新 · Live availability couldn't refresh — a few items may have
             just sold out. Staff will confirm your order.
           </p>
         )}
 
-        <div className="mt-9" ref={menuSectionRef}>
+        <div className="mt-6" ref={menuSectionRef}>
           <CategoryRail active={active} onChange={handleCategoryChange} />
         </div>
 
-        {/* Keyed on the chapter so every card remounts and replays its
-            entrance — the chapter change reads as turning a page rather than
+        {/* Keyed on the section so every card remounts and replays its
+            entrance — the section change reads as turning a page rather than
             as content silently swapping underneath the heading. */}
         <div key={active}>
           <SectionHeading
+            eyebrow={active === "signature" ? "Chef's Table" : "Section"}
             title={activeCategory.nameEn}
             zh={CATEGORY_ZH[active]}
             blurb={activeCategory.blurb}
-            count={items.length}
           />
 
-          {/* Without this a fully sold-out or hidden chapter is just a heading
+          {/* Without this a fully sold-out or hidden section is just a heading
               over blank space, which reads as a failed load. */}
           {items.length === 0 ? (
             <div className="px-5">
-              <p className="tp-rise rounded-2xl border border-dashed border-[var(--color-gold)]/30 px-4 py-8 text-center text-[13.5px] leading-relaxed text-[var(--color-cream)]/55">
+              <p className="tp-rise paper-grain rounded-xl border border-[var(--color-gold)]/25 px-4 py-5 text-center text-[13px] leading-relaxed text-[var(--color-ink)]/75">
                 暫時售罄 · Nothing in this section is available right now.
-                <span className="mt-1.5 block text-[12.5px] text-[var(--color-cream)]/35">
+                <span className="mt-1 block text-[12px] text-[var(--color-ink)]/60">
                   Please try another section, or ask our staff.
                 </span>
               </p>
             </div>
           ) : (
-            <div className="space-y-3 px-5">
+            <div className={`px-5 ${active === "signature" ? "space-y-4" : "space-y-2.5"}`}>
               {items.map((item, idx) => (
                 <div
                   key={item.id}
@@ -265,7 +283,7 @@ function MenuPage() {
                 >
                   <MenuItemCard
                     item={item}
-                    variant={active === "signature" && idx < 2 ? "feature" : "list"}
+                    variant={variantFor(idx)}
                     qty={cart[item.id] ?? 0}
                     onAdd={addToCart}
                     onIncrease={increaseQty}
@@ -277,18 +295,19 @@ function MenuPage() {
           )}
         </div>
 
-        <footer className="mt-16 px-5 text-center">
+        {/* Footer mark */}
+        <footer className="mt-14 px-5 text-center">
           <div className="flex items-center justify-center gap-3">
-            <span className="h-px w-12 bg-[var(--color-gold)]/35" />
-            <span className="font-display text-[15px] tracking-[0.4em] text-[var(--color-gold-soft)]/80">
+            <span className="h-px w-12 bg-[var(--color-gold)]/40" />
+            <span className="font-display text-[15px] tracking-[0.4em] text-[var(--color-gold-soft)]">
               第三空間
             </span>
-            <span className="h-px w-12 bg-[var(--color-gold)]/35" />
+            <span className="h-px w-12 bg-[var(--color-gold)]/40" />
           </div>
-          <p className="mt-3 text-[10.5px] uppercase tracking-[0.24em] text-[var(--color-cream)]/40">
+          <p className="mt-3 text-[11px] uppercase tracking-[0.22em] text-[var(--color-muted-foreground)]">
             The Third Place · Chinese BBQ &amp; Lounge
           </p>
-          <p className="mt-1.5 text-[11px] text-[var(--color-cream)]/30">
+          <p className="mt-1 text-[11px] text-[var(--color-muted-foreground)]">
             Near Assumption University · Powered by Atlas
           </p>
         </footer>

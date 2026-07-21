@@ -87,7 +87,7 @@ function Field({
 }
 
 const inputClass =
-  "w-full rounded-xl border border-[var(--color-gold)]/20 bg-[var(--color-lacquer-deep)] px-4 py-3.5 text-[15px] text-[var(--color-cream)] placeholder:text-[var(--color-cream)]/40 transition-colors duration-150 ease-[var(--ease-fluid)] focus:border-[var(--color-gold)]/55 focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-gold)]";
+  "w-full rounded-xl border border-[var(--color-gold)]/20 bg-[var(--color-ink)] px-4 py-3.5 text-[15px] text-[var(--color-cream)] placeholder:text-[var(--color-cream)]/40 transition-colors duration-150 ease-[var(--ease-fluid)] focus:border-[var(--color-gold)]/55 focus:outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-gold)]";
 
 function LineStepper({
   item,
@@ -99,7 +99,7 @@ function LineStepper({
   onDecrease: (id: string) => void;
 }) {
   return (
-    <div className="flex shrink-0 items-center gap-0.5 rounded-full border border-[var(--color-gold)]/20 bg-[var(--color-lacquer-deep)]">
+    <div className="flex shrink-0 items-center gap-0.5 rounded-full border border-[var(--color-gold)]/20 bg-[var(--color-ink)]">
       <button
         onClick={() => onDecrease(item.id)}
         aria-label={`Remove one ${item.name}`}
@@ -310,7 +310,7 @@ function CheckoutForm({
 
           {confirmedOrderId && (
             <p
-              className="tp-rise mt-4 rounded-full border border-[var(--color-gold)]/25 bg-[var(--color-lacquer-deep)]/70 px-4 py-1.5 text-[12px] text-[var(--color-cream)]/55"
+              className="tp-rise mt-4 rounded-full border border-[var(--color-gold)]/25 bg-[var(--color-ink)]/60 px-4 py-1.5 text-[12px] text-[var(--color-cream)]/55"
               style={{ ["--i" as string]: 8 }}
             >
               Order <span className="tp-num text-[var(--color-cream)]/85">{confirmedOrderId}</span>
@@ -330,7 +330,7 @@ function CheckoutForm({
 
           {orderType === "dine-in" && tableNumber.trim() && (
             <div
-              className="tp-rise mt-4 inline-flex items-baseline gap-2 rounded-full border border-[var(--color-gold)]/25 bg-[var(--color-lacquer-deep)]/70 px-4 py-2 text-[13px] text-[var(--color-cream)]/80"
+              className="tp-rise mt-4 inline-flex items-baseline gap-2 rounded-full border border-[var(--color-gold)]/25 bg-[var(--color-ink)]/60 px-4 py-2 text-[13px] text-[var(--color-cream)]/80"
               style={{ ["--i" as string]: 10 }}
             >
               Table{" "}
@@ -371,7 +371,7 @@ function CheckoutForm({
         )}
 
         <div
-          className="tp-rise mx-auto mt-6 max-w-[420px] rounded-2xl border border-[var(--color-gold)]/15 bg-[var(--color-lacquer-deep)]/70 px-4 py-4 text-left"
+          className="tp-rise mx-auto mt-6 max-w-[420px] rounded-2xl border border-[var(--color-gold)]/15 bg-[var(--color-ink)]/60 px-4 py-4 text-left"
           style={{ ["--i" as string]: 12 }}
         >
           <h4 className="mb-3 text-[10px] uppercase tracking-[0.24em] text-[var(--color-cream)]/45">
@@ -498,7 +498,7 @@ function CheckoutForm({
           )}
 
           {items.length > 0 && (
-            <div className="mt-4 space-y-1.5 rounded-2xl border border-[var(--color-gold)]/15 bg-[var(--color-lacquer-deep)]/60 px-4 py-3.5">
+            <div className="mt-4 space-y-1.5 rounded-2xl border border-[var(--color-gold)]/15 bg-[var(--color-ink)]/60 px-4 py-3.5">
               <div className="flex items-baseline justify-between text-[12.5px] text-[var(--color-cream)]/55">
                 <span className="uppercase tracking-[0.14em]">Subtotal</span>
                 <span className="tp-num">฿{total.toLocaleString("en-US")}</span>
@@ -628,7 +628,7 @@ function CheckoutForm({
       </div>
 
       {/* ── Commit ────────────────────────────────────────────────────── */}
-      <div className="shrink-0 space-y-2.5 border-t border-[var(--color-gold)]/15 bg-[var(--color-lacquer)]/80 px-5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4">
+      <div className="shrink-0 space-y-2.5 border-t border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/85 px-5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4">
         {submitError && (
           <p className="tp-rise-sm text-center text-[12.5px] leading-relaxed text-[var(--color-vermillion-text)]">
             {submitError}
@@ -694,18 +694,18 @@ export function CheckoutSheet({
       repositionInputs
     >
       <Drawer.Portal>
-        <Drawer.Overlay className="fixed inset-0 z-50 bg-black/70 backdrop-blur-[3px]" />
+        <Drawer.Overlay className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" />
         <Drawer.Content
           aria-describedby={undefined}
-          className="fixed inset-x-0 bottom-0 z-50 mx-auto flex h-[92dvh] max-w-[680px] flex-col rounded-t-[26px] border-x border-t border-[var(--color-gold)]/22 bg-[var(--color-lacquer)] shadow-[0_-28px_70px_-24px_oklch(0_0_0/0.9)] outline-none"
+          className="fixed inset-x-0 bottom-0 z-50 mx-auto flex h-[92dvh] max-w-[680px] flex-col rounded-t-3xl border-x border-t border-[var(--color-gold)]/20 bg-[var(--color-charcoal-soft)] shadow-[0_-20px_60px_-20px_oklch(0_0_0/0.7)] outline-none"
         >
           {/* Grabber — the affordance that says this thing is draggable. */}
           <div className="mx-auto mt-3 h-1.5 w-11 shrink-0 rounded-full bg-[var(--color-cream)]/20" />
 
           <div className="flex shrink-0 items-start justify-between gap-3 px-5 pb-4 pt-4">
             <div>
-              <Drawer.Title className="tp-display text-[27px] text-[var(--color-cream)]">
-                Your order
+              <Drawer.Title className="font-display text-[22px] text-[var(--color-cream)]">
+                Review Order
               </Drawer.Title>
               <p className="tp-num mt-0.5 text-[11px] uppercase tracking-[0.2em] text-[var(--color-gold-soft)]/55">
                 訂單 · {count} {count === 1 ? "item" : "items"}
