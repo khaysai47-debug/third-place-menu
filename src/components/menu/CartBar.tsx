@@ -9,7 +9,6 @@ interface CartItem {
 
 interface Props {
   items: CartItem[];
-  total: number;
   onIncrease: (id: string) => void;
   onDecrease: (id: string) => void;
   onClear: () => void;
@@ -36,7 +35,7 @@ function QtyButton({
   );
 }
 
-export function CartBar({ items, total, onIncrease, onDecrease, onClear, onCheckout }: Props) {
+export function CartBar({ items, onIncrease, onDecrease, onClear, onCheckout }: Props) {
   const count = items.reduce((s, i) => s + i.qty, 0);
   const hasSoldOut = items.some((i) => i.soldOut);
 
@@ -74,9 +73,6 @@ export function CartBar({ items, total, onIncrease, onDecrease, onClear, onCheck
                     </QtyButton>
                   )}
                 </div>
-                <span className="staff-num text-[14px] text-[var(--color-gold-soft)] w-12 text-right shrink-0">
-                  ฿{item.subtotal}
-                </span>
               </div>
             ))}
           </div>
@@ -101,7 +97,9 @@ export function CartBar({ items, total, onIncrease, onDecrease, onClear, onCheck
             </span>
             <span className="flex flex-col items-start leading-tight">
               <span className="text-[11px] uppercase tracking-[0.2em] opacity-80">Your order</span>
-              <span className="staff-num text-[17px]">฿{total.toLocaleString()}</span>
+              <span className="staff-num text-[17px] uppercase tracking-[0.04em]">
+                {count} {count === 1 ? "item" : "items"}
+              </span>
             </span>
           </span>
           <span className="text-[12px] uppercase tracking-[0.22em] font-medium">

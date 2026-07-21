@@ -249,7 +249,6 @@ function MenuPage() {
 
       <CartBar
         items={cartItems}
-        total={total}
         onIncrease={increaseQty}
         onDecrease={decreaseQty}
         onClear={clearCart}
