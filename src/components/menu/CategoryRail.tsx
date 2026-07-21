@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import type { ReactElement } from "react";
 import { CATEGORIES, type MenuCategoryId } from "@/data/menu";
 import {
@@ -27,83 +27,52 @@ const CATEGORY_ZH: Record<MenuCategoryId, string> = {
   soup: "湯品",
 };
 
+/** Narrowest a column may get before the tray starts scrolling instead of
+ *  crushing the labels. Sized so "Signature", the widest unbreakable word,
+ *  still sits on one line. */
+const MIN_COLUMN_PX = 84;
+
 interface Props {
   active: MenuCategoryId;
   onChange: (id: MenuCategoryId) => void;
 }
 
-/** Shared by the chip and the buttons so the moving panel lands exactly on
- *  the label it is covering. Any padding change has to happen in one place. */
-const CELL = "flex flex-col items-center gap-1.5 px-3 pb-4 pt-3";
-
 /**
- * Sections as one shared tray with a parchment chip that slides beneath the
- * current one.
+ * Sections as one balanced segmented selector.
  *
- * Parchment rather than vermillion, deliberately: the service selector above
- * already carries a vermillion panel, and stacking two red blocks turns the
- * top of the page into a warning light. Parchment-on-charcoal is the
- * approved menu's core motif, and it separates "how you are eating" (a
- * decision, in red) from "where you are in the menu" (a position, in paper).
- * A short vermillion underline inside the chip keeps the accent present.
+ * Layout: six `minmax(84px, 1fr)` columns in a grid that is at least as wide
+ * as its scroller. Where there is room the columns share the width equally
+ * and the tray is filled edge to edge; where there is not they hold 84px and
+ * the tray scrolls. Nothing is ever crushed and no gap is left at the right.
  *
- * The chip rides IN FRONT and carries its own copy of the active icon and
- * labels in ink. Behind the buttons it would slide under cream text on
- * parchment during travel, which is unreadable; in front it simply covers
- * what it crosses and reads as a physical button gliding along the tray.
+ * Because every column is identical, the indicator needs no measurement at
+ * all: it is exactly `w-1/6` and steps by whole multiples of its own width.
+ * That removed the rect maths, the ResizeObserver and the font-ready
+ * re-measure this component used to carry, and it means only `transform`
+ * animates — never `width`.
  *
- * Widths follow the real label lengths, so the chip is measured rather than
- * derived, and animates `width` alongside `transform`. It is one absolutely
- * positioned element, so nothing else reflows.
+ * The indicator is background only. Every icon and label stays put; the
+ * parchment surface glides underneath them and the text simply changes
+ * colour, so no content is duplicated and nothing travels across its
+ * neighbours.
  */
 export function CategoryRail({ active, onChange }: Props) {
   const scrollerRef = useRef<HTMLDivElement>(null);
-  const itemsRef = useRef<Partial<Record<MenuCategoryId, HTMLButtonElement>>>({});
-  const [chip, setChip] = useState({ x: 0, w: 0 });
-  // The chip must not slide in from x=0 on first paint; it only animates once
-  // it has been placed.
-  const placedRef = useRef(false);
-  const [placed, setPlaced] = useState(false);
+  const index = CATEGORIES.findIndex((c) => c.id === active);
 
-  const measure = useCallback(() => {
-    const scroller = scrollerRef.current;
-    const el = itemsRef.current[active];
-    if (!scroller || !el) return;
-    const a = el.getBoundingClientRect();
-    const b = scroller.getBoundingClientRect();
-    setChip({ x: a.left - b.left + scroller.scrollLeft, w: a.width });
-    if (!placedRef.current) {
-      placedRef.current = true;
-      setPlaced(true);
-    }
-  }, [active]);
-
-  useLayoutEffect(measure, [measure]);
-
+  // Keep the active section reachable when the tray is scrolling. Derived
+  // from the column width rather than a per-item ref, since the columns are
+  // equal by construction. scrollLeft is set directly rather than via
+  // scrollIntoView, which would also scroll the page vertically.
   useEffect(() => {
     const scroller = scrollerRef.current;
-    if (!scroller || typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(measure);
-    observer.observe(scroller);
-    // The labels are set in a webfont, so cell widths change once it swaps
-    // in. Without this the chip keeps its fallback-metric size until the
-    // customer happens to change section.
-    void document.fonts?.ready.then(measure);
-    return () => observer.disconnect();
-  }, [measure]);
-
-  // Keep the active section reachable when it sits off-screen in the tray.
-  // scrollLeft is set directly rather than via scrollIntoView, which would
-  // also scroll the page vertically.
-  useEffect(() => {
-    const scroller = scrollerRef.current;
-    const el = itemsRef.current[active];
-    if (!scroller || !el) return;
+    if (!scroller) return;
+    const column = scroller.scrollWidth / CATEGORIES.length;
     scroller.scrollTo({
-      left: el.offsetLeft - scroller.clientWidth / 2 + el.offsetWidth / 2,
+      left: index * column - scroller.clientWidth / 2 + column / 2,
       behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
     });
-  }, [active]);
+  }, [index]);
 
   return (
     // Opaque base first: the opacity modifier alone does nothing without
@@ -127,59 +96,64 @@ export function CategoryRail({ active, onChange }: Props) {
         <div className="rounded-2xl border border-[var(--color-gold)]/25 bg-[var(--color-ink)] p-1.5">
           <div
             ref={scrollerRef}
-            className="relative flex overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
-            <span
-              aria-hidden
-              className={`pointer-events-none absolute inset-y-0 left-0 z-20 ${
-                placed
-                  ? "transition-[transform,width] duration-[420ms] ease-[var(--ease-fluid)] motion-reduce:transition-none"
-                  : ""
-              }`}
-              style={{ transform: `translateX(${chip.x}px)`, width: `${chip.w}px` }}
+            <div
+              className="relative grid min-w-full"
+              style={{
+                gridTemplateColumns: `repeat(${CATEGORIES.length}, minmax(${MIN_COLUMN_PX}px, 1fr))`,
+              }}
             >
+              {/* Background only, and beneath the labels. Its border box is
+                  exactly one column, so a whole-number translate lands it on
+                  the cell every time. */}
               <span
-                className={`paper-grain relative h-full w-full rounded-xl border border-[var(--color-gold)]/45 text-[var(--color-ink)] shadow-[0_8px_20px_-12px_oklch(0_0_0/0.8)] ${CELL}`}
+                aria-hidden
+                className="pointer-events-none absolute inset-y-0 left-0 z-0 w-1/6 p-0.5 transition-transform duration-[400ms] ease-[var(--ease-fluid)] [will-change:transform] motion-reduce:transition-none"
+                style={{ transform: `translate3d(${index * 100}%, 0, 0)` }}
               >
-                <span className="h-7 w-7">{ICONS[active]}</span>
-                <span className="flex flex-col items-center leading-none">
-                  <span className="whitespace-nowrap text-[11px] font-medium uppercase tracking-wide">
-                    {CATEGORIES.find((c) => c.id === active)?.nameEn}
-                  </span>
-                  <span className="mt-1 text-[10px] text-[var(--color-ink)]/60">
-                    {CATEGORY_ZH[active]}
-                  </span>
+                <span className="paper-grain relative block h-full w-full rounded-xl border border-[var(--color-gold)]/45 shadow-[0_8px_20px_-12px_oklch(0_0_0/0.8)]">
+                  <span className="absolute bottom-1.5 left-1/2 h-[2px] w-5 -translate-x-1/2 rounded-full bg-[var(--color-vermillion)]" />
                 </span>
-                <span className="absolute bottom-1.5 left-1/2 h-[2px] w-5 -translate-x-1/2 rounded-full bg-[var(--color-vermillion)]" />
               </span>
-            </span>
 
-            {CATEGORIES.map((c) => {
-              const isActive = active === c.id;
-              return (
-                <button
-                  key={c.id}
-                  ref={(el) => {
-                    if (el) itemsRef.current[c.id] = el;
-                  }}
-                  onClick={() => onChange(c.id)}
-                  aria-current={isActive ? "true" : undefined}
-                  className={`${CELL} shrink-0 rounded-xl transition-[transform,color] duration-200 ease-[var(--ease-fluid)] active:scale-[0.96] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--color-gold)] ${
-                    isActive ? "text-[var(--color-cream)]" : "text-[var(--color-cream)]/70"
-                  }`}
-                >
-                  <span className="h-7 w-7">{ICONS[c.id]}</span>
-                  <span className="flex flex-col items-center leading-none">
-                    <span className="whitespace-nowrap text-[11px] font-medium uppercase tracking-wide">
-                      {c.nameEn}
+              {CATEGORIES.map((c) => {
+                const isActive = active === c.id;
+                return (
+                  <button
+                    key={c.id}
+                    onClick={() => onChange(c.id)}
+                    aria-current={isActive ? "true" : undefined}
+                    // The colour swap is deliberately asymmetric. Turning
+                    // active is delayed until the surface has almost arrived,
+                    // while turning inactive happens at once as it leaves —
+                    // otherwise ink text sits on the dark tray, or cream text
+                    // on parchment, for the length of the slide.
+                    className={`relative z-10 flex min-w-0 flex-col items-center justify-center gap-1.5 rounded-xl px-2 pb-4 pt-3 transition-colors duration-200 ease-[var(--ease-fluid)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--color-gold)] ${
+                      isActive
+                        ? "text-[var(--color-ink)] delay-200 motion-reduce:delay-0"
+                        : "text-[var(--color-cream)]/70 delay-0"
+                    }`}
+                  >
+                    <span className="h-7 w-7 shrink-0">{ICONS[c.id]}</span>
+                    <span className="flex flex-col items-center leading-none">
+                      <span className="text-balance text-center text-[11px] font-medium uppercase leading-[1.25] tracking-[0.02em]">
+                        {c.nameEn}
+                      </span>
+                      <span
+                        className={`mt-1 text-[10px] transition-colors duration-200 ease-[var(--ease-fluid)] ${
+                          isActive
+                            ? "text-[var(--color-ink)]/60 delay-200 motion-reduce:delay-0"
+                            : "text-[var(--color-cream)]/45 delay-0"
+                        }`}
+                      >
+                        {CATEGORY_ZH[c.id]}
+                      </span>
                     </span>
-                    <span className="mt-1 text-[10px] text-[var(--color-cream)]/45">
-                      {CATEGORY_ZH[c.id]}
-                    </span>
-                  </span>
-                </button>
-              );
-            })}
+                  </button>
+                );
+              })}
+            </div>
           </div>
         </div>
       </div>
