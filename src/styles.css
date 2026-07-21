@@ -50,6 +50,13 @@
   --color-charcoal: var(--charcoal);
   --color-charcoal-soft: var(--charcoal-soft);
 
+  /* Motion curves. The built-in CSS easings are too weak to read as
+     intentional; ease-in is never used because it delays the first frame —
+     exactly the moment the customer is watching. */
+  --ease-fluid: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-glide: cubic-bezier(0.77, 0, 0.175, 1);
+
   --font-display: "Cormorant Garamond", "Noto Serif SC", ui-serif, Georgia, serif;
   --font-sans: "Inter", "Noto Sans SC", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
@@ -184,3 +191,164 @@
   from { opacity: 0; transform: translateY(16px); }
   to   { opacity: 1; transform: none; }
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CUSTOMER MENU — "Lacquer Box" motion + surface system
+   Everything here is prefixed .tp- and used only by src/components/menu
+   and the customer route. Only transform/opacity are animated so the whole
+   system stays on the compositor.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+@layer utilities {
+  /* Figures. Lining + tabular so a column of prices aligns; the brand serif
+     ships old-style figures that don't. */
+  .tp-num {
+    font-family: var(--font-sans);
+    font-variant-numeric: lining-nums tabular-nums;
+  }
+
+  /* Display type gets negative tracking as it grows — letters read too far
+     apart at 40px+ with the tracking that suits 16px body copy. */
+  .tp-display {
+    font-family: var(--font-display);
+    letter-spacing: -0.02em;
+    line-height: 1.02;
+  }
+}
+
+/* ── Ember glow ─────────────────────────────────────────────────────────
+   A warm charcoal-on-charcoal wash behind the hero only. It is absolutely
+   positioned at the top of the page rather than fixed, so everything below
+   the fold stays the plain charcoal of the approved design instead of
+   sitting on a permanently tinted backdrop. Vermillion and gold hues only. */
+.tp-ember {
+  background-image:
+    radial-gradient(105% 46% at 50% -12%, oklch(0.48 0.13 33 / 0.20), transparent 64%),
+    radial-gradient(70% 34% at 88% 4%, oklch(0.66 0.10 78 / 0.07), transparent 72%);
+}
+
+/* ── Keyframes ─────────────────────────────────────────────────────────── */
+
+@keyframes tp-fade {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Entrance. Never from scale(0) — nothing in the real world appears from
+   nothing, so cards start at a visible size and settle. */
+@keyframes tp-rise {
+  from { opacity: 0; transform: translateY(16px) scale(0.985); }
+  to   { opacity: 1; transform: none; }
+}
+
+@keyframes tp-rise-sm {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* Chop-mark stamp: overshoot then settle, the way a seal is pressed. */
+@keyframes tp-seal {
+  0%   { opacity: 0; transform: scale(1.65) rotate(-11deg); }
+  55%  { opacity: 1; transform: scale(0.94) rotate(2.5deg); }
+  100% { opacity: 1; transform: none; }
+}
+
+/* Quantity / counter feedback. */
+@keyframes tp-bump {
+  0%   { transform: scale(1); }
+  38%  { transform: scale(1.3); }
+  100% { transform: scale(1); }
+}
+
+/* One-shot ring pulse fired when an item enters the cart. */
+@keyframes tp-ring {
+  from { opacity: 0.85; transform: scale(0.94); }
+  to   { opacity: 0; transform: scale(1.05); }
+}
+
+/* Gold sheen sweeping a surface — used once, on the success seal. */
+@keyframes tp-sheen {
+  from { transform: translateX(-130%) skewX(-18deg); }
+  to   { transform: translateX(260%) skewX(-18deg); }
+}
+
+/* Slow smoke drift behind the hero. ~14s, well clear of the 0.2Hz
+   oscillation band that triggers motion sickness. */
+@keyframes tp-drift {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50%      { transform: translate3d(-2.5%, -7px, 0); }
+}
+
+@keyframes tp-tray-in {
+  from { opacity: 0; transform: translateY(120%) scale(0.97); }
+  to   { opacity: 1; transform: none; }
+}
+
+/* ── Animation classes ─────────────────────────────────────────────────── */
+
+/* --i is the stagger index. 45ms is short enough that a 12-row category
+   still finishes well under half a second. */
+.tp-rise      { animation: tp-rise 520ms var(--ease-fluid) both; animation-delay: calc(var(--i, 0) * 45ms); }
+.tp-rise-sm   { animation: tp-rise-sm 420ms var(--ease-fluid) both; animation-delay: calc(var(--i, 0) * 45ms); }
+.tp-seal      { animation: tp-seal 620ms var(--ease-fluid) both; animation-delay: calc(var(--i, 0) * 45ms); }
+.tp-bump      { animation: tp-bump 320ms var(--ease-fluid); }
+.tp-ring      { animation: tp-ring 620ms var(--ease-fluid) forwards; }
+.tp-sheen     { animation: tp-sheen 1100ms var(--ease-glide) 260ms both; }
+.tp-sheen-loop{ animation: tp-sheen 1300ms var(--ease-glide) infinite; }
+.tp-drift     { animation: tp-drift 14s ease-in-out infinite; }
+.tp-tray-in   { animation: tp-tray-in 420ms var(--ease-drawer) both; }
+
+/* ── Scroll-driven hero parallax ────────────────────────────────────────
+   Native scroll timelines: no scroll listener, no rAF, runs off the main
+   thread. Unsupported browsers simply get a static hero, which is a fine
+   floor rather than a broken one. */
+@supports (animation-timeline: scroll()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .tp-parallax-slow,
+    .tp-parallax-fast {
+      animation: linear both;
+      animation-timeline: scroll(root block);
+      animation-range: 0 90vh;
+      will-change: transform;
+    }
+    .tp-parallax-slow { animation-name: tp-parallax-slow; }
+    .tp-parallax-fast { animation-name: tp-parallax-fast; }
+  }
+}
+
+@keyframes tp-parallax-slow {
+  to { transform: translateY(9%); opacity: 0.35; }
+}
+/* Tuned down from the taller editorial hero: the compact hero is roughly
+   half the height, so the same percentage drift would sink its quote card
+   into the clip edge almost immediately. */
+@keyframes tp-parallax-fast {
+  to { transform: translateY(16%); opacity: 0; }
+}
+
+/* ── Reduced motion ────────────────────────────────────────────────────
+   Gentler, not none: entrances collapse to a short cross-fade so content
+   still reads as arriving, while every position/scale change is dropped. */
+@media (prefers-reduced-motion: reduce) {
+  .tp-rise,
+  .tp-rise-sm,
+  .tp-seal,
+  .tp-tray-in {
+    animation: tp-fade 200ms ease both !important;
+    animation-delay: 0ms !important;
+  }
+  .tp-bump,
+  .tp-ring,
+  .tp-sheen,
+  .tp-sheen-loop,
+  .tp-drift {
+    animation: none !important;
+  }
+  .tp-parallax-slow,
+  .tp-parallax-fast {
+    animation: none !important;
+  }
+}
+
+/* Vaul's own transform is what drives the sheet, so nothing here may
+   fight it — the sheet's surface treatment is border/shadow only. */

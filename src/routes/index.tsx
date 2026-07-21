@@ -1,12 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Hero } from "@/components/menu/Hero";
-import { ServiceTiles } from "@/components/menu/ServiceTiles";
-import { CategoryNav } from "@/components/menu/CategoryNav";
+import { ServiceRail } from "@/components/menu/ServiceRail";
+import { CategoryRail } from "@/components/menu/CategoryRail";
 import { SectionHeading } from "@/components/menu/SectionHeading";
 import { MenuItemCard } from "@/components/menu/MenuItemCard";
-import { CartBar } from "@/components/menu/CartBar";
-import { CheckoutDrawer, type OrderType } from "@/components/menu/CheckoutDrawer";
+import { CartTray } from "@/components/menu/CartTray";
+import { CheckoutSheet } from "@/components/menu/CheckoutSheet";
+import type { OrderType } from "@/components/menu/orderType";
 import { CATEGORIES, MENU, type MenuCategoryId, type MenuItem } from "@/data/menu";
 import { getMenuAvailability, type MenuAvailabilityStatus } from "@/lib/menuAvailability";
 
@@ -17,12 +18,13 @@ export const Route = createFileRoute("/")({
       {
         name: "description",
         content:
-          "A warm table after class, work, and everything in between. Premium Chinese BBQ & lounge near Assumption University.",
+          "Chinese BBQ made for sharing. Browse the menu and order for dine-in, pickup, or delivery from The Third Place, near Assumption University.",
       },
       { property: "og:title", content: "The Third Place — Chinese BBQ & Lounge" },
       {
         property: "og:description",
-        content: "A warm table after class, work, and everything in between.",
+        content:
+          "Chinese BBQ made for sharing. Browse the menu and order for dine-in, pickup, or delivery from The Third Place.",
       },
     ],
   }),
@@ -41,6 +43,9 @@ const CATEGORY_ZH: Record<MenuCategoryId, string> = {
 function MenuPage() {
   const [active, setActive] = useState<MenuCategoryId>("signature");
   const [checkoutOpen, setCheckoutOpen] = useState(false);
+  // Incremented on every open so the checkout form remounts: one drawer
+  // session = one intended order = one idempotency key.
+  const [checkoutSession, setCheckoutSession] = useState(0);
   const [orderType, setOrderType] = useState<OrderType>("dine-in");
   const menuSectionRef = useRef<HTMLDivElement>(null);
 
@@ -48,18 +53,20 @@ function MenuPage() {
   // selection, so both behave identically. Honours reduced-motion.
   const scrollToMenu = useCallback(() => {
     menuSectionRef.current?.scrollIntoView({
-      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-        ? "auto"
-        : "smooth",
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
       block: "start",
     });
   }, []);
 
+  // Popular is a shortcut into the Signature section, not an order type.
   const handlePopularClick = useCallback(() => {
     setActive("signature");
     scrollToMenu();
   }, [scrollToMenu]);
 
+  // Changing section also returns to the top of the menu — otherwise a tap
+  // made while deep in a long section drops the customer into the middle of
+  // a shorter one.
   const handleCategoryChange = useCallback(
     (id: MenuCategoryId) => {
       setActive(id);
@@ -68,7 +75,11 @@ function MenuPage() {
     [scrollToMenu],
   );
 
-  const closeCheckout = useCallback(() => setCheckoutOpen(false), []);
+  const openCheckout = useCallback(() => {
+    setCheckoutSession((s) => s + 1);
+    setCheckoutOpen(true);
+  }, []);
+
   // Live "Availability Status" by menu item id; null until fetched.
   const [availability, setAvailability] = useState<ReadonlyMap<
     string,
@@ -191,23 +202,37 @@ function MenuPage() {
   );
 
   const cartHasSoldOut = cartItems.some((i) => i.soldOut);
+  const cartCount = cartItems.reduce((s, i) => s + i.qty, 0);
 
   const total = useMemo(() => cartItems.reduce((s, i) => s + i.subtotal, 0), [cartItems]);
 
   const activeCategory = CATEGORIES.find((c) => c.id === active)!;
   const items = menu.filter((m) => m.category === active).sort((a, b) => a.order - b.order);
 
+  // Skewers read as a price list, everything else as description-led cards.
+  // Signature leads with two feature plates.
+  const variantFor = (idx: number): "feature" | "row" | "compact" => {
+    if (active === "signature") return idx < 2 ? "feature" : "compact";
+    return active === "skewers" ? "row" : "compact";
+  };
+
   return (
-    <div className="min-h-dvh ink-grain">
-      {/* The sticky cart is ~290px tall with a full preview, so the reserve
-          grows while it is on screen — otherwise it covers the last cards and
-          the footer, and covers more of them the more the customer orders. */}
-      <main
-        className={`mx-auto max-w-[680px] ${cartItems.length > 0 ? "pb-[19rem]" : "pb-32"}`}
-      >
+    <div className="relative min-h-dvh ink-grain">
+      {/* Warm glow behind the hero only. Absolute rather than fixed, so
+          everything past the fold sits on plain charcoal instead of a
+          permanently tinted backdrop. */}
+      <div
+        aria-hidden
+        className="tp-ember pointer-events-none absolute inset-x-0 top-0 z-0 h-[70vh]"
+      />
+
+      {/* pb-32 clears the cart bar (~64px plus the safe area) in every state,
+          so the footer is never hidden behind it. */}
+      <main className="relative z-10 mx-auto max-w-[680px] pb-32">
         <Hero />
+
         <div className="mt-2">
-          <ServiceTiles
+          <ServiceRail
             orderType={orderType}
             onOrderTypeChange={setOrderType}
             onPopularClick={handlePopularClick}
@@ -215,67 +240,61 @@ function MenuPage() {
         </div>
 
         {availabilityWarning && (
-          <p className="mt-4 mx-5 rounded-xl border border-[var(--color-gold)]/25 bg-[var(--color-charcoal-soft)]/60 px-4 py-2.5 text-center text-[12px] leading-relaxed text-[var(--color-gold-soft)]/80">
+          <p className="tp-rise-sm mx-5 mt-4 rounded-xl border border-[var(--color-gold)]/25 bg-[var(--color-charcoal-soft)]/60 px-4 py-2.5 text-center text-[12px] leading-relaxed text-[var(--color-gold-soft)]/80">
             即時供應狀態暫時無法更新 · Live availability couldn't refresh — a few items may have
             just sold out. Staff will confirm your order.
           </p>
         )}
 
         <div className="mt-6" ref={menuSectionRef}>
-          <CategoryNav active={active} onChange={handleCategoryChange} />
+          <CategoryRail active={active} onChange={handleCategoryChange} />
         </div>
 
-        <SectionHeading
-          eyebrow={active === "signature" ? "Chef's Table" : "Section"}
-          title={activeCategory.nameEn}
-          zh={CATEGORY_ZH[active]}
-          blurb={activeCategory.blurb}
-        />
+        {/* Keyed on the section so every card remounts and replays its
+            entrance — the section change reads as turning a page rather than
+            as content silently swapping underneath the heading. */}
+        <div key={active}>
+          <SectionHeading
+            eyebrow={active === "signature" ? "Chef's Table" : "Section"}
+            title={activeCategory.nameEn}
+            zh={CATEGORY_ZH[active]}
+            blurb={activeCategory.blurb}
+          />
 
-        {/* Every category block below renders nothing when a section is fully
-            sold out or hidden — without this the customer just gets a heading
-            over blank space, which reads as a failed load. */}
-        {items.length === 0 && (
-          <div className="px-5">
-            <p className="paper-grain rounded-xl border border-[var(--color-gold)]/25 px-4 py-5 text-center text-[13px] leading-relaxed text-[var(--color-ink)]/75">
-              暫時售罄 · Nothing in this section is available right now.
-              <span className="mt-1 block text-[12px] text-[var(--color-ink)]/60">
-                Please try another section, or ask our staff.
-              </span>
-            </p>
-          </div>
-        )}
-
-        {active === "signature" && (
-          <div className="px-5 space-y-4">
-            {items.map((item, idx) =>
-              idx < 2 ? (
-                <MenuItemCard key={item.id} item={item} variant="feature" onAdd={addToCart} />
-              ) : (
-                <MenuItemCard key={item.id} item={item} variant="compact" onAdd={addToCart} />
-              ),
-            )}
-          </div>
-        )}
-
-        {active === "skewers" && (
-          <div className="px-5 space-y-2.5">
-            {items.map((item) => (
-              <MenuItemCard key={item.id} item={item} variant="row" onAdd={addToCart} />
-            ))}
-          </div>
-        )}
-
-        {(active === "skewers-veg" ||
-          active === "stir-fried" ||
-          active === "rice-noodles" ||
-          active === "soup") && (
-          <div className="px-5 space-y-2.5">
-            {items.map((item) => (
-              <MenuItemCard key={item.id} item={item} variant="compact" onAdd={addToCart} />
-            ))}
-          </div>
-        )}
+          {/* Without this a fully sold-out or hidden section is just a heading
+              over blank space, which reads as a failed load. */}
+          {items.length === 0 ? (
+            <div className="px-5">
+              <p className="tp-rise paper-grain rounded-xl border border-[var(--color-gold)]/25 px-4 py-5 text-center text-[13px] leading-relaxed text-[var(--color-ink)]/75">
+                暫時售罄 · Nothing in this section is available right now.
+                <span className="mt-1 block text-[12px] text-[var(--color-ink)]/60">
+                  Please try another section, or ask our staff.
+                </span>
+              </p>
+            </div>
+          ) : (
+            <div className={`px-5 ${active === "signature" ? "space-y-4" : "space-y-2.5"}`}>
+              {items.map((item, idx) => (
+                <div
+                  key={item.id}
+                  className="tp-rise"
+                  // Cap the stagger so the twelfth row is not half a second
+                  // behind the first.
+                  style={{ ["--i" as string]: Math.min(idx, 7) }}
+                >
+                  <MenuItemCard
+                    item={item}
+                    variant={variantFor(idx)}
+                    qty={cart[item.id] ?? 0}
+                    onAdd={addToCart}
+                    onIncrease={increaseQty}
+                    onDecrease={decreaseQty}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* Footer mark */}
         <footer className="mt-14 px-5 text-center">
@@ -286,7 +305,7 @@ function MenuPage() {
             </span>
             <span className="h-px w-12 bg-[var(--color-gold)]/40" />
           </div>
-          <p className="mt-3 text-[11px] tracking-[0.22em] uppercase text-[var(--color-muted-foreground)]">
+          <p className="mt-3 text-[11px] uppercase tracking-[0.22em] text-[var(--color-muted-foreground)]">
             The Third Place · Chinese BBQ &amp; Lounge
           </p>
           <p className="mt-1 text-[11px] text-[var(--color-muted-foreground)]">
@@ -295,24 +314,22 @@ function MenuPage() {
         </footer>
       </main>
 
-      <CartBar
+      {/* No total here on purpose: prices stay on the cards while browsing
+          and the full breakdown lives in the checkout sheet. */}
+      <CartTray count={cartCount} hasSoldOut={cartHasSoldOut} onOpen={openCheckout} />
+
+      <CheckoutSheet
+        open={checkoutOpen}
+        onOpenChange={setCheckoutOpen}
+        sessionKey={checkoutSession}
         items={cartItems}
+        total={total}
         onIncrease={increaseQty}
         onDecrease={decreaseQty}
         onRemove={removeItem}
         onClear={clearCart}
-        onCheckout={() => {
-          if (!cartHasSoldOut) setCheckoutOpen(true);
-        }}
+        initialOrderType={orderType}
       />
-      {checkoutOpen && (
-        <CheckoutDrawer
-          items={cartItems}
-          total={total}
-          onClose={closeCheckout}
-          initialOrderType={orderType}
-        />
-      )}
     </div>
   );
 }

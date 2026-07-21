@@ -1,10 +1,15 @@
+import { useEffect, useRef, useState } from "react";
 import type { MenuItem } from "@/data/menu";
-import { PlusIcon, SkewerFlameIcon } from "./Icons";
+import { MinusIcon, PlusIcon, SkewerFlameIcon } from "./Icons";
 
 interface Props {
   item: MenuItem;
   variant?: "feature" | "compact" | "row";
+  /** Quantity already in the cart. 0 collapses the control back to "add". */
+  qty: number;
   onAdd: (item: MenuItem) => void;
+  onIncrease: (id: string) => void;
+  onDecrease: (id: string) => void;
 }
 
 const tagColor = (tag: string) => {
@@ -27,75 +32,161 @@ const tagColor = (tag: string) => {
 function Price({ value }: { value?: number }) {
   if (value === undefined) {
     return (
-      <span className="text-[13px] leading-none text-[var(--color-ink)]/50 italic">
+      <span className="text-[13px] italic leading-none text-[var(--color-ink)]/50">
         Price · ask staff
       </span>
     );
   }
   return (
-    <span className="staff-num text-[15px] leading-none text-[var(--color-ink)]">
-      ฿{value}
+    <span className="tp-num text-[15px] leading-none text-[var(--color-ink)]">
+      ฿{value.toLocaleString("en-US")}
     </span>
   );
 }
 
-function AddButton({ onClick, disabled }: { onClick: () => void; disabled?: boolean }) {
-  if (disabled) {
+/**
+ * Add control. At qty 0 it is the approved ink circle; from qty 1 it becomes
+ * a stepper in place, so the whole quantity conversation happens on the card
+ * the customer is already looking at instead of down in the cart.
+ *
+ * Both states are 36px tall — the same height as the original add button —
+ * so a card does not change height when an item enters the order.
+ */
+function AddControl({ item, qty, onAdd, onIncrease, onDecrease }: Omit<Props, "variant">) {
+  if (!item.available) {
     return (
-      <span className="h-9 px-2.5 rounded-full bg-[var(--color-ink)]/15 text-[var(--color-ink)]/55 flex items-center justify-center text-[10px] uppercase tracking-[0.18em] border border-[var(--color-ink)]/15">
+      <span className="flex h-9 shrink-0 items-center justify-center rounded-full border border-[var(--color-ink)]/15 bg-[var(--color-ink)]/15 px-2.5 text-[10px] uppercase tracking-[0.18em] text-[var(--color-ink)]/55">
         Sold out
       </span>
     );
   }
+
+  if (qty > 0) {
+    return (
+      <div className="flex h-9 shrink-0 items-center gap-0.5 rounded-full border border-[var(--color-gold)]/30 bg-[var(--color-ink)] px-1 text-[var(--color-cream)] shadow-[0_6px_14px_-6px_oklch(0_0_0/0.6)] animate-in fade-in zoom-in-95 duration-200 motion-reduce:animate-none">
+        <button
+          onClick={() => onDecrease(item.id)}
+          aria-label={`Remove one ${item.nameEn}`}
+          className="relative flex h-7 w-7 items-center justify-center rounded-full transition-[transform,background-color] duration-150 ease-[var(--ease-fluid)] hover:bg-[var(--color-cream)]/12 active:scale-90 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--color-gold)] before:absolute before:-inset-1.5 before:content-['']"
+        >
+          <MinusIcon className="h-3.5 w-3.5" />
+        </button>
+        {/* Remounting the figure on every change replays the bump, which is
+            the acknowledgement that the tap registered. */}
+        <span key={qty} className="tp-num tp-bump w-5 text-center text-[13px]">
+          {qty}
+        </span>
+        <button
+          onClick={() => onIncrease(item.id)}
+          aria-label={`Add another ${item.nameEn}`}
+          className="relative flex h-7 w-7 items-center justify-center rounded-full bg-[var(--color-vermillion)] transition-[transform,background-color] duration-150 ease-[var(--ease-fluid)] active:scale-90 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--color-gold)] before:absolute before:-inset-1.5 before:content-['']"
+        >
+          <PlusIcon className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    );
+  }
+
   // Visual circle stays 36px; the transparent ::before lifts the hit area to
   // 44x44 without changing card layout or rhythm.
   return (
     <button
-      onClick={onClick}
-      aria-label="Add to cart"
-      className="relative h-9 w-9 rounded-full bg-[var(--color-ink)] text-[var(--color-cream)] flex items-center justify-center shadow-[0_6px_14px_-6px_oklch(0_0_0/0.6)] active:scale-95 transition-[transform,background-color] duration-150 ease-out border border-[var(--color-gold)]/30 hover:bg-[var(--color-vermillion)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-gold)] before:absolute before:-inset-1 before:content-['']"
+      onClick={() => onAdd(item)}
+      aria-label={`Add ${item.nameEn} to your order`}
+      className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--color-gold)]/30 bg-[var(--color-ink)] text-[var(--color-cream)] shadow-[0_6px_14px_-6px_oklch(0_0_0/0.6)] transition-[transform,background-color] duration-150 ease-[var(--ease-fluid)] hover:bg-[var(--color-vermillion)] active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-gold)] before:absolute before:-inset-1 before:content-['']"
     >
       <PlusIcon className="h-4 w-4" />
     </button>
   );
 }
 
+/** Fires a single vermillion ring on the card the moment it enters the cart. */
+function useAddPulse(qty: number) {
+  const [pulsing, setPulsing] = useState(false);
+  const previous = useRef(qty);
 
-export function MenuItemCard({ item, variant = "compact", onAdd }: Props) {
+  useEffect(() => {
+    const wasEmpty = previous.current === 0;
+    previous.current = qty;
+    if (!wasEmpty || qty === 0) return;
+    setPulsing(true);
+    const t = window.setTimeout(() => setPulsing(false), 640);
+    return () => window.clearTimeout(t);
+  }, [qty]);
+
+  return pulsing;
+}
+
+export function MenuItemCard({
+  item,
+  variant = "compact",
+  qty,
+  onAdd,
+  onIncrease,
+  onDecrease,
+}: Props) {
+  const pulsing = useAddPulse(qty);
   const soldOutClass = item.available ? "" : " opacity-70 saturate-[0.85]";
+
+  const ring = pulsing ? (
+    <span
+      aria-hidden
+      className="tp-ring pointer-events-none absolute -inset-px z-10 rounded-[inherit] border-2 border-[var(--color-vermillion)]"
+    />
+  ) : null;
+
+  // A hairline on the left edge marks everything already on the order, so
+  // the customer can scan what they have picked without opening the cart.
+  // It rests in muted gold — a column of bright vermillion edges down a long
+  // section reads as alarm rather than confirmation — and flashes vermillion
+  // only for the moment the item joins the order before settling back.
+  const cartEdge =
+    qty > 0
+      ? ` before:absolute before:inset-y-3 before:left-0 before:z-10 before:w-[2px] before:rounded-r-full before:transition-colors before:duration-[600ms] before:content-[''] ${
+          pulsing ? "before:bg-[var(--color-vermillion)]" : "before:bg-[var(--color-gold)]/50"
+        }`
+      : "";
+
+  const control = (
+    <AddControl
+      item={item}
+      qty={qty}
+      onAdd={onAdd}
+      onIncrease={onIncrease}
+      onDecrease={onDecrease}
+    />
+  );
 
   if (variant === "feature") {
     return (
       <article
-        className={`relative paper-grain rounded-2xl border border-[var(--color-gold)]/30 overflow-hidden shadow-[0_24px_50px_-30px_oklch(0_0_0/0.9)]${soldOutClass}`}
+        className={`paper-grain relative overflow-hidden rounded-2xl border border-[var(--color-gold)]/30 shadow-[0_24px_50px_-30px_oklch(0_0_0/0.9)]${soldOutClass}${cartEdge}`}
       >
+        {ring}
         {/* Warm accent line — signals a featured card without needing a photo */}
         <div className="h-[2px] bg-gradient-to-r from-[var(--color-vermillion)]/50 via-[var(--color-gold)]/40 to-transparent" />
-        <div className="p-5 flex flex-col">
-          {/* Eyebrow row: category on left, popular badge on right */}
+        <div className="flex flex-col p-5">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] uppercase tracking-[0.2em] text-[var(--color-ink)]/70">
               {item.category.replace("-", " ")}
             </span>
             {item.popular && (
-              <span className="text-[9px] uppercase tracking-[0.18em] bg-[var(--color-vermillion)]/10 text-[var(--color-vermillion)] border border-[var(--color-vermillion)]/40 px-1.5 py-0.5 rounded-sm">
+              <span className="rounded-sm border border-[var(--color-vermillion)]/40 bg-[var(--color-vermillion)]/10 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.18em] text-[var(--color-vermillion)]">
                 Best Seller
               </span>
             )}
           </div>
 
-          {/* Name — leads the card */}
-          <h3 className="mt-2 font-display font-semibold text-[22px] leading-[1.15] text-[var(--color-ink)]">
+          <h3 className="font-display mt-2 text-[22px] font-semibold leading-[1.15] text-[var(--color-ink)]">
             {item.nameEn}
           </h3>
 
-          {/* Tags below name, supporting role */}
           {item.tags && item.tags.length > 0 && (
             <div className="mt-1.5 flex flex-wrap gap-1">
               {item.tags.slice(0, 2).map((t) => (
                 <span
                   key={t}
-                  className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded-sm border ${tagColor(t)}`}
+                  className={`rounded-sm border px-1.5 py-0.5 text-[10px] uppercase tracking-wider ${tagColor(t)}`}
                 >
                   {t}
                 </span>
@@ -103,12 +194,10 @@ export function MenuItemCard({ item, variant = "compact", onAdd }: Props) {
             </div>
           )}
 
-          {/* Description */}
-          <p className="mt-2.5 text-[13px] leading-relaxed text-[var(--color-ink)]/75 line-clamp-3">
+          <p className="mt-2.5 line-clamp-3 text-[13px] leading-relaxed text-[var(--color-ink)]/75">
             {item.descriptionEn}
           </p>
 
-          {/* Bottom: price + unit inline on left, add button on right */}
           <div className="mt-4 flex items-center justify-between">
             <div className="flex items-baseline gap-2">
               <Price value={item.price} />
@@ -116,7 +205,7 @@ export function MenuItemCard({ item, variant = "compact", onAdd }: Props) {
                 {item.unit}
               </span>
             </div>
-            <AddButton onClick={() => onAdd(item)} disabled={!item.available} />
+            {control}
           </div>
         </div>
       </article>
@@ -127,56 +216,56 @@ export function MenuItemCard({ item, variant = "compact", onAdd }: Props) {
     // Printed-menu row: name ···dotted leader··· price
     return (
       <article
-        className={`paper-grain rounded-xl border border-[var(--color-gold)]/25 px-3.5 py-3 flex items-center gap-3${soldOutClass}`}
+        className={`paper-grain relative flex items-center gap-3 overflow-hidden rounded-xl border border-[var(--color-gold)]/25 px-3.5 py-3${soldOutClass}${cartEdge}`}
       >
-        <div className="h-11 w-11 rounded-lg bg-[var(--color-ink)] text-[var(--color-gold-soft)] flex items-center justify-center shrink-0">
+        {ring}
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[var(--color-ink)] text-[var(--color-gold-soft)]">
           <SkewerFlameIcon className="h-6 w-6" />
         </div>
-        <div className="flex-1 min-w-0">
+        <div className="min-w-0 flex-1">
           <div className="flex items-baseline justify-between gap-3">
-            <h4 className="font-display font-semibold text-[16px] text-[var(--color-ink)] truncate">
+            <h4 className="font-display truncate text-[16px] font-semibold text-[var(--color-ink)]">
               {item.nameEn}
             </h4>
-            <span className="flex-1 mx-1 border-b border-dotted border-[var(--color-ink)]/25 translate-y-[-3px]" />
+            <span className="mx-1 min-w-2 flex-1 translate-y-[-3px] border-b border-dotted border-[var(--color-ink)]/25" />
             <Price value={item.price} />
           </div>
           <div className="mt-0.5 flex items-center gap-2 text-[11px] text-[var(--color-ink)]/75">
             <span className="uppercase tracking-wider">{item.unit}</span>
             {item.tags?.slice(0, 2).map((t) => (
-              <span key={t} className={`px-1.5 py-px rounded-sm border text-[10px] ${tagColor(t)}`}>
+              <span key={t} className={`rounded-sm border px-1.5 py-px text-[10px] ${tagColor(t)}`}>
                 {t}
               </span>
             ))}
           </div>
         </div>
-        <AddButton onClick={() => onAdd(item)} disabled={!item.available} />
+        {control}
       </article>
     );
   }
 
-  // compact — flat row layout, no large image block
+  // compact — icon tile, name, description, price
   return (
     <article
-      className={`paper-grain rounded-xl border border-[var(--color-gold)]/25 px-3.5 py-3 flex items-center gap-3${soldOutClass}`}
+      className={`paper-grain relative flex items-center gap-3 overflow-hidden rounded-xl border border-[var(--color-gold)]/25 px-3.5 py-3${soldOutClass}${cartEdge}`}
     >
-      {/* Small icon tile, same height family as the row variant */}
-      <div className="h-11 w-11 rounded-xl bg-[var(--color-ink)] text-[var(--color-gold-soft)] flex items-center justify-center shrink-0">
+      {ring}
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--color-ink)] text-[var(--color-gold-soft)]">
         <SkewerFlameIcon className="h-6 w-6" />
       </div>
 
-      {/* Text block */}
-      <div className="flex-1 min-w-0">
+      <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-2">
-          <h4 className="font-display font-semibold text-[16px] leading-tight text-[var(--color-ink)]">
+          <h4 className="font-display text-[16px] font-semibold leading-tight text-[var(--color-ink)]">
             {item.nameEn}
           </h4>
           {item.popular && (
-            <span className="shrink-0 text-[9px] bg-[var(--color-vermillion)]/10 text-[var(--color-vermillion)] border border-[var(--color-vermillion)]/35 px-1.5 py-0.5 rounded-sm">
+            <span className="shrink-0 rounded-sm border border-[var(--color-vermillion)]/35 bg-[var(--color-vermillion)]/10 px-1.5 py-0.5 text-[9px] text-[var(--color-vermillion)]">
               ★
             </span>
           )}
         </div>
-        <p className="mt-0.5 text-[12px] leading-snug text-[var(--color-ink)]/70 line-clamp-1">
+        <p className="mt-0.5 line-clamp-1 text-[12px] leading-snug text-[var(--color-ink)]/70">
           {item.descriptionEn}
         </p>
         <div className="mt-1 flex items-center gap-1.5">
@@ -189,7 +278,7 @@ export function MenuItemCard({ item, variant = "compact", onAdd }: Props) {
         </div>
       </div>
 
-      <AddButton onClick={() => onAdd(item)} disabled={!item.available} />
+      {control}
     </article>
   );
 }
