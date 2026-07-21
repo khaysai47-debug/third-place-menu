@@ -28,9 +28,15 @@ const CATEGORY_ZH: Record<MenuCategoryId, string> = {
 };
 
 /** Narrowest a column may get before the tray starts scrolling instead of
- *  crushing the labels. Sized so "Signature", the widest unbreakable word,
- *  still sits on one line. */
-const MIN_COLUMN_PX = 84;
+ *  crushing the labels.
+ *
+ *  104px, not the 84px this started at, because the column's proportions are
+ *  the indicator's proportions. At 84 wide the cell was 104 tall — portrait —
+ *  and the parchment surface read as a card standing on the tray. At 104 wide
+ *  and ~75 tall it reads as a landscape plate lying in it. It also happens to
+ *  be the width the six columns settle at on desktop, so the shape is the
+ *  same on every screen; only the count you can see at once changes. */
+const MIN_COLUMN_PX = 104;
 
 interface Props {
   active: MenuCategoryId;
@@ -40,10 +46,11 @@ interface Props {
 /**
  * Sections as one balanced segmented selector.
  *
- * Layout: six `minmax(84px, 1fr)` columns in a grid that is at least as wide
- * as its scroller. Where there is room the columns share the width equally
- * and the tray is filled edge to edge; where there is not they hold 84px and
- * the tray scrolls. Nothing is ever crushed and no gap is left at the right.
+ * Layout: six `minmax(MIN_COLUMN_PX, 1fr)` columns in a grid that is at
+ * least as wide as its scroller. Where there is room the columns share the
+ * width equally and the tray is filled edge to edge; where there is not they
+ * hold the minimum and the tray scrolls. Nothing is ever crushed and no gap
+ * is left at the right.
  *
  * Because every column is identical, the indicator needs no measurement at
  * all: it is exactly `w-1/6` and steps by whole multiples of its own width.
@@ -98,8 +105,14 @@ export function CategoryRail({ active, onChange }: Props) {
             ref={scrollerRef}
             className="overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
           >
+            {/* `w-max` is load-bearing, not decoration. Without it the grid
+                box stays at the scroller's width while its columns overflow
+                it, so the indicator's `w-1/6` resolved against 306px instead
+                of 624px and came out at less than half a cell on mobile.
+                With `w-max` the box matches its columns, and `min-w-full`
+                still lets the fr tracks stretch to fill a wide tray. */}
             <div
-              className="relative grid min-w-full"
+              className="relative grid w-max min-w-full"
               style={{
                 gridTemplateColumns: `repeat(${CATEGORIES.length}, minmax(${MIN_COLUMN_PX}px, 1fr))`,
               }}
@@ -109,10 +122,14 @@ export function CategoryRail({ active, onChange }: Props) {
                   the cell every time. */}
               <span
                 aria-hidden
-                className="pointer-events-none absolute inset-y-0 left-0 z-0 w-1/6 p-0.5 transition-transform duration-[400ms] ease-[var(--ease-fluid)] [will-change:transform] motion-reduce:transition-none"
+                className="pointer-events-none absolute inset-y-0 left-0 z-0 w-1/6 p-0.5 transition-transform duration-[340ms] ease-[var(--ease-fluid)] [will-change:transform] motion-reduce:transition-none"
                 style={{ transform: `translate3d(${index * 100}%, 0, 0)` }}
               >
-                <span className="paper-grain relative block h-full w-full rounded-xl border border-[var(--color-gold)]/45 shadow-[0_8px_20px_-12px_oklch(0_0_0/0.8)]">
+                {/* Inlaid rather than floating: no drop shadow, a softer
+                    border and a smaller radius, with a single inset highlight
+                    along the top edge so the surface reads as set into the
+                    tray instead of resting on top of it. */}
+                <span className="paper-grain relative block h-full w-full rounded-lg border border-[var(--color-gold)]/25 shadow-[inset_0_1px_0_oklch(1_0_0/0.28)]">
                   <span className="absolute bottom-1.5 left-1/2 h-[2px] w-5 -translate-x-1/2 rounded-full bg-[var(--color-vermillion)]" />
                 </span>
               </span>
@@ -129,21 +146,27 @@ export function CategoryRail({ active, onChange }: Props) {
                     // while turning inactive happens at once as it leaves —
                     // otherwise ink text sits on the dark tray, or cream text
                     // on parchment, for the length of the slide.
-                    className={`relative z-10 flex min-w-0 flex-col items-center justify-center gap-1.5 rounded-xl px-2 pb-4 pt-3 transition-colors duration-200 ease-[var(--ease-fluid)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--color-gold)] ${
+                    className={`relative z-10 flex min-w-0 flex-col items-center justify-center gap-1 rounded-lg px-1.5 py-2.5 transition-colors duration-200 ease-[var(--ease-fluid)] focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--color-gold)] ${
                       isActive
-                        ? "text-[var(--color-ink)] delay-200 motion-reduce:delay-0"
+                        ? "text-[var(--color-ink)] delay-[170ms] motion-reduce:delay-0"
                         : "text-[var(--color-cream)]/70 delay-0"
                     }`}
                   >
-                    <span className="h-7 w-7 shrink-0">{ICONS[c.id]}</span>
+                    <span className="h-6 w-6 shrink-0">{ICONS[c.id]}</span>
                     <span className="flex flex-col items-center leading-none">
-                      <span className="text-balance text-center text-[11px] font-medium uppercase leading-[1.25] tracking-[0.02em]">
+                      {/* 10px keeps "Rice & Noodles", the longest label, on a
+                          single line inside the 104px column. Wrapping is
+                          still allowed as a graceful fallback if the webfont
+                          renders wider than expected — the grid equalises
+                          every cell, so it degrades in height, never by
+                          spilling into a neighbour. */}
+                      <span className="text-center text-[10px] font-medium uppercase leading-[1.2] tracking-[0.02em]">
                         {c.nameEn}
                       </span>
                       <span
-                        className={`mt-1 text-[10px] transition-colors duration-200 ease-[var(--ease-fluid)] ${
+                        className={`mt-0.5 text-[9.5px] transition-colors duration-200 ease-[var(--ease-fluid)] ${
                           isActive
-                            ? "text-[var(--color-ink)]/60 delay-200 motion-reduce:delay-0"
+                            ? "text-[var(--color-ink)]/60 delay-[170ms] motion-reduce:delay-0"
                             : "text-[var(--color-cream)]/45 delay-0"
                         }`}
                       >
