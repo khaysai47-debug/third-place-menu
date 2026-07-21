@@ -17,8 +17,13 @@ export function StarChopsticksIcon(props: SVGProps<SVGSVGElement>) {
     <svg {...base} {...props}>
       <path d="M14 38 L34 12" />
       <path d="M18 38 L38 12" />
-      <path d="M24 22 l1.8 3.6 4 .6 -2.9 2.8 .7 4 -3.6 -1.9 -3.6 1.9 .7 -4 -2.9 -2.8 4 -.6 z"
-        className="text-[var(--color-vermillion)]" stroke="currentColor" fill="currentColor" fillOpacity="0.85"/>
+      <path
+        d="M24 22 l1.8 3.6 4 .6 -2.9 2.8 .7 4 -3.6 -1.9 -3.6 1.9 .7 -4 -2.9 -2.8 4 -.6 z"
+        className="text-[var(--color-vermillion)]"
+        stroke="currentColor"
+        fill="currentColor"
+        fillOpacity="0.85"
+      />
     </svg>
   );
 }
@@ -34,8 +39,13 @@ export function SkewerFlameIcon(props: SVGProps<SVGSVGElement>) {
       <rect x="22" y="20" width="6" height="6" rx="1.2" transform="rotate(-18 25 23)" />
       <rect x="30" y="18" width="6" height="6" rx="1.2" transform="rotate(-18 33 21)" />
       {/* flame */}
-      <path d="M34 36 c-3 -3 -1 -6 1 -7 c-1 4 2 3 2 6 c0 2 -1.5 3 -3 1z"
-        className="text-[var(--color-vermillion)]" stroke="currentColor" fill="currentColor" fillOpacity="0.85"/>
+      <path
+        d="M34 36 c-3 -3 -1 -6 1 -7 c-1 4 2 3 2 6 c0 2 -1.5 3 -3 1z"
+        className="text-[var(--color-vermillion)]"
+        stroke="currentColor"
+        fill="currentColor"
+        fillOpacity="0.85"
+      />
     </svg>
   );
 }
@@ -65,8 +75,11 @@ export function SoupBowlIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...base} {...props}>
       <path d="M8 24 h32 a16 16 0 0 1 -32 0 z" />
-      <path d="M20 14 c-1 -3 2 -3 1 -6 M28 14 c-1 -3 2 -3 1 -6"
-        className="text-[var(--color-vermillion)]" stroke="currentColor"/>
+      <path
+        d="M20 14 c-1 -3 2 -3 1 -6 M28 14 c-1 -3 2 -3 1 -6"
+        className="text-[var(--color-vermillion)]"
+        stroke="currentColor"
+      />
       <path d="M6 38 h36" />
     </svg>
   );
@@ -106,27 +119,83 @@ export function TableChopsticksIcon(props: SVGProps<SVGSVGElement>) {
 export function StampStarIcon(props: SVGProps<SVGSVGElement>) {
   return (
     <svg {...base} {...props}>
-      <rect x="10" y="10" width="28" height="28" rx="3"
-        className="text-[var(--color-vermillion)]" stroke="currentColor" />
-      <path d="M24 17 l2.2 4.5 5 .7 -3.6 3.5 .85 5 -4.45 -2.35 -4.45 2.35 .85 -5 -3.6 -3.5 5 -.7 z"
-        className="text-[var(--color-vermillion)]" stroke="currentColor" fill="currentColor"/>
+      <rect
+        x="10"
+        y="10"
+        width="28"
+        height="28"
+        rx="3"
+        className="text-[var(--color-vermillion)]"
+        stroke="currentColor"
+      />
+      <path
+        d="M24 17 l2.2 4.5 5 .7 -3.6 3.5 .85 5 -4.45 -2.35 -4.45 2.35 .85 -5 -3.6 -3.5 5 -.7 z"
+        className="text-[var(--color-vermillion)]"
+        stroke="currentColor"
+        fill="currentColor"
+      />
     </svg>
   );
 }
 
 export function SmokeMotif(props: SVGProps<SVGSVGElement>) {
   return (
-    <svg viewBox="0 0 120 60" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" {...props}>
+    <svg
+      viewBox="0 0 120 60"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.2"
+      strokeLinecap="round"
+      {...props}
+    >
       <path d="M6 40 c10 -12 22 12 32 0 s22 -12 32 0 s22 12 32 0" />
-      <path d="M6 50 c10 -12 22 12 32 0 s22 -12 32 0 s22 12 32 0" opacity="0.5"/>
+      <path d="M6 50 c10 -12 22 12 32 0 s22 -12 32 0 s22 12 32 0" opacity="0.5" />
     </svg>
   );
 }
 
 export function PlusIcon(props: SVGProps<SVGSVGElement>) {
   return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" {...props}>
-      <path d="M12 5v14M5 12h14"/>
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      {...props}
+    >
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
+export function MinusIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      {...props}
+    >
+      <path d="M5 12h14" />
+    </svg>
+  );
+}
+
+export function ArrowRightIcon(props: SVGProps<SVGSVGElement>) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      {...props}
+    >
+      <path d="M4 12h15M13 6l6 6-6 6" />
     </svg>
   );
 }
