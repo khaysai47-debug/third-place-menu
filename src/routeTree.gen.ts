@@ -11,7 +11,21 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as StaffRouteImport } from './routes/staff'
 import { Route as OwnerRouteImport } from './routes/owner'
+import { Route as MRouteImport } from './routes/m'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiStaffUpdateStatusRouteImport } from './routes/api.staff.update-status'
+import { Route as ApiStaffUpdateMenuAvailabilityRouteImport } from './routes/api.staff.update-menu-availability'
+import { Route as ApiStaffOrdersRouteImport } from './routes/api.staff.orders'
+import { Route as ApiStaffMarkPaidRouteImport } from './routes/api.staff.mark-paid'
+import { Route as ApiStaffExpensesRouteImport } from './routes/api.staff.expenses'
+import { Route as ApiStaffCancelOrderRouteImport } from './routes/api.staff.cancel-order'
+import { Route as ApiStaffAddOrderRouteImport } from './routes/api.staff.add-order'
+import { Route as ApiStaffAddExpenseRouteImport } from './routes/api.staff.add-expense'
+import { Route as ApiOrderSubmitSessionRouteImport } from './routes/api.order.submit-session'
+import { Route as ApiOrderSubmitRouteImport } from './routes/api.order.submit'
+import { Route as ApiMenuSessionResolveRouteImport } from './routes/api.menu-session.resolve'
+import { Route as ApiAutomationOrderDetailsRouteImport } from './routes/api.automation.order-details'
+import { Route as ApiAutomationBotSessionRouteImport } from './routes/api.automation.bot-session'
 
 const StaffRoute = StaffRouteImport.update({
   id: '/staff',
@@ -23,40 +37,220 @@ const OwnerRoute = OwnerRouteImport.update({
   path: '/owner',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MRoute = MRouteImport.update({
+  id: '/m',
+  path: '/m',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiStaffUpdateStatusRoute = ApiStaffUpdateStatusRouteImport.update({
+  id: '/api/staff/update-status',
+  path: '/api/staff/update-status',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiStaffUpdateMenuAvailabilityRoute =
+  ApiStaffUpdateMenuAvailabilityRouteImport.update({
+    id: '/api/staff/update-menu-availability',
+    path: '/api/staff/update-menu-availability',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiStaffOrdersRoute = ApiStaffOrdersRouteImport.update({
+  id: '/api/staff/orders',
+  path: '/api/staff/orders',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiStaffMarkPaidRoute = ApiStaffMarkPaidRouteImport.update({
+  id: '/api/staff/mark-paid',
+  path: '/api/staff/mark-paid',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiStaffExpensesRoute = ApiStaffExpensesRouteImport.update({
+  id: '/api/staff/expenses',
+  path: '/api/staff/expenses',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiStaffCancelOrderRoute = ApiStaffCancelOrderRouteImport.update({
+  id: '/api/staff/cancel-order',
+  path: '/api/staff/cancel-order',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiStaffAddOrderRoute = ApiStaffAddOrderRouteImport.update({
+  id: '/api/staff/add-order',
+  path: '/api/staff/add-order',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiStaffAddExpenseRoute = ApiStaffAddExpenseRouteImport.update({
+  id: '/api/staff/add-expense',
+  path: '/api/staff/add-expense',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiOrderSubmitSessionRoute = ApiOrderSubmitSessionRouteImport.update({
+  id: '/api/order/submit-session',
+  path: '/api/order/submit-session',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiOrderSubmitRoute = ApiOrderSubmitRouteImport.update({
+  id: '/api/order/submit',
+  path: '/api/order/submit',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiMenuSessionResolveRoute = ApiMenuSessionResolveRouteImport.update({
+  id: '/api/menu-session/resolve',
+  path: '/api/menu-session/resolve',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ApiAutomationOrderDetailsRoute =
+  ApiAutomationOrderDetailsRouteImport.update({
+    id: '/api/automation/order-details',
+    path: '/api/automation/order-details',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiAutomationBotSessionRoute = ApiAutomationBotSessionRouteImport.update({
+  id: '/api/automation/bot-session',
+  path: '/api/automation/bot-session',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/m': typeof MRoute
   '/owner': typeof OwnerRoute
   '/staff': typeof StaffRoute
+  '/api/automation/bot-session': typeof ApiAutomationBotSessionRoute
+  '/api/automation/order-details': typeof ApiAutomationOrderDetailsRoute
+  '/api/menu-session/resolve': typeof ApiMenuSessionResolveRoute
+  '/api/order/submit': typeof ApiOrderSubmitRoute
+  '/api/order/submit-session': typeof ApiOrderSubmitSessionRoute
+  '/api/staff/add-expense': typeof ApiStaffAddExpenseRoute
+  '/api/staff/add-order': typeof ApiStaffAddOrderRoute
+  '/api/staff/cancel-order': typeof ApiStaffCancelOrderRoute
+  '/api/staff/expenses': typeof ApiStaffExpensesRoute
+  '/api/staff/mark-paid': typeof ApiStaffMarkPaidRoute
+  '/api/staff/orders': typeof ApiStaffOrdersRoute
+  '/api/staff/update-menu-availability': typeof ApiStaffUpdateMenuAvailabilityRoute
+  '/api/staff/update-status': typeof ApiStaffUpdateStatusRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/m': typeof MRoute
   '/owner': typeof OwnerRoute
   '/staff': typeof StaffRoute
+  '/api/automation/bot-session': typeof ApiAutomationBotSessionRoute
+  '/api/automation/order-details': typeof ApiAutomationOrderDetailsRoute
+  '/api/menu-session/resolve': typeof ApiMenuSessionResolveRoute
+  '/api/order/submit': typeof ApiOrderSubmitRoute
+  '/api/order/submit-session': typeof ApiOrderSubmitSessionRoute
+  '/api/staff/add-expense': typeof ApiStaffAddExpenseRoute
+  '/api/staff/add-order': typeof ApiStaffAddOrderRoute
+  '/api/staff/cancel-order': typeof ApiStaffCancelOrderRoute
+  '/api/staff/expenses': typeof ApiStaffExpensesRoute
+  '/api/staff/mark-paid': typeof ApiStaffMarkPaidRoute
+  '/api/staff/orders': typeof ApiStaffOrdersRoute
+  '/api/staff/update-menu-availability': typeof ApiStaffUpdateMenuAvailabilityRoute
+  '/api/staff/update-status': typeof ApiStaffUpdateStatusRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/m': typeof MRoute
   '/owner': typeof OwnerRoute
   '/staff': typeof StaffRoute
+  '/api/automation/bot-session': typeof ApiAutomationBotSessionRoute
+  '/api/automation/order-details': typeof ApiAutomationOrderDetailsRoute
+  '/api/menu-session/resolve': typeof ApiMenuSessionResolveRoute
+  '/api/order/submit': typeof ApiOrderSubmitRoute
+  '/api/order/submit-session': typeof ApiOrderSubmitSessionRoute
+  '/api/staff/add-expense': typeof ApiStaffAddExpenseRoute
+  '/api/staff/add-order': typeof ApiStaffAddOrderRoute
+  '/api/staff/cancel-order': typeof ApiStaffCancelOrderRoute
+  '/api/staff/expenses': typeof ApiStaffExpensesRoute
+  '/api/staff/mark-paid': typeof ApiStaffMarkPaidRoute
+  '/api/staff/orders': typeof ApiStaffOrdersRoute
+  '/api/staff/update-menu-availability': typeof ApiStaffUpdateMenuAvailabilityRoute
+  '/api/staff/update-status': typeof ApiStaffUpdateStatusRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/owner' | '/staff'
+  fullPaths:
+    | '/'
+    | '/m'
+    | '/owner'
+    | '/staff'
+    | '/api/automation/bot-session'
+    | '/api/automation/order-details'
+    | '/api/menu-session/resolve'
+    | '/api/order/submit'
+    | '/api/order/submit-session'
+    | '/api/staff/add-expense'
+    | '/api/staff/add-order'
+    | '/api/staff/cancel-order'
+    | '/api/staff/expenses'
+    | '/api/staff/mark-paid'
+    | '/api/staff/orders'
+    | '/api/staff/update-menu-availability'
+    | '/api/staff/update-status'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/owner' | '/staff'
-  id: '__root__' | '/' | '/owner' | '/staff'
+  to:
+    | '/'
+    | '/m'
+    | '/owner'
+    | '/staff'
+    | '/api/automation/bot-session'
+    | '/api/automation/order-details'
+    | '/api/menu-session/resolve'
+    | '/api/order/submit'
+    | '/api/order/submit-session'
+    | '/api/staff/add-expense'
+    | '/api/staff/add-order'
+    | '/api/staff/cancel-order'
+    | '/api/staff/expenses'
+    | '/api/staff/mark-paid'
+    | '/api/staff/orders'
+    | '/api/staff/update-menu-availability'
+    | '/api/staff/update-status'
+  id:
+    | '__root__'
+    | '/'
+    | '/m'
+    | '/owner'
+    | '/staff'
+    | '/api/automation/bot-session'
+    | '/api/automation/order-details'
+    | '/api/menu-session/resolve'
+    | '/api/order/submit'
+    | '/api/order/submit-session'
+    | '/api/staff/add-expense'
+    | '/api/staff/add-order'
+    | '/api/staff/cancel-order'
+    | '/api/staff/expenses'
+    | '/api/staff/mark-paid'
+    | '/api/staff/orders'
+    | '/api/staff/update-menu-availability'
+    | '/api/staff/update-status'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  MRoute: typeof MRoute
   OwnerRoute: typeof OwnerRoute
   StaffRoute: typeof StaffRoute
+  ApiAutomationBotSessionRoute: typeof ApiAutomationBotSessionRoute
+  ApiAutomationOrderDetailsRoute: typeof ApiAutomationOrderDetailsRoute
+  ApiMenuSessionResolveRoute: typeof ApiMenuSessionResolveRoute
+  ApiOrderSubmitRoute: typeof ApiOrderSubmitRoute
+  ApiOrderSubmitSessionRoute: typeof ApiOrderSubmitSessionRoute
+  ApiStaffAddExpenseRoute: typeof ApiStaffAddExpenseRoute
+  ApiStaffAddOrderRoute: typeof ApiStaffAddOrderRoute
+  ApiStaffCancelOrderRoute: typeof ApiStaffCancelOrderRoute
+  ApiStaffExpensesRoute: typeof ApiStaffExpensesRoute
+  ApiStaffMarkPaidRoute: typeof ApiStaffMarkPaidRoute
+  ApiStaffOrdersRoute: typeof ApiStaffOrdersRoute
+  ApiStaffUpdateMenuAvailabilityRoute: typeof ApiStaffUpdateMenuAvailabilityRoute
+  ApiStaffUpdateStatusRoute: typeof ApiStaffUpdateStatusRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -75,6 +269,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OwnerRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/m': {
+      id: '/m'
+      path: '/m'
+      fullPath: '/m'
+      preLoaderRoute: typeof MRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -82,13 +283,118 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/staff/update-status': {
+      id: '/api/staff/update-status'
+      path: '/api/staff/update-status'
+      fullPath: '/api/staff/update-status'
+      preLoaderRoute: typeof ApiStaffUpdateStatusRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/staff/update-menu-availability': {
+      id: '/api/staff/update-menu-availability'
+      path: '/api/staff/update-menu-availability'
+      fullPath: '/api/staff/update-menu-availability'
+      preLoaderRoute: typeof ApiStaffUpdateMenuAvailabilityRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/staff/orders': {
+      id: '/api/staff/orders'
+      path: '/api/staff/orders'
+      fullPath: '/api/staff/orders'
+      preLoaderRoute: typeof ApiStaffOrdersRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/staff/mark-paid': {
+      id: '/api/staff/mark-paid'
+      path: '/api/staff/mark-paid'
+      fullPath: '/api/staff/mark-paid'
+      preLoaderRoute: typeof ApiStaffMarkPaidRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/staff/expenses': {
+      id: '/api/staff/expenses'
+      path: '/api/staff/expenses'
+      fullPath: '/api/staff/expenses'
+      preLoaderRoute: typeof ApiStaffExpensesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/staff/cancel-order': {
+      id: '/api/staff/cancel-order'
+      path: '/api/staff/cancel-order'
+      fullPath: '/api/staff/cancel-order'
+      preLoaderRoute: typeof ApiStaffCancelOrderRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/staff/add-order': {
+      id: '/api/staff/add-order'
+      path: '/api/staff/add-order'
+      fullPath: '/api/staff/add-order'
+      preLoaderRoute: typeof ApiStaffAddOrderRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/staff/add-expense': {
+      id: '/api/staff/add-expense'
+      path: '/api/staff/add-expense'
+      fullPath: '/api/staff/add-expense'
+      preLoaderRoute: typeof ApiStaffAddExpenseRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/order/submit-session': {
+      id: '/api/order/submit-session'
+      path: '/api/order/submit-session'
+      fullPath: '/api/order/submit-session'
+      preLoaderRoute: typeof ApiOrderSubmitSessionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/order/submit': {
+      id: '/api/order/submit'
+      path: '/api/order/submit'
+      fullPath: '/api/order/submit'
+      preLoaderRoute: typeof ApiOrderSubmitRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/menu-session/resolve': {
+      id: '/api/menu-session/resolve'
+      path: '/api/menu-session/resolve'
+      fullPath: '/api/menu-session/resolve'
+      preLoaderRoute: typeof ApiMenuSessionResolveRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/automation/order-details': {
+      id: '/api/automation/order-details'
+      path: '/api/automation/order-details'
+      fullPath: '/api/automation/order-details'
+      preLoaderRoute: typeof ApiAutomationOrderDetailsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/automation/bot-session': {
+      id: '/api/automation/bot-session'
+      path: '/api/automation/bot-session'
+      fullPath: '/api/automation/bot-session'
+      preLoaderRoute: typeof ApiAutomationBotSessionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  MRoute: MRoute,
   OwnerRoute: OwnerRoute,
   StaffRoute: StaffRoute,
+  ApiAutomationBotSessionRoute: ApiAutomationBotSessionRoute,
+  ApiAutomationOrderDetailsRoute: ApiAutomationOrderDetailsRoute,
+  ApiMenuSessionResolveRoute: ApiMenuSessionResolveRoute,
+  ApiOrderSubmitRoute: ApiOrderSubmitRoute,
+  ApiOrderSubmitSessionRoute: ApiOrderSubmitSessionRoute,
+  ApiStaffAddExpenseRoute: ApiStaffAddExpenseRoute,
+  ApiStaffAddOrderRoute: ApiStaffAddOrderRoute,
+  ApiStaffCancelOrderRoute: ApiStaffCancelOrderRoute,
+  ApiStaffExpensesRoute: ApiStaffExpensesRoute,
+  ApiStaffMarkPaidRoute: ApiStaffMarkPaidRoute,
+  ApiStaffOrdersRoute: ApiStaffOrdersRoute,
+  ApiStaffUpdateMenuAvailabilityRoute: ApiStaffUpdateMenuAvailabilityRoute,
+  ApiStaffUpdateStatusRoute: ApiStaffUpdateStatusRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

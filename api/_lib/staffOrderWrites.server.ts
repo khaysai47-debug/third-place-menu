@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import process from "node:process";
 import { z } from "zod";
 
@@ -54,14 +55,33 @@ export function methodNotAllowed(): Response {
 }
 
 /**
+ * Constant-time shared-secret comparison. Plain `!==` on strings short-circuits
+ * on the first differing byte, leaking a prefix-matching oracle through timing;
+ * this uses the same crypto.timingSafeEqual the order-event JWT verifier
+ * already relies on (orderEventJwt.server.ts). The length pre-check is
+ * required (timingSafeEqual throws on unequal lengths) and is not itself a
+ * meaningful leak for a high-entropy secret.
+ * Shared with the Phase 3D bot-session secret check (botSession.server.ts).
+ */
+export function secretMatches(given: string | null, expected: string): boolean {
+  if (given === null) return false;
+  const a = Buffer.from(given, "utf8");
+  const b = Buffer.from(expected, "utf8");
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+/**
  * Checks the x-staff-secret header against STAFF_WRITE_SECRET.
  * Returns a Response to send (401/500) or null when authorized.
  * Also used by the staff order-intake route (orderIntake.server.ts).
+ * Phase 3D: the comparison is now timing-safe; status codes and messages are
+ * deliberately UNCHANGED.
  */
 export function checkStaffSecret(request: Request): Response | null {
   const secret = process.env.STAFF_WRITE_SECRET;
   if (!secret) return jsonError(500, "Server is not configured for staff writes.");
-  if (request.headers.get("x-staff-secret") !== secret) {
+  if (!secretMatches(request.headers.get("x-staff-secret"), secret)) {
     return jsonError(401, "Unauthorized.");
   }
   return null;

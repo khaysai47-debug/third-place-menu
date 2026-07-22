@@ -38,7 +38,11 @@ const MAX_QTY_PER_ITEM = 20;
 const MAX_CART_LINES = 30;
 const MAX_TOTAL_ITEMS = 60;
 
-const intakeBody = z.object({
+// Exported for the Phase 3D session-order route, which extends this schema
+// with a `token` field. It deliberately has NO channel/platform/source key —
+// zod strips unknown keys, so a browser sending one is silently discarded
+// before any handler sees it.
+export const intakeBody = z.object({
   requestId: z
     .string()
     .min(8)
@@ -65,6 +69,128 @@ const intakeBody = z.object({
     .max(MAX_CART_LINES),
 });
 
+export type IntakeInput = z.infer<typeof intakeBody>;
+
+/** Server-normalized intake, ready for the RPC. Money is never in here. */
+export interface NormalizedIntake {
+  requestId: string;
+  orderType: "dine_in" | "pickup" | "delivery";
+  tableNumber: string | null;
+  customerName: string | null;
+  customerPhone: string | null;
+  customerAddress: string | null;
+  customerNote: string | null;
+  items: { item_code: string; quantity: number }[];
+}
+
+/**
+ * Either a parsed value or a ready-to-send error Response.
+ *
+ * Both members declare BOTH properties (the unused one as `?: undefined`) on
+ * purpose: the standalone `npx tsc` calls in scripts/test-*.mjs compile these
+ * modules WITHOUT --strict, and without strictNullChecks TypeScript will not
+ * narrow a discriminated union on a boolean literal. With the optional members
+ * present, `x.response` / `x.value` typecheck under strict (via narrowing) and
+ * non-strict (via the declaration) alike. Do not "tidy" these away.
+ */
+export type Parsed<T> =
+  | { ok: true; value: T; response?: undefined }
+  | { ok: false; value?: undefined; response: Response };
+
+/**
+ * Content-type gate + size cap + JSON parse — extracted VERBATIM from
+ * handleIntake so the Phase 3D session-order route enforces byte-identical
+ * limits instead of re-implementing them.
+ */
+export async function readIntakeJson(request: Request): Promise<Parsed<unknown>> {
+  if (!(request.headers.get("content-type") ?? "").includes("application/json")) {
+    return { ok: false, response: jsonError(415, "Unsupported content type.") };
+  }
+  const raw = await request.text().catch(() => null);
+  if (raw === null || raw.length > MAX_BODY_BYTES) {
+    return { ok: false, response: jsonError(413, "Request too large.") };
+  }
+  try {
+    return { ok: true, value: JSON.parse(raw) as unknown };
+  } catch {
+    return { ok: false, response: jsonError(400, "Invalid request body.") };
+  }
+}
+
+/**
+ * Per-order-type required fields, dine_in field nulling, duplicate item-code
+ * combining and the quantity caps — extracted VERBATIM from handleIntake.
+ * ONE implementation, so the bot-session path can never drift from the
+ * customer path on validation. (The DB function enforces the same rules again
+ * on insert.)
+ */
+export function normalizeIntake(data: IntakeInput): Parsed<NormalizedIntake> {
+  const { requestId, orderType, notes } = data;
+
+  // dine_in deliberately drops any leftover customer/delivery data from a
+  // prior order-type selection.
+  const tableNumber = data.tableNumber?.trim() || null;
+  const customerName = orderType === "dine_in" ? null : data.customerName?.trim() || null;
+  const customerPhone = orderType === "dine_in" ? null : data.customerPhone?.trim() || null;
+  const customerAddress = orderType === "delivery" ? data.customerAddress?.trim() || null : null;
+
+  if (orderType === "dine_in" && !tableNumber) {
+    return { ok: false, response: jsonError(400, "Table number is required.") };
+  }
+  if (orderType !== "dine_in" && (!customerName || !customerPhone)) {
+    return { ok: false, response: jsonError(400, "Name and phone are required.") };
+  }
+  if (orderType === "delivery" && !customerAddress) {
+    return { ok: false, response: jsonError(400, "Delivery address is required.") };
+  }
+
+  // Combine duplicate item codes safely (sum quantities), enforce caps.
+  const combined = new Map<string, number>();
+  for (const item of data.items) {
+    combined.set(item.itemCode, (combined.get(item.itemCode) ?? 0) + item.quantity);
+  }
+  let totalItems = 0;
+  const items: { item_code: string; quantity: number }[] = [];
+  for (const [itemCode, quantity] of combined) {
+    if (quantity > MAX_QTY_PER_ITEM) {
+      return {
+        ok: false,
+        response: jsonError(400, `Too many of item ${itemCode} (max ${MAX_QTY_PER_ITEM}).`),
+      };
+    }
+    totalItems += quantity;
+    items.push({ item_code: itemCode, quantity });
+  }
+  if (totalItems > MAX_TOTAL_ITEMS) {
+    return {
+      ok: false,
+      response: jsonError(400, `Too many items in one order (max ${MAX_TOTAL_ITEMS}).`),
+    };
+  }
+
+  return {
+    ok: true,
+    value: {
+      requestId,
+      orderType,
+      tableNumber,
+      customerName,
+      customerPhone,
+      customerAddress,
+      customerNote: notes?.trim() || null,
+      items,
+    },
+  };
+}
+
+/** Supabase REST base + service-role key, or a ready-to-send 500. */
+export function supabaseAdmin(unconfigured: string): Parsed<{ base: string; key: string }> {
+  const url = process.env.VITE_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return { ok: false, response: jsonError(500, unconfigured) };
+  return { ok: true, value: { base: url.replace(/\/+$/, ""), key } };
+}
+
 /* ── RPC error → safe client message ─────────────────────────────────────── */
 
 // The Postgres function raises machine-readable ORDER_* messages with the
@@ -76,7 +202,7 @@ const ITEM_ERRORS: Record<string, string> = {
   ORDER_ITEM_UNPRICED: "is not orderable right now",
 };
 
-function mapRpcError(message: string, detail: string): Response {
+export function mapRpcError(message: string, detail: string): Response {
   const suffix = ITEM_ERRORS[message];
   if (suffix) {
     return jsonError(
@@ -176,67 +302,22 @@ export function fireOrderAutomation(orderNumber: string, channel: OrderEventChan
 /* ── The intake handler ──────────────────────────────────────────────────── */
 
 async function handleIntake(request: Request, channel: "customer" | "staff"): Promise<Response> {
-  if (!(request.headers.get("content-type") ?? "").includes("application/json")) {
-    return jsonError(415, "Unsupported content type.");
-  }
-  const raw = await request.text().catch(() => null);
-  if (raw === null || raw.length > MAX_BODY_BYTES) {
-    return jsonError(413, "Request too large.");
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    return jsonError(400, "Invalid request body.");
-  }
-  const body = intakeBody.safeParse(parsed);
+  const json = await readIntakeJson(request);
+  if (!json.ok) return json.response;
+  const body = intakeBody.safeParse(json.value);
   if (!body.success) return jsonError(400, "Invalid request body.");
-  const { requestId, orderType, notes } = body.data;
+  const normalized = normalizeIntake(body.data);
+  if (!normalized.ok) return normalized.response;
+  const { requestId, orderType, tableNumber, customerName, customerPhone } = normalized.value;
+  const { customerAddress, customerNote, items } = normalized.value;
 
-  // Required-fields per order type. dine_in deliberately drops any leftover
-  // customer/delivery data from a prior order-type selection (the DB function
-  // enforces the same rule again on insert).
-  const tableNumber = body.data.tableNumber?.trim() || null;
-  const customerName = orderType === "dine_in" ? null : body.data.customerName?.trim() || null;
-  const customerPhone = orderType === "dine_in" ? null : body.data.customerPhone?.trim() || null;
-  const customerAddress =
-    orderType === "delivery" ? body.data.customerAddress?.trim() || null : null;
-
-  if (orderType === "dine_in" && !tableNumber) {
-    return jsonError(400, "Table number is required.");
-  }
-  if (orderType !== "dine_in" && (!customerName || !customerPhone)) {
-    return jsonError(400, "Name and phone are required.");
-  }
-  if (orderType === "delivery" && !customerAddress) {
-    return jsonError(400, "Delivery address is required.");
-  }
-
-  // Combine duplicate item codes safely (sum quantities), enforce caps.
-  const combined = new Map<string, number>();
-  for (const item of body.data.items) {
-    combined.set(item.itemCode, (combined.get(item.itemCode) ?? 0) + item.quantity);
-  }
-  let totalItems = 0;
-  const items: { item_code: string; quantity: number }[] = [];
-  for (const [itemCode, quantity] of combined) {
-    if (quantity > MAX_QTY_PER_ITEM) {
-      return jsonError(400, `Too many of item ${itemCode} (max ${MAX_QTY_PER_ITEM}).`);
-    }
-    totalItems += quantity;
-    items.push({ item_code: itemCode, quantity });
-  }
-  if (totalItems > MAX_TOTAL_ITEMS) {
-    return jsonError(400, `Too many items in one order (max ${MAX_TOTAL_ITEMS}).`);
-  }
-
-  const url = process.env.VITE_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) return jsonError(500, "Server is not configured for order intake.");
+  const admin = supabaseAdmin("Server is not configured for order intake.");
+  if (!admin.ok) return admin.response;
+  const { base, key } = admin.value;
 
   let response: globalThis.Response;
   try {
-    response = await fetch(`${url.replace(/\/+$/, "")}/rest/v1/rpc/create_order_with_items`, {
+    response = await fetch(`${base}/rest/v1/rpc/create_order_with_items`, {
       method: "POST",
       headers: {
         apikey: key,
@@ -251,7 +332,7 @@ async function handleIntake(request: Request, channel: "customer" | "staff"): Pr
         p_customer_name: customerName,
         p_customer_phone: customerPhone,
         p_customer_address: customerAddress,
-        p_customer_note: notes?.trim() || null,
+        p_customer_note: customerNote,
         p_items: items,
       }),
     });

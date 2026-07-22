@@ -1112,6 +1112,139 @@ never the unnecessary broader privileges). The two
 must go together only for a FULL rollback; the app rollback alone is safe
 before the migration runs.
 
+### Phase 3D — secure bot sessions & secure menu links (2026-07-22)
+
+Code on branch `feat/3d-secure-bot-sessions`. Migration PREPARED, **NOT
+APPLIED**: `docs/sql/2026-07-22-3D-bot-sessions.sql`, gated behind the
+read-only `docs/sql/2026-07-22-3D-bot-sessions-precheck.sql` (see "Migration
+sequence" below — run the pre-check first, always). Purpose: give a trusted
+simulated Instagram/Messenger conversation a one-time secure menu link that
+opens the approved customer menu, can be reopened before checkout, is consumed
+by exactly ONE order, and **cannot be forged by a browser**.
+
+**Secure link format — `${PUBLIC_SITE_URL}/m#<token>`.** The token is in the
+URL FRAGMENT. Fragments are never sent in an HTTP request line (RFC 3986 §
+3.5) and are always stripped from `Referer`, so the token reaches no Vercel /
+CDN / proxy / WAF access log, no link-preview crawler, and no error reporter.
+`/m/<token>` and `/m?token=` were both rejected for exactly this reason —
+note that `src/lib/lovable-error-reporting.ts` ships
+`window.location.pathname` to an external sink, which with a path token would
+have exported live credentials. There is ONE browser route (`src/routes/m.tsx`)
+and the edge only ever sees `GET /m`.
+
+Browser handling (`src/lib/menuSessionToken.ts`): capture the fragment
+synchronously during first render → validate `^[A-Za-z0-9_-]{43}$` → bridge
+through `sessionStorage["tp_menu_session"]` (never localStorage) → strip the
+fragment via TanStack Router `navigate({ hash: "", replace: true })`. The
+bridge is what keeps refresh and iOS tab-restore working after the strip; it
+is cleared on every terminal state. Reopening from browser history after the
+tab was closed is the one capability given up — the chat thread holds the
+durable link.
+
+**Token derivation is DETERMINISTIC** (`BOT_SESSION_TOKEN_SECRET`, separate
+from the inbound `BOT_SESSION_SECRET`): HMAC-SHA256 over a length-prefixed,
+0x1F-separated canonical input of `atlas.botsession.v1` + platform + chat id +
+requestId, base64url, 43 chars. Supabase stores ONLY `sha256(token)` as hex.
+Determinism exists so a LOST HTTP RESPONSE can be retried and reproduce the
+identical link — a random token could not be, because only its hash is stored.
+On retry the server re-derives, and `create_bot_session` compares the
+recomputed hash against the stored one, raising `SESSION_TOKEN_UNRECOVERABLE`
+rather than returning a dead URL if the secret was rotated (fail closed).
+
+**Concurrency:** `create_bot_session` takes `pg_advisory_xact_lock` on a
+namespaced, length-prefixed (platform, chat) key BEFORE the request_id lookup.
+Transaction-scoped, never session-scoped: PostgREST runs on pooled
+connections, so a session-scoped lock would leak onto the connection on any
+raise. Same request id → same session, `duplicate: true`, identical token/URL.
+Different request ids → the later committer wins and revokes the earlier
+link (the customer sees the "replaced" panel). The unique partial index
+`bot_sessions_one_active_per_chat` stays as the final integrity backstop, with
+a defensive `unique_violation` handler behind it.
+
+**Checkout is atomic:** `create_order_from_bot_session` does
+`SELECT … FOR UPDATE` on the session, rejects revoked/expired/consumed, calls
+`create_order_with_items` **with the platform from the locked row**, and marks
+the session completed with its order id — all in ONE transaction.
+`orders.client_request_id` alone is NOT sufficient here: two browser tabs
+generate two different requestIds, so both inserts would otherwise succeed.
+
+**Additive only:** `create_order_with_items` gained the `instagram`/`messenger`
+channel branches (sources `instagram`/`messenger`, prefixes `TP-IG-`/`TP-MS-`)
+and an `order_id` key in all three return objects. Customer/staff behaviour,
+prices, order numbers and idempotency are unchanged — proven by the migration's
+§ 8 regression and by `npm run test:bridge`.
+
+**Unchanged:** normal customer and staff orders still cost ZERO n8n executions
+(`AUTOMATION_DISPATCH_CHANNELS` was already `instagram`/`messenger` and needed
+no edit); Owner Menu stays read-only; the approved customer-menu design is
+byte-identical (the `MenuScreen` extraction is a verified pure move — the only
+delta across 293 lines is the added `session` prop).
+
+**Requires:** the § 1–6 migration, plus `BOT_SESSION_SECRET`,
+`BOT_SESSION_TOKEN_SECRET`, `PUBLIC_SITE_URL` (and optionally
+`MESSENGER_PAGE_HANDLE` / `INSTAGRAM_HANDLE`) in the server environment.
+NO n8n workflow change. NO change to any existing route's behaviour.
+
+**Deployment order:** run the SQL FIRST (as with 2G-H / 2G-I), then deploy.
+Rollback is the REVERSE — revert/redeploy the app, then run § 11. Getting that
+backwards takes the secure-link route down.
+
+**Migration sequence — follow in this exact order:**
+
+1. **Run the pre-check file on its own:**
+   `docs/sql/2026-07-22-3D-bot-sessions-precheck.sql`. It is READ-ONLY (14
+   SELECTs against catalog/information_schema; zero mutating statements) and is
+   safe against Production. It is a SEPARATE file precisely so that one
+   paste-and-run cannot execute the check *and* apply the migration before
+   anyone reads the result.
+2. **Review and classify EVERY returned row.** A returned row is **not**
+   automatically a blocker — classify each by its actual definition using the
+   interpretation guidance printed beside each section. Only these block:
+   - a CHECK, ENUM or DOMAIN on `orders.source` that excludes `instagram` or
+     `messenger` (§ A / § C — note § C must be read **even if § A returns
+     nothing**, because an enum-backed column produces no table CHECK row);
+   - `orders.order_number` with `character_maximum_length` below 23 (§ B —
+     `TP-IG-`/`TP-MS-` raise the longest possible order number from 20 to 23);
+   - a trigger that rejects or rewrites `source`/`order_number` (§ D);
+   - `create_order_with_items` not matching the 2G-I baseline, or
+     `public.bot_sessions` already existing (§ E).
+   Complete the § F decision checklist and record the outputs in the runbook
+   notes — they are the only evidence the migration was safe to apply.
+3. **Apply the main migration only after that approval:**
+   `docs/sql/2026-07-22-3D-bot-sessions.sql` §§ 1–6. Its first executable
+   statement is the `begin;` in § 1; there is no executable pre-check above it.
+4. **Run § 7 verification** (read-only): expect 0 policies, 0
+   anon/authenticated grants, `service_role` with SELECT/INSERT/UPDATE and no
+   DELETE, three functions SECURITY INVOKER with pinned `search_path`, and 0
+   advisory locks held.
+5. **Run the § 8 normal-order regression twice** — same `TP-` number both
+   times, `duplicate` false then true, `source='customer_menu'` — then clean up.
+6. **Run the § 9 and § 10 tests on a branch/staging project only, never
+   Production.** § 10 needs two simultaneous connections (two psql windows; SQL
+   Editor tabs autocommit per statement and will not reproduce the race).
+
+**Preview verification checklist:**
+
+- [ ] `npm run test:bot-session`, `test:bridge`, `test:order-details`,
+      `test:dashboard`, `test:dashboard-parity` green.
+- [ ] `docs/sql/2026-07-22-3D-bot-sessions-precheck.sql` has been run on its
+      own, every returned row classified by its actual definition (a row is
+      NOT automatically a blocker), and its § F decision checklist completed
+      and recorded — all before anything is applied.
+- [ ] Migration § 8 normal-order regression: a `customer` order still gets a
+      `TP-` number and `source='customer_menu'`.
+- [ ] Migration § 10 concurrency tests C1–C5 on a BRANCH/STAGING project.
+- [ ] Preview: `/` pixel-identical to Production (hero, rails, stagger, cart
+      tray, checkout sheet).
+- [ ] Preview: create a session via `/api/automation/bot-session`, open the
+      link, confirm the address bar shows `/m` with NO token, refresh, reopen,
+      check out, reopen → completed panel, attempt a second checkout → refused.
+- [ ] Vercel logs show `GET /m` only (never a token), plus `BOT_SESSION
+      created`, `MENU_SESSION_RESOLVE state=…`, `SESSION_ORDER …` lines with
+      no token, hash, chat id, or secret.
+- [ ] One normal customer order in Preview → `ORDER_INTAKE` but NO
+      `ORDER_AUTOMATION`; n8n executions list shows nothing new.
+
 ### Production test checklist after the 2G-F/2G-G deploy
 
 1. ⚿ on each staff device: enter the CURRENT rotated secret.

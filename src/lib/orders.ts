@@ -56,13 +56,15 @@ export type IntakeChannel = "customer" | "staff";
 
 const GENERIC_ERROR = "Failed to submit order. Please try again.";
 
-async function submitOrderViaSupabase(
-  payload: OrderPayload,
-  channel: IntakeChannel,
-): Promise<SubmitResult> {
-  // Narrow trust boundary: codes + quantities only. Names/prices/totals in
-  // the payload are display-only and deliberately not sent.
-  const body = {
+/**
+ * The narrow trust boundary: codes + quantities only. Names/prices/totals in
+ * the payload are display-only and deliberately not sent — the server
+ * recomputes every one of them from menu_items.
+ * Deliberately carries NO channel/platform/source field: the server decides
+ * the channel, and the bot path reads it from the database session row.
+ */
+function narrowIntakeBody(payload: OrderPayload): Record<string, unknown> {
+  return {
     requestId: payload.requestId,
     orderType: payload.orderType,
     tableNumber: payload.tableNumber,
@@ -72,21 +74,14 @@ async function submitOrderViaSupabase(
     notes: payload.notes,
     items: payload.items.map((item) => ({ itemCode: item.id, quantity: item.quantity })),
   };
+}
 
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  let path = "/api/order/submit";
-  if (channel === "staff") {
-    const secret = getStaffWriteSecret();
-    if (!secret) {
-      return {
-        success: false,
-        error: "未設定員工密碼 · Staff secret not set — tap the key button in the header.",
-      };
-    }
-    headers["x-staff-secret"] = secret;
-    path = "/api/staff/add-order";
-  }
-
+/** One intake POST + the shared response contract. Never throws. */
+async function postIntake(
+  path: string,
+  body: Record<string, unknown>,
+  headers: Record<string, string>,
+): Promise<SubmitResult> {
   try {
     const response = await fetch(path, {
       method: "POST",
@@ -105,6 +100,47 @@ async function submitOrderViaSupabase(
   } catch {
     return { success: false, error: GENERIC_ERROR };
   }
+}
+
+async function submitOrderViaSupabase(
+  payload: OrderPayload,
+  channel: IntakeChannel,
+): Promise<SubmitResult> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  let path = "/api/order/submit";
+  if (channel === "staff") {
+    const secret = getStaffWriteSecret();
+    if (!secret) {
+      return {
+        success: false,
+        error: "未設定員工密碼 · Staff secret not set — tap the key button in the header.",
+      };
+    }
+    headers["x-staff-secret"] = secret;
+    path = "/api/staff/add-order";
+  }
+
+  return postIntake(path, narrowIntakeBody(payload), headers);
+}
+
+/**
+ * Checkout from a secure bot-session link (Phase 3D). Same narrow body plus
+ * the session token, which is the ONLY credential and travels in the BODY —
+ * never a path or query parameter.
+ *
+ * The order's channel (instagram/messenger) is resolved server-side from the
+ * locked bot_sessions row; nothing here can influence it. Response shape is
+ * identical to /api/order/submit, so the checkout UI needs no special casing.
+ */
+export async function submitSessionOrder(
+  payload: OrderPayload,
+  token: string,
+): Promise<SubmitResult> {
+  return postIntake(
+    "/api/order/submit-session",
+    { ...narrowIntakeBody(payload), token },
+    { "Content-Type": "application/json" },
+  );
 }
 
 /* ── n8n source (original bridge — rollback path, do not modify) ────────── */

@@ -55,11 +55,20 @@ HS256 JWT (`Authorization: Bearer`) to
 order — **since Phase 3C (2026-07-17) only for server-resolved BOT channels
 (instagram/messenger)**. Customer checkout, dine-in QR, and staff manual
 orders never dispatch: normal restaurant operations cost zero n8n
-executions. No public route can create a bot-channel order yet (trusted
-bot sessions are a later phase), so the bridge is currently silent. Full
-spec, n8n workflow plan, and verification checklist in
-docs/backend-separation-runbook.md § Phase 3A + § Phase 3C. Hard rules for the
-receiving workflow:
+executions. Full spec, n8n workflow plan, and verification checklist in
+docs/backend-separation-runbook.md § Phase 3A + § Phase 3C.
+
+**Phase 3D (2026-07-22) — the bridge is no longer silent.** Secure bot
+sessions add the ONE trusted path that can produce an `instagram`/`messenger`
+order: `POST /api/order/submit-session`, whose channel is read by the database
+from a locked `bot_sessions` row (never from the request). Those orders DO
+dispatch exactly one `order.created` event each. Everything else is unchanged
+— customer checkout, dine-in QR and staff manual orders still dispatch
+nothing, and duplicate/idempotent replays still dispatch nothing. The n8n
+workflow needs NO change for 3D: it receives the same event contract it
+already handles, now actually populated. See § Phase 3D in the runbook.
+
+Hard rules for the receiving workflow:
 
 - It must be a **brand-new automation-only webhook path** — never the old
   `third-place-order-test` webhook (row 1 above), which INSERTS an order

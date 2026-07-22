@@ -77,6 +77,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
+      // Phase 3D defense in depth. The secure menu link carries its token in
+      // the URL FRAGMENT, which browsers never send in a request line and
+      // always strip from Referer — so the token cannot leak here regardless.
+      // This states the policy instead of inheriting the browser default.
+      { name: "referrer", content: "strict-origin-when-cross-origin" },
       { title: "Lovable App" },
       { name: "description", content: "A premium mobile-first e-menu for Chinese BBQ & Lounge, designed for easy browsing and future ordering." },
       { name: "author", content: "Lovable" },
