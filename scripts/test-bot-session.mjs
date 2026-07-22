@@ -1,14 +1,16 @@
 // Standalone Phase 3D secure-bot-session check (no test framework — run with
 // `npm run test:bot-session`). Compiles the SINGLE production Vercel entry
-// point, api/[...route].ts (which pulls in every api/_lib/*.server.ts module),
-// to node_modules/.cache/bot-session-test, then asserts the full contract:
+// point, api/router.ts (which pulls in every api/_lib/*.server.ts module), to
+// node_modules/.cache/bot-session-test, then asserts the full contract:
 //
 //   1. token derivation — determinism, independent re-derivation, injectivity
 //   2. trusted creation  — auth, UUIDv4, idempotent retry, fail-closed rotation
 //   3. resolve           — all five states, no chat-id leak, no invented platform
 //   4. session checkout  — forged channel fields ignored, selective dispatch
 //   5. cross-cutting     — no token in any URL, no token in any log, no-store
-//   6. the catch-all router — path routing, method dispatch, 404s, 405s+Allow
+//   6. router dispatch   — method dispatch, 404s, 405s + Allow
+//   7. rewrite contract  — the vercel.json /api/:path* → /api/router?path=:path*
+//                          shape, which is how every production request arrives
 //
 // Every fetch is stubbed — no network, no real secrets, no database.
 import assert from "node:assert/strict";
@@ -19,12 +21,11 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const outDir = "node_modules/.cache/bot-session-test";
-// Compiling the PRODUCTION entry point — the single catch-all Vercel function
-// (api/[...route].ts) — means the real deployed surface is what gets
-// exercised: path routing, method dispatch, 404s and 405s included. The quotes
-// keep the shell from touching the bracketed filename.
+// Compiling the PRODUCTION entry point — the single Vercel function
+// api/router.ts — means the real deployed surface is what gets exercised:
+// path resolution, method dispatch, 404s and 405s included.
 execSync(
-  `npx tsc "api/[...route].ts"` +
+  `npx tsc api/router.ts` +
     ` --outDir ${outDir}` +
     " --module nodenext --moduleResolution nodenext --target es2022" +
     " --lib es2022,dom --skipLibCheck",
@@ -37,10 +38,19 @@ const load = (rel) => import(pathToFileURL(path.resolve(outDir, rel)).href);
 const lib = await load("_lib/botSession.server.js");
 const intake = await load("_lib/orderIntake.server.js");
 // One module now serves every endpoint; each request is routed by its URL.
-const api = await load("[...route].js");
+const api = await load("router.js");
 const createRoute = api;
 const resolveRoute = api;
 const orderRoute = api;
+
+/* ── URL shapes ──────────────────────────────────────────────────────────────
+ * PRODUCTION requests reach the function AFTER the vercel.json rewrite
+ *   { "source": "/api/:path*", "destination": "/api/router?path=:path*" }
+ * so the pathname is always "/api/router" and the real path is in `path`.
+ * The suite drives that shape by default, because it is what actually ships.
+ * `direct()` is the pre-rewrite shape, kept to prove the pathname fallback. */
+const rewritten = (p) => `https://app.invalid/api/router?path=${encodeURIComponent(p)}`;
+const direct = (p) => `https://app.invalid/api/${p}`;
 
 /* ── Fixtures + environment ──────────────────────────────────────────────── */
 
@@ -144,7 +154,7 @@ const jsonRequest = (url, body, headers = {}) =>
   });
 
 const createRequest = (body, headers = { "x-bot-secret": BOT_SECRET }) =>
-  jsonRequest("https://app.invalid/api/automation/bot-session", body, headers);
+  jsonRequest(rewritten("automation/bot-session"), body, headers);
 
 // Every log line emitted anywhere in this run, for the leak assertions.
 const logLines = [];
@@ -350,8 +360,7 @@ createSessionError = null;
 
 /* ── 3. Resolve ──────────────────────────────────────────────────────────── */
 
-const resolveRequest = (t) =>
-  jsonRequest("https://app.invalid/api/menu-session/resolve", { token: t });
+const resolveRequest = (t) => jsonRequest(rewritten("menu-session/resolve"), { token: t });
 
 const future = new Date(Date.now() + 3_600_000).toISOString();
 const past = new Date(Date.now() - 3_600_000).toISOString();
@@ -497,7 +506,7 @@ assert.ok(lib.chatDeepLink("instagram").startsWith("https://ig.me/m/"));
 /* ── 5. Session checkout ─────────────────────────────────────────────────── */
 
 const sessionOrderRequest = (extra = {}) =>
-  jsonRequest("https://app.invalid/api/order/submit-session", {
+  jsonRequest(rewritten("order/submit-session"), {
     token,
     requestId: "bot-order-0001",
     orderType: "pickup",
@@ -619,7 +628,7 @@ sessionOrderError = null;
 // -- 5f. Shared intake validation is genuinely shared (not re-implemented).
 reset();
 response = await orderRoute.POST(
-  jsonRequest("https://app.invalid/api/order/submit-session", {
+  jsonRequest(rewritten("order/submit-session"), {
     token,
     requestId: "bot-order-0002",
     orderType: "delivery",
@@ -633,7 +642,7 @@ assert.ok((await response.json()).error.includes("Delivery address"));
 
 reset();
 response = await orderRoute.POST(
-  jsonRequest("https://app.invalid/api/order/submit-session", {
+  jsonRequest(rewritten("order/submit-session"), {
     token,
     requestId: "bot-order-0003",
     orderType: "dine_in",
@@ -646,7 +655,7 @@ assert.equal(response.status, 400, "dine-in still requires a table number");
 for (const badToken of [undefined, "", "short"]) {
   reset();
   response = await orderRoute.POST(
-    jsonRequest("https://app.invalid/api/order/submit-session", {
+    jsonRequest(rewritten("order/submit-session"), {
       ...(badToken === undefined ? {} : { token: badToken }),
       requestId: "bot-order-0004",
       orderType: "pickup",
@@ -663,7 +672,7 @@ for (const badToken of [undefined, "", "short"]) {
 
 const normalRequest = (staff) =>
   jsonRequest(
-    `https://app.invalid/api/${staff ? "staff/add-order" : "order/submit"}`,
+    rewritten(staff ? "staff/add-order" : "order/submit"),
     {
       requestId: "normal-order-0001",
       orderType: "dine_in",
@@ -699,7 +708,7 @@ assert.equal(webhookCalls.length, 0, "staff orders dispatch zero n8n events");
 /* ── 7. The catch-all router: paths, methods, 404s and 405s ──────────────── */
 
 const bare = (url, method) => new Request(url, { method });
-const U = (p) => `https://app.invalid/api/${p}`;
+const U = rewritten;
 
 // Every POST-only endpoint refuses other verbs with 405 + a correct Allow.
 const POST_ONLY = [
@@ -754,29 +763,91 @@ for (const p of [
   }
 }
 
-// Routing is tolerant of a trailing slash and of a stripped /api prefix, so a
-// platform path-normalisation difference cannot silently 404 the whole API.
-{
+/* ── 7b. The vercel.json rewrite contract ────────────────────────────────────
+ * These assertions exist because the FIRST consolidation attempt
+ * (api/[...route].ts) deployed as one READY function and still returned a
+ * PLATFORM 404 on every nested URL — the code was never reached. The contract
+ * below is the thing that was untested then, so it is pinned now. */
+
+const okResolve = async (url) => {
   reset();
   sessionRows = [];
-  const withSlash = await api.POST(
-    jsonRequest("https://app.invalid/api/menu-session/resolve/", { token }),
-  );
-  assert.equal(withSlash.status, 200, "a trailing slash must still route");
-  const noPrefix = await api.POST(
-    jsonRequest("https://app.invalid/menu-session/resolve", { token }),
-  );
-  assert.equal(noPrefix.status, 200, "a stripped /api prefix must still route");
+  return api.POST(jsonRequest(url, { token }));
+};
+
+// 1. The production shape: pathname is /api/router, real path in `path`.
+assert.equal(
+  (await okResolve("https://app.invalid/api/router?path=menu-session%2Fresolve")).status,
+  200,
+  "percent-encoded rewrite path must route",
+);
+assert.equal(
+  (await okResolve("https://app.invalid/api/router?path=menu-session/resolve")).status,
+  200,
+  "literal-slash rewrite path must route (Vercel may not encode)",
+);
+
+// 2. Every one of the 13 URLs must resolve through the rewrite shape. A route
+//    the table is missing would 404 here, which is exactly the production
+//    symptom we are guarding against.
+for (const p of [...POST_ONLY, ...GET_ONLY]) {
+  const res = await api.PUT(bare(rewritten(p), "PUT"));
+  assert.equal(res.status, 405, `${p} must RESOLVE through the rewrite (405, not 404)`);
 }
 
-// A query string must not defeat path matching.
-{
+// 3. The pathname fallback still works, so a direct hit or a future change of
+//    mechanism does not break every endpoint at once.
+assert.equal(
+  (await okResolve(direct("menu-session/resolve"))).status,
+  200,
+  "direct /api/<path> must still route via the pathname fallback",
+);
+assert.equal(
+  (await okResolve(direct("menu-session/resolve/"))).status,
+  200,
+  "a trailing slash must still route",
+);
+assert.equal(
+  (await okResolve("https://app.invalid/menu-session/resolve")).status,
+  200,
+  "a stripped /api prefix must still route",
+);
+
+// 4. Unrelated query parameters must not defeat matching.
+assert.equal(
+  (await okResolve("https://app.invalid/api/router?path=menu-session/resolve&utm_source=ig"))
+    .status,
+  200,
+  "an extra query parameter must not break routing",
+);
+assert.equal(
+  (await okResolve(direct("menu-session/resolve") + "?utm_source=ig")).status,
+  200,
+  "a query string on the direct shape must not break routing",
+);
+
+// 5. Vercel merges the incoming query string into the rewrite destination, so
+//    a client appending its own ?path= yields TWO values. Resolution must be
+//    deterministic whichever order the platform emits them in: the first
+//    candidate naming a REAL route wins.
+for (const url of [
+  "https://app.invalid/api/router?path=menu-session/resolve&path=not-a-route",
+  "https://app.invalid/api/router?path=not-a-route&path=menu-session/resolve",
+]) {
+  assert.equal((await okResolve(url)).status, 200, `duplicate path values must resolve: ${url}`);
+}
+
+// 6. The function's own path, and an empty/absent path, are not routes.
+for (const url of [
+  "https://app.invalid/api/router",
+  "https://app.invalid/api/router?path=",
+  "https://app.invalid/api/router?path=router",
+  "https://app.invalid/api/router?path=nope",
+]) {
   reset();
-  sessionRows = [];
-  const res = await api.POST(
-    jsonRequest("https://app.invalid/api/menu-session/resolve?utm_source=ig", { token }),
-  );
-  assert.equal(res.status, 200, "a query string must not break routing");
+  const res = await api.POST(jsonRequest(url, { token }));
+  assert.equal(res.status, 404, `must be 404: ${url}`);
+  assert.equal((await res.json()).error, "Not found.");
 }
 
 // The router itself must never emit CORS headers.
