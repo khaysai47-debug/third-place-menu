@@ -1,14 +1,14 @@
 // Standalone Phase 3D secure-bot-session check (no test framework — run with
-// `npm run test:bot-session`). Compiles the three production Vercel function
-// entry points (which pull in api/_lib/botSession.server.ts, and through it
-// orderIntake/orderEventJwt/staffOrderWrites) to
-// node_modules/.cache/bot-session-test, then asserts the full contract:
+// `npm run test:bot-session`). Compiles the SINGLE production Vercel entry
+// point, api/[...route].ts (which pulls in every api/_lib/*.server.ts module),
+// to node_modules/.cache/bot-session-test, then asserts the full contract:
 //
 //   1. token derivation — determinism, independent re-derivation, injectivity
 //   2. trusted creation  — auth, UUIDv4, idempotent retry, fail-closed rotation
 //   3. resolve           — all five states, no chat-id leak, no invented platform
 //   4. session checkout  — forged channel fields ignored, selective dispatch
-//   5. cross-cutting     — no token in any URL, no token in any log, no-store, 405
+//   5. cross-cutting     — no token in any URL, no token in any log, no-store
+//   6. the catch-all router — path routing, method dispatch, 404s, 405s+Allow
 //
 // Every fetch is stubbed — no network, no real secrets, no database.
 import assert from "node:assert/strict";
@@ -19,10 +19,12 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 const outDir = "node_modules/.cache/bot-session-test";
-// Compiling the api/ entry points (not just _lib) means the PRODUCTION
-// surface is what gets exercised, including its 405 wiring.
+// Compiling the PRODUCTION entry point — the single catch-all Vercel function
+// (api/[...route].ts) — means the real deployed surface is what gets
+// exercised: path routing, method dispatch, 404s and 405s included. The quotes
+// keep the shell from touching the bracketed filename.
 execSync(
-  `npx tsc api/automation/bot-session.ts api/menu-session/resolve.ts api/order/submit-session.ts` +
+  `npx tsc "api/[...route].ts"` +
     ` --outDir ${outDir}` +
     " --module nodenext --moduleResolution nodenext --target es2022" +
     " --lib es2022,dom --skipLibCheck",
@@ -34,9 +36,11 @@ writeFileSync(path.join(outDir, "package.json"), '{"type":"module"}\n');
 const load = (rel) => import(pathToFileURL(path.resolve(outDir, rel)).href);
 const lib = await load("_lib/botSession.server.js");
 const intake = await load("_lib/orderIntake.server.js");
-const createRoute = await load("automation/bot-session.js");
-const resolveRoute = await load("menu-session/resolve.js");
-const orderRoute = await load("order/submit-session.js");
+// One module now serves every endpoint; each request is routed by its URL.
+const api = await load("[...route].js");
+const createRoute = api;
+const resolveRoute = api;
+const orderRoute = api;
 
 /* ── Fixtures + environment ──────────────────────────────────────────────── */
 
@@ -692,17 +696,110 @@ assert.equal(response.status, 200);
 assert.equal(rpcArgs.create_order_with_items.p_channel, "staff");
 assert.equal(webhookCalls.length, 0, "staff orders dispatch zero n8n events");
 
-/* ── 7. Method rejection on all three production surfaces ────────────────── */
+/* ── 7. The catch-all router: paths, methods, 404s and 405s ──────────────── */
 
-for (const [name, mod] of [
-  ["automation/bot-session", createRoute],
-  ["menu-session/resolve", resolveRoute],
-  ["order/submit-session", orderRoute],
-]) {
-  for (const verb of ["GET", "PUT", "PATCH", "DELETE"]) {
-    const res = await mod[verb]();
-    assert.equal(res.status, 405, `${name} ${verb} must be 405`);
+const bare = (url, method) => new Request(url, { method });
+const U = (p) => `https://app.invalid/api/${p}`;
+
+// Every POST-only endpoint refuses other verbs with 405 + a correct Allow.
+const POST_ONLY = [
+  "automation/bot-session",
+  "automation/order-details",
+  "menu-session/resolve",
+  "order/submit",
+  "order/submit-session",
+  "staff/add-expense",
+  "staff/add-order",
+  "staff/cancel-order",
+  "staff/mark-paid",
+  "staff/update-menu-availability",
+  "staff/update-status",
+];
+for (const p of POST_ONLY) {
+  for (const verb of ["GET", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]) {
+    const res = await api[verb](bare(U(p), verb));
+    assert.equal(res.status, 405, `${p} ${verb} must be 405`);
+    assert.equal(res.headers.get("allow"), "POST", `${p} must advertise Allow: POST`);
+    if (verb !== "HEAD") {
+      assert.equal((await res.json()).error, "Method not allowed.");
+    }
   }
+}
+
+// Every GET-only endpoint refuses other verbs, and advertises HEAD alongside GET.
+const GET_ONLY = ["staff/expenses", "staff/orders"];
+for (const p of GET_ONLY) {
+  for (const verb of ["POST", "PUT", "PATCH", "DELETE", "OPTIONS"]) {
+    const res = await api[verb](bare(U(p), verb));
+    assert.equal(res.status, 405, `${p} ${verb} must be 405`);
+    assert.equal(res.headers.get("allow"), "GET, HEAD", `${p} must advertise Allow: GET, HEAD`);
+  }
+}
+
+// Unknown paths are 404 — for EVERY verb, so a wrong method on a route that
+// does not exist never masquerades as 405.
+for (const p of [
+  "",
+  "nope",
+  "staff",
+  "staff/nope",
+  "order",
+  "automation/nope",
+  "staff/orders/extra",
+]) {
+  for (const verb of ["GET", "POST", "PUT", "DELETE"]) {
+    const res = await api[verb](bare(U(p), verb));
+    assert.equal(res.status, 404, `/api/${p} ${verb} must be 404`);
+    assert.equal((await res.json()).error, "Not found.");
+  }
+}
+
+// Routing is tolerant of a trailing slash and of a stripped /api prefix, so a
+// platform path-normalisation difference cannot silently 404 the whole API.
+{
+  reset();
+  sessionRows = [];
+  const withSlash = await api.POST(
+    jsonRequest("https://app.invalid/api/menu-session/resolve/", { token }),
+  );
+  assert.equal(withSlash.status, 200, "a trailing slash must still route");
+  const noPrefix = await api.POST(
+    jsonRequest("https://app.invalid/menu-session/resolve", { token }),
+  );
+  assert.equal(noPrefix.status, 200, "a stripped /api prefix must still route");
+}
+
+// A query string must not defeat path matching.
+{
+  reset();
+  sessionRows = [];
+  const res = await api.POST(
+    jsonRequest("https://app.invalid/api/menu-session/resolve?utm_source=ig", { token }),
+  );
+  assert.equal(res.status, 200, "a query string must not break routing");
+}
+
+// The router itself must never emit CORS headers.
+{
+  reset();
+  sessionRows = [];
+  const res = await api.POST(resolveRequest(token));
+  for (const h of [
+    "access-control-allow-origin",
+    "access-control-allow-methods",
+    "access-control-allow-headers",
+    "access-control-allow-credentials",
+  ]) {
+    assert.equal(res.headers.get(h), null, `router must not emit ${h}`);
+  }
+}
+
+// Staff endpoints still enforce their own auth THROUGH the router.
+{
+  reset();
+  const denied = await api.GET(bare(U("staff/orders"), "GET"));
+  assert.equal(denied.status, 401, "staff reads still require x-staff-secret");
+  assert.equal(fetchCalls.length, 0, "an unauthorised staff read must not reach Supabase");
 }
 
 /* ── 8. Cross-cutting leak checks ────────────────────────────────────────── */
