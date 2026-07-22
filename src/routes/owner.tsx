@@ -1,12 +1,32 @@
-// Owner Dashboard v1 — read-only control room. Reuses the same order feed as the
-// staff board (getStaffOrders) and derives tonight's money figures with
-// summarizeToday. No write actions, no backend changes. Realized (paid) revenue
-// is the headline; unpaid and done-but-unpaid are surfaced separately for
-// payment auditing. Layout only: 3-column shell (sidebar / main / needs-attention)
-// on desktop, single column on mobile. All numbers come from real data.
+// Owner Console — 「炭」 The Brazier.
+//
+// Read-only control room. Reuses the same order feed as the staff board
+// (getStaffOrders) and derives tonight's money figures with summarizeToday.
+// No write actions, no backend changes. Realized (paid) revenue is the
+// headline; unpaid and done-but-unpaid are surfaced separately for payment
+// auditing. All numbers come from real data.
+//
+// DESIGN: the room is lit by one source, above and to the left. Cards are
+// lacquer slabs sitting on explicit depth planes, and warmth means "this
+// needs you" — nothing is warm for decoration. Surface, depth and motion
+// vocabulary lives in src/components/owner/console.tsx and the ".oc-" block
+// of src/styles.css; this file owns data and layout only.
+//
+// Reading order of the overview, top to bottom, is operational priority:
+// money in hand → what is owed → where revenue moved → what the floor did.
 
 import { createFileRoute } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import {
   AlertTriangle,
   ArrowLeftRight,
@@ -32,9 +52,10 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import {
+  Area,
   CartesianGrid,
+  ComposedChart,
   Line,
-  LineChart,
   ResponsiveContainer,
   Tooltip,
   type TooltipProps,
@@ -58,6 +79,19 @@ import {
 import { isSameLocalDay, summarizeToday, todaysOrders } from "@/lib/ownerSummary";
 import type { Expense } from "@/lib/expenses";
 import { CATEGORIES, MENU, type MenuCategoryId } from "@/data/menu";
+import {
+  BrandMark,
+  Count,
+  EmberBed,
+  Eyebrow,
+  LiveSeal,
+  Money,
+  PanelHead,
+  Slab,
+  Sparkline,
+} from "@/components/owner/console";
+import { useTilt } from "@/components/owner/useTilt";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/owner")({
   head: () => ({
@@ -78,6 +112,10 @@ function dateLabel(now: Date): string {
     month: "short",
     year: "numeric",
   });
+}
+
+function longDate(now: Date): string {
+  return now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" });
 }
 
 const OWNER_NAME = "Mike Li";
@@ -214,7 +252,17 @@ function OwnerPage() {
 
   // Auto-polling disabled — use the manual Refresh button to avoid burning n8n executions.
 
-  // Auto-polling disabled — use the manual Refresh button.
+  // Presentation-only: the refresh control needs to acknowledge the press
+  // while the two reads are in flight. It wraps the same calls, unchanged.
+  const [refreshing, setRefreshing] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([refreshOrders(), silentRefreshExpenses()]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshOrders, silentRefreshExpenses]);
 
   // Gate submit (the gate already stored the entered key): validate it by
   // loading — the gate stays up until the server accepts the read
@@ -293,117 +341,1938 @@ function OwnerPage() {
     [orders, now],
   );
 
+  // How busy the floor is right now, 0..1. Drives the ember bed under the
+  // command bar so the console reads as alive (or as closed) without the
+  // owner looking at a single number. Six concurrent orders is a full pass.
+  const heat = useMemo(
+    () => Math.min(1, today.filter((o) => isActiveStatus(o.status)).length / 6),
+    [today],
+  );
+
+  const attentionCount = doneUnpaid.length + unpaidOpen.length;
+
   if (!unlocked || accessDenied) {
     return <AccessGate area="owner" denied={accessDenied} onSubmitted={handleSecretEntry} />;
   }
 
   return (
     <div
-      className="min-h-screen ink-grain lg:flex"
+      data-owner-console
+      className="ink-grain flex min-h-[100dvh] flex-col lg:flex-row"
       style={{ backgroundColor: "oklch(0.145 0.005 60)" }}
     >
       {selectedOrder && (
         <OwnerOrderModal order={selectedOrder} onClose={() => setSelectedOrder(null)} />
       )}
-      <OwnerSidebar activeSection={activeSection} onSectionChange={setActiveSection} />
 
-      <div className="min-w-0 flex-1">
-        <OwnerHeader
+      <ConsoleRail
+        activeSection={activeSection}
+        onSectionChange={setActiveSection}
+        attentionCount={attentionCount}
+      />
+
+      {/* pb clears the mobile tab bar; lg has the rail instead. */}
+      <div className="min-w-0 flex-1 pb-[76px] lg:pb-0">
+        <CommandBar
           now={now}
           live={loadState === "ready"}
-          onRefresh={() => { void refreshOrders(); void silentRefreshExpenses(); }}
+          heat={heat}
+          refreshing={refreshing}
+          onRefresh={() => void handleRefresh()}
         />
 
         {loadState === "loading" ? (
-          <LoadingState />
+          <LoadingDeck />
         ) : loadState === "error" ? (
           <ErrorState onRetry={() => void loadOrders()} />
-        ) : activeSection === "orders" ? (
-          <OwnerOrdersView
-            orders={allTodayOrders}
-            now={now}
-            onSelectOrder={setSelectedOrder}
-          />
-        ) : activeSection === "payments" ? (
-          <OwnerPaymentsView
-            orders={allTodayOrders}
-            now={now}
-            onSelectOrder={setSelectedOrder}
-          />
-        ) : activeSection === "reports" ? (
-          <OwnerReportsView
-            orders={allTodayOrders}
-            expensesTotal={expensesTotalToday}
-            expLoadState={expLoadState}
-            now={now}
-            onSelectOrder={setSelectedOrder}
-          />
-        ) : activeSection === "menu" ? (
-          <OwnerMenuView />
         ) : (
-          <main className="mx-auto w-full max-w-[1600px] px-5 py-6 lg:px-8">
-            {/* Page-level eyebrow — spans both columns so the grid below starts
-                on one clean line (hero and right rail share the same top edge). */}
-            <div className="mb-4 flex items-center gap-3">
-              <p className="shrink-0 text-[11px] uppercase tracking-[0.2em] text-[var(--color-muted-foreground)]">
-                Today&apos;s operations snapshot · 營運快照
-              </p>
-              <span aria-hidden className="h-px flex-1 bg-[var(--color-gold)]/15" />
-            </div>
-            <div className="grid grid-cols-12 gap-6">
-            <section className="col-span-12 space-y-6 xl:col-span-8">
-              <Hero summary={summary} />
-              <MetricsGrid summary={summary} />
-              <ExpenseNetRow
+          // Keyed on the section so switching views reads as the console
+          // turning to face somewhere else, not as a hard content swap.
+          <main key={activeSection} className="oc-view oc-grid">
+            {activeSection === "orders" ? (
+              <OwnerOrdersView orders={allTodayOrders} now={now} onSelectOrder={setSelectedOrder} />
+            ) : activeSection === "payments" ? (
+              <OwnerPaymentsView orders={allTodayOrders} now={now} onSelectOrder={setSelectedOrder} />
+            ) : activeSection === "reports" ? (
+              <OwnerReportsView
+                orders={allTodayOrders}
                 expensesTotal={expensesTotalToday}
-                collected={summary.collected}
                 expLoadState={expLoadState}
+                now={now}
+                onSelectOrder={setSelectedOrder}
               />
-              <RevenueTrend orders={orders} now={now} />
-              <RecentOrders recent={recentAll} onSelectOrder={setSelectedOrder} />
-            </section>
-
-            <aside className="col-span-12 space-y-6 xl:col-span-4">
-              <NeedsAttention
+            ) : activeSection === "menu" ? (
+              <OwnerMenuView />
+            ) : (
+              <OverviewDeck
+                orders={orders}
+                now={now}
+                summary={summary}
                 doneUnpaid={doneUnpaid}
                 unpaidOpen={unpaidOpen}
                 activeDeliveries={activeDeliveries}
+                outForDeliveryNow={outForDeliveryNow}
+                deliveredToday={deliveredToday}
+                cancelledToday={cancelledToday}
+                cancelledTodayValue={cancelledTodayValue}
+                recentAll={recentAll}
+                expenses={expenses}
+                expensesTotal={expensesTotalToday}
+                expLoadState={expLoadState}
+                onRetryExpenses={() => void loadExpenses()}
                 onSelectOrder={setSelectedOrder}
               />
-              <DeliveryWatch
-                activeCount={activeDeliveries.length}
-                outNowCount={outForDeliveryNow.length}
-                deliveredCount={deliveredToday.length}
-              />
-              {cancelledToday.length > 0 && (
-                <CancelledToday
-                  orders={cancelledToday}
-                  totalValue={cancelledTodayValue}
-                  onSelectOrder={setSelectedOrder}
-                />
-              )}
-              <PaymentMix
-                collected={summary.collected}
-                cash={summary.cash}
-                transfer={summary.transfer}
-                unpaid={summary.unpaidTotal}
-                unpaidCount={summary.unpaidCount}
-              />
-              <ExpenseSummary
-                expenses={expenses}
-                loadState={expLoadState}
-                onRetry={() => void loadExpenses()}
-              />
-            </aside>
-            </div>
+            )}
           </main>
         )}
+      </div>
+
+      <ConsoleTabs activeSection={activeSection} onSectionChange={setActiveSection} />
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Shell — rail, tab bar, command bar
+   ═══════════════════════════════════════════════════════════════════════ */
+
+type OwnerSection = "overview" | "orders" | "payments" | "reports" | "menu";
+
+const NAV_ITEMS: { id: OwnerSection; label: string; labelZh: string; icon: LucideIcon }[] = [
+  { id: "overview", label: "Overview", labelZh: "總覽", icon: LayoutGrid },
+  { id: "orders",   label: "Orders",   labelZh: "訂單", icon: ClipboardList },
+  { id: "menu",     label: "Menu",     labelZh: "菜單", icon: UtensilsCrossed },
+  { id: "payments", label: "Payments", labelZh: "收款", icon: Banknote },
+  { id: "reports",  label: "Reports",  labelZh: "報表", icon: LineChartIcon },
+];
+
+// Rail rows are 44px with a 4px gap, so the light travels a 48px stride.
+// Keeping this a constant means the indicator and the buttons can never
+// drift apart when the row height is tuned.
+const RAIL_STRIDE = 48;
+
+function ConsoleRail({
+  activeSection,
+  onSectionChange,
+  attentionCount,
+}: {
+  activeSection: OwnerSection;
+  onSectionChange: (s: OwnerSection) => void;
+  attentionCount: number;
+}) {
+  const [hint, setHint] = useState(false);
+  const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => { if (hintTimer.current) clearTimeout(hintTimer.current); }, []);
+
+  function showHint() {
+    if (hintTimer.current) clearTimeout(hintTimer.current);
+    setHint(true);
+    hintTimer.current = setTimeout(() => setHint(false), 2600);
+  }
+
+  const activeIndex = Math.max(0, NAV_ITEMS.findIndex((n) => n.id === activeSection));
+
+  return (
+    <aside className="sticky top-0 hidden h-[100dvh] w-[224px] shrink-0 flex-col border-r border-[var(--oc-rule)] bg-[oklch(0.175_0.008_58)] lg:flex xl:w-[248px]">
+      {/* Masthead. The vertical 東主 spine runs the height of the block —
+          it says whose console this is without spending a headline on it. */}
+      <div className="relative flex gap-4 border-b border-[var(--oc-rule)] px-6 pb-6 pt-7">
+        {/* The spine runs the full height of the masthead with a hairline
+            under it, so it reads as an edge the wordmark is set against
+            rather than as two characters floating in the corner. */}
+        <span
+          aria-hidden
+          className="vertical-cn flex shrink-0 flex-col items-center gap-2 text-[10px] text-[var(--color-gold-soft)]/45"
+        >
+          東主
+          <span className="w-px flex-1 bg-[var(--oc-rule)]" />
+        </span>
+        <div className="min-w-0">
+          <BrandMark className="h-7 w-7" />
+          <p className="mt-3 font-display text-[23px] leading-[1.08] tracking-[-0.015em] text-[var(--color-cream)]">
+            The <span className="text-[var(--color-vermillion)]">Third</span> Place
+          </p>
+          <p className="mt-1 text-[10.5px] uppercase tracking-[0.16em] text-[var(--color-gold-soft)]/60">
+            Chinese BBQ &amp; Lounge
+          </p>
+        </div>
+      </div>
+
+      <nav className="relative flex-1 px-3 py-5" aria-label="Owner sections">
+        {/* One light for the whole rail. It slides between rows so a section
+            change reads as the light travelling, not two highlights blinking. */}
+        <span
+          aria-hidden
+          className="oc-navlight pointer-events-none absolute left-3 right-3 top-5 h-11 rounded-lg border border-[var(--color-gold)]/25 bg-[var(--color-gold)]/[0.07] shadow-[inset_2px_0_0_var(--color-gold)]"
+          style={{ "--oc-nav-y": `${activeIndex * RAIL_STRIDE}px` } as CSSProperties}
+        />
+        <ul className="relative space-y-1">
+          {NAV_ITEMS.map(({ id, label, labelZh, icon: Icon }) => {
+            const isActive = id === activeSection;
+            return (
+              <li key={id}>
+                <button
+                  type="button"
+                  aria-current={isActive ? "page" : undefined}
+                  onClick={() => onSectionChange(id)}
+                  className={cn(
+                    "oc-press flex h-11 w-full items-center gap-3 rounded-lg px-3 text-[14px] transition-colors",
+                    isActive
+                      ? "text-[var(--color-cream)]"
+                      : "text-[var(--color-gold-soft)]/60 hover:text-[var(--color-cream)]/85",
+                  )}
+                >
+                  <Icon
+                    className="h-[16px] w-[16px] shrink-0 transition-opacity"
+                    strokeWidth={1.5}
+                    style={{ opacity: isActive ? 0.9 : 0.55 }}
+                  />
+                  <span className="flex-1 text-left">{label}</span>
+                  <span className="shrink-0 text-[11px] text-[var(--color-muted-foreground)]/70">
+                    {labelZh}
+                  </span>
+                  {/* The one badge in the rail. It exists only while money is
+                      genuinely outstanding, so it never becomes wallpaper. */}
+                  {id === "overview" && attentionCount > 0 && (
+                    <span className="oc-num shrink-0 rounded-full bg-[var(--color-vermillion)]/20 px-1.5 py-0.5 text-[10px] text-[var(--color-vermillion)]">
+                      {attentionCount}
+                    </span>
+                  )}
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+
+        <div className="mt-4 border-t border-[var(--oc-rule)] pt-4">
+          <button
+            type="button"
+            onClick={showHint}
+            className="oc-press flex h-11 w-full cursor-default items-center gap-3 rounded-lg px-3 text-[14px] text-[var(--color-gold-soft)]/35 transition-colors hover:text-[var(--color-gold-soft)]/55"
+          >
+            <Settings className="h-[16px] w-[16px] shrink-0" strokeWidth={1.5} />
+            <span className="flex-1 text-left">Settings</span>
+            <span className="shrink-0 rounded-sm border border-[var(--color-gold)]/18 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] text-[var(--color-muted-foreground)]">
+              Soon
+            </span>
+          </button>
+        </div>
+      </nav>
+
+      <div className="border-t border-[var(--oc-rule)] px-6 py-4">
+        <p className="text-[10.5px] leading-relaxed text-[var(--color-muted-foreground)]">
+          {hint
+            ? "Settings arrives in a later release."
+            : "Overview, Orders, Menu, Payments and Reports are live."}
+        </p>
+      </div>
+    </aside>
+  );
+}
+
+/** Mobile navigation. The old dashboard had none below `lg` — the sidebar
+ *  simply disappeared and the owner was stranded on whichever section they
+ *  landed on. Rows are 48px so they clear the touch-target floor. */
+function ConsoleTabs({
+  activeSection,
+  onSectionChange,
+}: {
+  activeSection: OwnerSection;
+  onSectionChange: (s: OwnerSection) => void;
+}) {
+  return (
+    <nav
+      aria-label="Owner sections"
+      className="oc-bar fixed inset-x-0 bottom-0 z-40 border-t border-[var(--oc-rule)] lg:hidden"
+      style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
+    >
+      <ul className="mx-auto flex max-w-[560px]">
+        {NAV_ITEMS.map(({ id, label, icon: Icon }) => {
+          const isActive = id === activeSection;
+          return (
+            <li key={id} className="flex-1">
+              <button
+                type="button"
+                aria-current={isActive ? "page" : undefined}
+                onClick={() => onSectionChange(id)}
+                className="oc-press relative flex h-[60px] w-full flex-col items-center justify-center gap-1"
+              >
+                <span
+                  aria-hidden
+                  className={cn(
+                    "absolute inset-x-5 top-0 h-[2px] rounded-b-full bg-[var(--color-gold)] transition-opacity duration-200",
+                    isActive ? "opacity-100" : "opacity-0",
+                  )}
+                />
+                <Icon
+                  className="h-[18px] w-[18px]"
+                  strokeWidth={1.5}
+                  style={{ opacity: isActive ? 0.95 : 0.5 }}
+                />
+                <span
+                  className={cn(
+                    "text-[10px] tracking-[0.06em]",
+                    isActive
+                      ? "text-[var(--color-cream)]"
+                      : "text-[var(--color-gold-soft)]/55",
+                  )}
+                >
+                  {label}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </nav>
+  );
+}
+
+/** Translucent command bar the deck scrolls under, with the ember bed as its
+ *  lower edge instead of a divider rule. */
+function CommandBar({
+  now,
+  live,
+  heat,
+  refreshing,
+  onRefresh,
+}: {
+  now: Date;
+  live: boolean;
+  heat: number;
+  refreshing: boolean;
+  onRefresh: () => void;
+}) {
+  return (
+    <header className="oc-bar sticky top-0 z-30">
+      <div className="mx-auto flex w-full max-w-[1560px] flex-wrap items-end justify-between gap-x-6 gap-y-4 px-5 pb-5 pt-5 lg:px-8 lg:pt-6">
+        <div className="min-w-0">
+          <h1 className="font-display text-[30px] leading-[1.04] tracking-[-0.02em] text-[var(--color-cream)] sm:text-[38px]">
+            {greeting(now)}, <span className="text-[var(--color-gold)]">{OWNER_NAME}</span>.
+          </h1>
+          <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2">
+            <span className="flex items-center gap-3 text-[11px] uppercase tracking-[0.24em] text-[var(--color-gold-soft)]/75">
+              <span aria-hidden className="h-px w-6 bg-[var(--color-gold)]/40" />
+              Dinner Service
+            </span>
+            <span className="oc-num text-[11px] tracking-[0.06em] text-[var(--color-muted-foreground)]">
+              {dateLabel(now)}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-4">
+          <LiveSeal live={live} />
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={refreshing}
+            aria-label={`Refresh. Last updated ${hhmm(now)}`}
+            className="oc-press group flex h-11 items-center gap-2 rounded-xl border border-[var(--oc-rule)] bg-[oklch(0.22_0.012_58)] px-4 text-[13px] text-[var(--color-gold-soft)]/90 transition-colors hover:border-[var(--oc-rule-lit)] hover:text-[var(--color-cream)] disabled:opacity-60"
+          >
+            <RefreshCw
+              className={cn(
+                "h-3.5 w-3.5 transition-transform duration-500",
+                refreshing ? "animate-spin" : "group-hover:rotate-180",
+              )}
+              strokeWidth={1.5}
+            />
+            <span className="oc-num hidden sm:inline">{hhmm(now)}</span>
+          </button>
+        </div>
+      </div>
+
+      <EmberBed heat={heat} />
+      <div aria-hidden className="oc-bar-edge h-4 w-full" />
+    </header>
+  );
+}
+
+/** Shared page shell for every section below the command bar. */
+function Deck({ children }: { children: ReactNode }) {
+  return (
+    <div className="mx-auto w-full max-w-[1560px] px-5 pb-14 pt-5 lg:px-8">{children}</div>
+  );
+}
+
+/** Section title band. The Chinese reading sits alongside the English at the
+ *  same weight — this is a bilingual room, not an English one with captions. */
+function ViewHead({
+  title,
+  titleZh,
+  meta,
+}: {
+  title: string;
+  titleZh: string;
+  meta: string;
+}) {
+  return (
+    <div className="mb-6 flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
+      <h2 className="font-display text-[26px] leading-none tracking-[-0.015em] text-[var(--color-cream)]">
+        {title}{" "}
+        <span className="text-[var(--color-gold-soft)]/70">{titleZh}</span>
+      </h2>
+      <p className="text-[11.5px] uppercase tracking-[0.16em] text-[var(--color-muted-foreground)]">
+        {meta}
+      </p>
+      <span aria-hidden className="h-px w-full bg-[var(--oc-rule)]" />
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Tiles
+   ═══════════════════════════════════════════════════════════════════════ */
+
+type Tone = "money" | "warn" | "alert" | "muted" | "cost";
+
+function toneColor(tone: Tone): string {
+  switch (tone) {
+    case "money":
+      return "var(--color-gold)";
+    case "warn":
+      return "var(--color-gold-soft)";
+    case "alert":
+      return "var(--color-vermillion)";
+    case "cost":
+      return "oklch(0.62 0.155 27 / 0.88)";
+    default:
+      return "var(--color-cream)";
+  }
+}
+
+/** The console's unit of measurement. One figure, its accent spine, and the
+ *  one line of context that makes the figure mean something.
+ *
+ *  Renders as a real <button> when it filters something, so the pressed state
+ *  is announced rather than only drawn. A tile that does nothing stays a
+ *  <div> — a button that isn't one is worse than no affordance at all. */
+function StatTile({
+  icon: Icon,
+  label,
+  labelZh,
+  value,
+  money = false,
+  sub,
+  tone,
+  index = 0,
+  active,
+  onClick,
+}: {
+  icon: LucideIcon;
+  label: string;
+  labelZh: string;
+  value: number | string;
+  money?: boolean;
+  sub: string;
+  tone: Tone;
+  index?: number;
+  active?: boolean;
+  onClick?: () => void;
+}) {
+  const t = useTilt();
+  const accent = toneColor(tone);
+  const interactive = Boolean(onClick);
+
+  const body = (
+    <>
+      <span
+        aria-hidden
+        className={cn(
+          "absolute bottom-5 left-0 top-5 w-[2px] rounded-r-full transition-opacity duration-300",
+          active ? "opacity-100" : "opacity-55 group-hover:opacity-100",
+        )}
+        style={{ background: accent }}
+      />
+      {/* The English label owns the top line outright. Sharing it with the
+          Chinese reading squeezed six-across tiles down to "Ne… 今日淨額" —
+          the operational label is the one that must never truncate, so the
+          second reading moves to the context line below. */}
+      <div className="relative flex min-w-0 items-center gap-2 text-[11.5px] text-[var(--color-gold-soft)]/85">
+        <Icon
+          className="h-4 w-4 shrink-0"
+          strokeWidth={1.5}
+          style={{ color: accent, opacity: 0.85 }}
+        />
+        <span className="truncate">{label}</span>
+      </div>
+      <div
+        className="relative mt-3.5 break-all text-[25px] leading-none sm:text-[28px]"
+        style={{ color: tone === "muted" ? "var(--color-cream)" : accent }}
+      >
+        {typeof value === "number" ? (
+          money ? <Money value={value} /> : <Count value={value} />
+        ) : (
+          <span className="oc-num">{value}</span>
+        )}
+      </div>
+      {/* No "filtering" caption on the pressed state: the lit spine, the gold
+          border and aria-pressed already say it, and the word cost the tile
+          its second reading. */}
+      <div className="relative mt-2.5 flex items-baseline justify-between gap-2 text-[11.5px] text-[var(--color-muted-foreground)]">
+        <span className="min-w-0 truncate">{sub}</span>
+        <span className="shrink-0 text-[11px] text-[var(--color-muted-foreground)]/80">
+          {labelZh}
+        </span>
+      </div>
+    </>
+  );
+
+  const shell = cn(
+    "oc-slab oc-lift oc-spec oc-tilt group relative h-full w-full overflow-hidden rounded-2xl px-5 py-5 text-left",
+    active && "border-[var(--color-gold)]/45",
+  );
+
+  return (
+    <div className="oc-rise h-full" style={{ "--i": index } as CSSProperties}>
+      {interactive ? (
+        <button
+          type="button"
+          ref={t.ref as RefObject<HTMLButtonElement | null>}
+          onPointerEnter={t.onPointerEnter}
+          onPointerMove={t.onPointerMove}
+          onPointerLeave={t.onPointerLeave}
+          onClick={onClick}
+          aria-pressed={active}
+          className={cn(shell, "oc-press")}
+        >
+          {body}
+        </button>
+      ) : (
+        <div
+          ref={t.ref as RefObject<HTMLDivElement | null>}
+          onPointerEnter={t.onPointerEnter}
+          onPointerMove={t.onPointerMove}
+          onPointerLeave={t.onPointerLeave}
+          className={shell}
+        >
+          {body}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Filter pill. Counts live inside the pill so choosing a filter is an
+ *  informed choice rather than a guess followed by an empty table. */
+function FilterPill({
+  label,
+  labelZh,
+  count,
+  active,
+  danger,
+  onClick,
+}: {
+  label: string;
+  labelZh?: string;
+  count: number;
+  active: boolean;
+  danger?: boolean;
+  onClick: () => void;
+}) {
+  const accent = danger ? "var(--color-vermillion)" : "var(--color-gold)";
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "oc-press flex h-9 items-center gap-2 rounded-full border px-3.5 text-[12px] font-medium tracking-[0.04em] transition-colors",
+        active
+          ? "text-[var(--color-cream)]"
+          : "border-[var(--oc-rule)] text-[var(--color-muted-foreground)] hover:border-[var(--oc-rule-lit)] hover:text-[var(--color-cream)]/80",
+      )}
+      style={
+        active
+          ? { borderColor: accent, backgroundColor: `color-mix(in oklab, ${accent} 14%, transparent)` }
+          : undefined
+      }
+    >
+      <span>
+        {label}
+        {labelZh && <span className="ml-1.5 text-[var(--color-muted-foreground)]">{labelZh}</span>}
+      </span>
+      <span
+        className={cn(
+          "oc-num rounded-full px-1.5 py-0.5 text-[10px]",
+          active ? "bg-[var(--color-cream)]/12 text-[var(--color-cream)]" : "bg-[var(--color-gold)]/8",
+        )}
+      >
+        {count}
+      </span>
+    </button>
+  );
+}
+
+/** Table shell. Recessed below the working plane so a data surface reads as
+ *  something the cards sit above, and horizontally scrollable inside its own
+ *  bounds so a wide audit table never makes the page scroll sideways. */
+function TableShell({ children, index = 0 }: { children: ReactNode; index?: number }) {
+  return (
+    <div className="oc-rise" style={{ "--i": index } as CSSProperties}>
+      <div className="oc-slab oc-slab-recessed overflow-hidden rounded-2xl">
+        <div className="overflow-x-auto">{children}</div>
       </div>
     </div>
   );
 }
 
-/* ---------- Orders view ---------- */
+function Th({ children, right }: { children: ReactNode; right?: boolean }) {
+  return (
+    <th
+      className={cn(
+        "whitespace-nowrap px-4 py-3 text-[10.5px] font-medium uppercase tracking-[0.14em] text-[var(--color-muted-foreground)]",
+        right ? "text-right" : "text-left",
+      )}
+    >
+      {children}
+    </th>
+  );
+}
+
+/** Empty state. Never a bare sentence in a void — it says what is missing
+ *  and what would put something there. */
+function EmptyNote({ zh, en, hint }: { zh: string; en: string; hint?: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+      <div className="mb-3 flex items-center gap-3">
+        <span aria-hidden className="h-px w-8 bg-[var(--color-gold)]/30" />
+        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-[var(--color-gold)]/40" />
+        <span aria-hidden className="h-px w-8 bg-[var(--color-gold)]/30" />
+      </div>
+      <p className="font-display text-[19px] text-[var(--color-gold-soft)]/85">{zh}</p>
+      <p className="mt-1.5 text-[13px] text-[var(--color-muted-foreground)]">{en}</p>
+      {hint && (
+        <p className="mt-1 max-w-[380px] text-[12px] text-[var(--color-muted-foreground)]/60">
+          {hint}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Overview deck
+   ═══════════════════════════════════════════════════════════════════════ */
+
+function OverviewDeck({
+  orders,
+  now,
+  summary,
+  doneUnpaid,
+  unpaidOpen,
+  activeDeliveries,
+  outForDeliveryNow,
+  deliveredToday,
+  cancelledToday,
+  cancelledTodayValue,
+  recentAll,
+  expenses,
+  expensesTotal,
+  expLoadState,
+  onRetryExpenses,
+  onSelectOrder,
+}: {
+  orders: StaffOrder[];
+  now: Date;
+  summary: ReturnType<typeof summarizeToday>;
+  doneUnpaid: StaffOrder[];
+  unpaidOpen: StaffOrder[];
+  activeDeliveries: StaffOrder[];
+  outForDeliveryNow: StaffOrder[];
+  deliveredToday: StaffOrder[];
+  cancelledToday: StaffOrder[];
+  cancelledTodayValue: number;
+  recentAll: StaffOrder[];
+  expenses: Expense[];
+  expensesTotal: number;
+  expLoadState: LoadState;
+  onRetryExpenses: () => void;
+  onSelectOrder: (o: StaffOrder) => void;
+}) {
+  const expLoading = expLoadState !== "ready";
+  const net = summary.collected - expensesTotal;
+
+  return (
+    <Deck>
+      <div className="mb-5 flex items-center gap-3">
+        <Eyebrow className="shrink-0">Tonight&apos;s operations · 營運快照</Eyebrow>
+        <span aria-hidden className="h-px flex-1 bg-[var(--oc-rule)]" />
+      </div>
+
+      {/* Band 1 — money in hand, and what is owed. */}
+      <div className="grid grid-cols-12 gap-5">
+        <div className="col-span-12 xl:col-span-7">
+          <LedgerStone summary={summary} orders={orders} now={now} />
+        </div>
+        <div className="col-span-12 xl:col-span-5">
+          <NeedsAttention
+            doneUnpaid={doneUnpaid}
+            unpaidOpen={unpaidOpen}
+            activeDeliveries={activeDeliveries}
+            onSelectOrder={onSelectOrder}
+          />
+        </div>
+      </div>
+
+      {/* Band 2 — the figures behind the headline. */}
+      <div className="mt-5 grid grid-cols-2 gap-5 sm:grid-cols-3 2xl:grid-cols-6">
+        <StatTile icon={Wallet} label="Cash" labelZh="現金" value={summary.cash} money sub="collected" tone="money" index={0} />
+        <StatTile icon={ArrowLeftRight} label="Transfer" labelZh="轉帳" value={summary.transfer} money sub="collected" tone="money" index={1} />
+        <StatTile
+          icon={AlertTriangle}
+          label="Unpaid"
+          labelZh="未付"
+          value={summary.unpaidTotal}
+          money
+          sub={`${summary.unpaidCount} ${summary.unpaidCount === 1 ? "order" : "orders"}`}
+          tone={summary.unpaidTotal > 0 ? "warn" : "muted"}
+          index={2}
+        />
+        {/* Same predicate as the Payments view's Risk filter (isPaymentRisk =
+            completed AND unpaid), so it carries the same name. Two labels for
+            one concept made the console look like it tracked two things. */}
+        <StatTile
+          icon={Receipt}
+          label="At Risk"
+          labelZh="風險"
+          value={summary.doneUnpaidCount}
+          sub="closed, not paid"
+          tone={summary.doneUnpaidCount > 0 ? "alert" : "muted"}
+          index={3}
+        />
+        <StatTile
+          icon={TrendingDown}
+          label="Expenses"
+          labelZh="今日支出"
+          value={expLoading ? "…" : expensesTotal}
+          money
+          sub="logged outflows"
+          tone={expLoading ? "muted" : "cost"}
+          index={4}
+        />
+        <StatTile
+          icon={Scale}
+          label="Net Today"
+          labelZh="今日淨額"
+          value={expLoading ? "…" : net}
+          money
+          sub="collected minus expenses"
+          tone={expLoading ? "muted" : net < 0 ? "alert" : "money"}
+          index={5}
+        />
+      </div>
+
+      {/* Band 3 — where the money moved. */}
+      <div className="mt-5 grid grid-cols-12 gap-5">
+        <div className="col-span-12 xl:col-span-8">
+          <RevenueTrend orders={orders} now={now} />
+        </div>
+        <div className="col-span-12 xl:col-span-4">
+          <PaymentMix
+            collected={summary.collected}
+            cash={summary.cash}
+            transfer={summary.transfer}
+            unpaid={summary.unpaidTotal}
+            unpaidCount={summary.unpaidCount}
+          />
+        </div>
+      </div>
+
+      {/* Band 4 — what the floor actually did. */}
+      <div className="mt-5 grid grid-cols-12 gap-5">
+        <div className="col-span-12 xl:col-span-8">
+          <RecentOrders recent={recentAll} onSelectOrder={onSelectOrder} />
+        </div>
+        <div className="col-span-12 space-y-5 xl:col-span-4">
+          <DeliveryWatch
+            activeCount={activeDeliveries.length}
+            outNowCount={outForDeliveryNow.length}
+            deliveredCount={deliveredToday.length}
+          />
+          {cancelledToday.length > 0 && (
+            <CancelledToday
+              orders={cancelledToday}
+              totalValue={cancelledTodayValue}
+              onSelectOrder={onSelectOrder}
+            />
+          )}
+          <ExpenseSummary
+            expenses={expenses}
+            loadState={expLoadState}
+            onRetry={onRetryExpenses}
+          />
+        </div>
+      </div>
+    </Deck>
+  );
+}
+
+/* ---------- The Ledger Stone ---------- */
+
+/** Tonight's realized revenue, per hour, from the open of service.
+ *  Same source and same rules as the trend chart — paid, non-cancelled. */
+function hourlyPaidSeries(orders: readonly StaffOrder[], now: Date): number[] {
+  const map = paidRevenueByHour(orders, now);
+  const OPEN_HOUR = 10;
+  const end = Math.max(now.getHours(), OPEN_HOUR + 1);
+  const out: number[] = [];
+  for (let h = OPEN_HOUR; h <= end; h++) out.push(map[h] ?? 0);
+  return out;
+}
+
+/** The signature slab. Every other card on the deck is quiet so this one can
+ *  carry the whole page: the night's takings, split by how they arrived, with
+ *  the shape of the night etched into the lower edge.
+ *
+ *  It is the only element that both tilts and holds a live curve, which is
+ *  what makes it read as the thing the console is built around. */
+function LedgerStone({
+  summary,
+  orders,
+  now,
+}: {
+  summary: ReturnType<typeof summarizeToday>;
+  orders: readonly StaffOrder[];
+  now: Date;
+}) {
+  const series = useMemo(() => hourlyPaidSeries(orders, now), [orders, now]);
+  const hasCurve = series.some((v) => v > 0);
+  const cashPct = summary.collected > 0 ? (summary.cash / summary.collected) * 100 : 0;
+
+  return (
+    // flex column so the etched curve can sit on the bottom edge however tall
+    // the slab is stretched by its neighbour. Left to flow, it stranded the
+    // curve mid-card with dead space beneath it.
+    <Slab tilt index={0} className="flex flex-col overflow-hidden">
+      {/* Ember wash in the top-right corner — the light source, made visible
+          once, on the one card that earns it. */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute -right-24 -top-28 h-72 w-72 rounded-full"
+        style={{
+          background: "radial-gradient(circle, oklch(0.55 0.19 27 / 0.13) 0%, transparent 62%)",
+        }}
+      />
+
+      <div className="relative px-6 pb-6 pt-6 sm:px-8 sm:pt-8">
+        <div className="flex items-start justify-between gap-4">
+          <div className="min-w-0">
+            <Eyebrow>Collected Tonight · 今晚收款</Eyebrow>
+            <p className="mt-1.5 text-[12px] text-[var(--color-muted-foreground)]">
+              Paid cash and paid transfer only
+            </p>
+          </div>
+          <span className="oc-num shrink-0 rounded-full border border-[var(--oc-rule)] px-3 py-1 text-[11.5px] text-[var(--color-gold-soft)]/85">
+            {summary.orderCount} {summary.orderCount === 1 ? "order" : "orders"}
+          </span>
+        </div>
+
+        <div className="mt-6 break-all text-[44px] leading-none text-[var(--color-gold)] sm:text-[58px] lg:text-[68px]">
+          <Money value={summary.collected} />
+        </div>
+
+        {/* How the money arrived, as a single measured bar rather than two
+            competing numbers. Cash reads gold, transfer reads soft gold —
+            same family, because they are the same thing: money in hand. */}
+        <div className="mt-7">
+          <div
+            className="flex h-1.5 w-full overflow-hidden rounded-full bg-[var(--color-charcoal)]"
+            role="img"
+            aria-label={`Cash ${baht(summary.cash)}, transfer ${baht(summary.transfer)}`}
+          >
+            <span
+              className="h-full bg-[var(--color-gold)] transition-[width] duration-700 ease-[cubic-bezier(0.23,1,0.32,1)]"
+              style={{ width: `${cashPct}%` }}
+            />
+            <span
+              className="h-full flex-1 bg-[var(--color-gold-soft)]/55 transition-all duration-700"
+              style={{ opacity: summary.collected > 0 ? 1 : 0 }}
+            />
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-x-6 gap-y-1.5 text-[12.5px]">
+            <span className="flex items-center gap-2 text-[var(--color-cream)]/85">
+              <span aria-hidden className="h-2 w-2 rounded-[2px] bg-[var(--color-gold)]" />
+              Cash 現金
+              <span className="oc-num text-[var(--color-gold)]">{baht(summary.cash)}</span>
+            </span>
+            <span className="flex items-center gap-2 text-[var(--color-cream)]/85">
+              <span aria-hidden className="h-2 w-2 rounded-[2px] bg-[var(--color-gold-soft)]/70" />
+              Transfer 轉帳
+              <span className="oc-num text-[var(--color-gold-soft)]">{baht(summary.transfer)}</span>
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* The night, etched into the lower edge. Empty until there is something
+          real to draw — a decorative curve here would be a lie about takings. */}
+      <div className="relative mt-auto h-20 w-full min-h-20 pt-6 sm:h-28">
+        {hasCurve ? (
+          <Sparkline points={series} />
+        ) : (
+          <div className="flex h-full items-end justify-center pb-4">
+            <p className="text-[11.5px] text-[var(--color-muted-foreground)]/70">
+              The night&apos;s curve appears with the first paid order.
+            </p>
+          </div>
+        )}
+      </div>
+    </Slab>
+  );
+}
+
+/* ---------- Needs Attention ---------- */
+
+function NeedsAttention({
+  doneUnpaid,
+  unpaidOpen,
+  activeDeliveries,
+  onSelectOrder,
+}: {
+  doneUnpaid: StaffOrder[];
+  unpaidOpen: StaffOrder[];
+  activeDeliveries: StaffOrder[];
+  onSelectOrder: (o: StaffOrder) => void;
+}) {
+  const openCount = doneUnpaid.length + unpaidOpen.length;
+  const hasContent = openCount > 0 || activeDeliveries.length > 0;
+
+  return (
+    // The rim breathes only while money is genuinely outstanding. At zero the
+    // card is completely still, so "nothing waiting" is legible across a room.
+    <Slab index={1} alert={openCount > 0} className="flex flex-col overflow-hidden">
+      <PanelHead
+        eyebrow="Control Room · 需注意"
+        title="Needs Attention"
+        meta={
+          <span
+            className={cn(
+              "oc-num rounded-full border px-2.5 py-1 text-[11px]",
+              openCount > 0
+                ? "border-[var(--color-vermillion)]/45 bg-[var(--color-vermillion)]/15 text-[var(--color-vermillion)]"
+                : "border-[var(--oc-rule)] text-[var(--color-muted-foreground)]",
+            )}
+          >
+            {openCount} open
+          </span>
+        }
+      />
+
+      {hasContent ? (
+        <div className="min-h-0 flex-1 divide-y divide-[var(--oc-rule)] overflow-y-auto">
+          <AttnGroup
+            title="Done / Delivered — unpaid"
+            titleZh="已完成未付"
+            tone="var(--color-vermillion)"
+            orders={doneUnpaid}
+            onSelectOrder={onSelectOrder}
+          />
+          <AttnGroup
+            title="Unpaid — still open"
+            titleZh="未付進行中"
+            tone="var(--color-gold-soft)"
+            orders={unpaidOpen}
+            onSelectOrder={onSelectOrder}
+          />
+          <AttnGroup
+            title="Active deliveries"
+            titleZh="配送"
+            tone="oklch(0.72 0.13 230)"
+            orders={activeDeliveries}
+            delivery
+            onSelectOrder={onSelectOrder}
+          />
+        </div>
+      ) : (
+        <div className="flex flex-1 items-center justify-center">
+          <EmptyNote zh="全部清楚" en="Nothing waiting — every order is settled." />
+        </div>
+      )}
+    </Slab>
+  );
+}
+
+function AttnGroup({
+  title,
+  titleZh,
+  tone,
+  orders,
+  delivery,
+  onSelectOrder,
+}: {
+  title: string;
+  titleZh: string;
+  tone: string;
+  orders: StaffOrder[];
+  delivery?: boolean;
+  onSelectOrder: (o: StaffOrder) => void;
+}) {
+  if (orders.length === 0) return null;
+  return (
+    <div className="px-5 py-4 sm:px-6">
+      <div className="mb-2.5 flex items-center gap-2.5">
+        {delivery ? (
+          <Bike className="h-3.5 w-3.5 shrink-0 text-sky-400/80" strokeWidth={1.5} />
+        ) : (
+          <span aria-hidden className="h-4 w-[3px] shrink-0 rounded-full" style={{ background: tone }} />
+        )}
+        <span className="min-w-0 truncate text-[12.5px] text-[var(--color-cream)]">
+          {title} <span className="text-[var(--color-muted-foreground)]">{titleZh}</span>
+        </span>
+        <span className="oc-num ml-auto shrink-0 text-[11px] text-[var(--color-muted-foreground)]">
+          {orders.length}
+        </span>
+      </div>
+      <ul className="space-y-0.5">
+        {orders.map((o) => (
+          <li key={o.orderId}>
+            <button
+              type="button"
+              onClick={() => onSelectOrder(o)}
+              className="oc-press -mx-2 flex w-[calc(100%+1rem)] items-start gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-[var(--color-gold)]/[0.07]"
+            >
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13px] text-[var(--color-cream)]/95">
+                  {delivery ? (o.customerName ?? o.customerPhone ?? "Delivery") : locText(o)}
+                </span>
+                <span className="oc-num block truncate text-[11px] text-[var(--color-muted-foreground)]">
+                  {o.orderId} · {delivery ? `${STATUS_META[o.status].labelEn} · ` : ""}{o.time}
+                </span>
+              </span>
+              <span className="oc-num shrink-0 whitespace-nowrap text-[14px] text-[var(--color-gold)]">
+                {baht(o.totalPrice)}
+              </span>
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+/* ---------- Delivery Watch ---------- */
+
+function DeliveryWatch({
+  activeCount,
+  outNowCount,
+  deliveredCount,
+}: {
+  activeCount: number;
+  outNowCount: number;
+  deliveredCount: number;
+}) {
+  return (
+    <Slab index={2} className="overflow-hidden">
+      <PanelHead eyebrow="Delivery Watch · 配送" icon={Bike} />
+      <div className="grid grid-cols-3 divide-x divide-[var(--oc-rule)]">
+        <DeliveryStat label="Active" labelZh="進行中" value={activeCount} />
+        <DeliveryStat label="Out Now" labelZh="配送中" value={outNowCount} sky />
+        <DeliveryStat label="Delivered" labelZh="已送達" value={deliveredCount} />
+      </div>
+    </Slab>
+  );
+}
+
+function DeliveryStat({
+  label,
+  labelZh,
+  value,
+  sky,
+}: {
+  label: string;
+  labelZh: string;
+  value: number;
+  sky?: boolean;
+}) {
+  const dim = value === 0;
+  return (
+    <div className="py-5 text-center">
+      <div
+        className={cn(
+          "text-[27px] leading-none",
+          dim
+            ? "text-[var(--color-muted-foreground)]/70"
+            : sky
+            ? "text-sky-400"
+            : "text-[var(--color-cream)]",
+        )}
+      >
+        <Count value={value} />
+      </div>
+      <div className="mt-2 text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted-foreground)]">
+        {label}
+      </div>
+      <div className="text-[10px] text-[var(--color-muted-foreground)]/55">{labelZh}</div>
+    </div>
+  );
+}
+
+/* ---------- Cancelled Today ---------- */
+
+function CancelledToday({
+  orders,
+  totalValue,
+  onSelectOrder,
+}: {
+  orders: StaffOrder[];
+  totalValue: number;
+  onSelectOrder: (o: StaffOrder) => void;
+}) {
+  return (
+    <Slab index={3} className="overflow-hidden">
+      <PanelHead
+        eyebrow="Cancelled Today · 今日取消"
+        icon={XCircle}
+        meta={
+          <>
+            <span className="oc-num block text-[16px] leading-none text-[var(--color-muted-foreground)]">
+              {baht(totalValue)}
+            </span>
+            <span className="mt-1 block text-[10.5px] text-[var(--color-muted-foreground)]/60">
+              {orders.length} {orders.length === 1 ? "order" : "orders"}
+            </span>
+          </>
+        }
+      />
+      <ul className="divide-y divide-[var(--oc-rule)]">
+        {orders.slice(0, 5).map((o) => (
+          <li key={o.orderId}>
+            <button
+              type="button"
+              onClick={() => onSelectOrder(o)}
+              className="flex w-full items-start gap-3 px-5 py-3 text-left transition-colors hover:bg-[var(--color-gold)]/[0.05] sm:px-6"
+            >
+              <span className="min-w-0 flex-1">
+                <span className="flex items-baseline gap-2 text-[12px]">
+                  <span className="oc-num text-[var(--color-muted-foreground)]">{o.orderId}</span>
+                  <span className="truncate text-[var(--color-muted-foreground)]/55">
+                    {locText(o)} · {o.time}
+                  </span>
+                </span>
+                {o.cancellationReason && (
+                  <span className="mt-0.5 block truncate text-[11.5px] italic text-[var(--color-muted-foreground)]/70">
+                    {o.cancellationReason}
+                  </span>
+                )}
+              </span>
+              <span className="oc-num shrink-0 text-[13px] text-[var(--color-muted-foreground)] line-through">
+                {baht(o.totalPrice)}
+              </span>
+            </button>
+          </li>
+        ))}
+        {orders.length > 5 && (
+          <li className="px-5 py-2.5 text-[11px] text-[var(--color-muted-foreground)] sm:px-6">
+            {orders.length - 5} more in Orders
+          </li>
+        )}
+      </ul>
+    </Slab>
+  );
+}
+
+/* ---------- Recent Orders ---------- */
+
+function RecentOrders({
+  recent,
+  onSelectOrder,
+}: {
+  recent: StaffOrder[];
+  onSelectOrder: (o: StaffOrder) => void;
+}) {
+  return (
+    <Slab index={2} className="overflow-hidden">
+      <PanelHead
+        eyebrow="Floor Activity · 最近訂單"
+        title="Recent Orders"
+        meta={
+          <span className="text-[11px] uppercase tracking-[0.16em] text-[var(--color-muted-foreground)]">
+            newest first
+          </span>
+        }
+      />
+
+      {recent.length === 0 ? (
+        <EmptyNote zh="目前沒有訂單" en="No orders yet tonight." />
+      ) : (
+        <>
+          {/* Phone: the table's six columns don't survive a 390px screen, so
+              each order becomes a row you can actually read and tap. */}
+          <ul className="divide-y divide-[var(--oc-rule)] sm:hidden">
+            {recent.map((o) => {
+              const meta = STATUS_META[o.status];
+              const cancelled = o.status === "cancelled";
+              return (
+                <li key={o.orderId}>
+                  <button
+                    type="button"
+                    onClick={() => onSelectOrder(o)}
+                    className="flex w-full items-start gap-3 px-5 py-3.5 text-left transition-colors hover:bg-[var(--color-gold)]/[0.05]"
+                  >
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[14px] text-[var(--color-cream)]">
+                        {locText(o)}
+                      </span>
+                      <span
+                        className={cn(
+                          "mt-0.5 block truncate text-[12px]",
+                          cancelled
+                            ? "text-[var(--color-muted-foreground)] line-through"
+                            : "text-[var(--color-cream)]/70",
+                        )}
+                      >
+                        {itemsSummary(o)}
+                      </span>
+                      <span className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--color-muted-foreground)]">
+                        <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", meta.dotClass)} />
+                        {meta.labelEn}
+                        <span className="oc-num">· {o.time}</span>
+                      </span>
+                    </span>
+                    <span className="shrink-0 text-right">
+                      <span
+                        className={cn(
+                          "oc-num block text-[15px]",
+                          cancelled ? "text-[var(--color-muted-foreground)]" : "text-[var(--color-gold)]",
+                        )}
+                      >
+                        {baht(o.totalPrice)}
+                      </span>
+                      {o.paymentStatus === "unpaid" && !cancelled && (
+                        <span className="mt-0.5 block text-[10.5px] text-[var(--color-vermillion-text)]">
+                          Unpaid
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+
+          <div className="hidden overflow-x-auto sm:block">
+            <table className="w-full min-w-[600px] text-[13px]">
+              <thead>
+                <tr className="border-b border-[var(--oc-rule)]">
+                  <Th>Table · Order</Th>
+                  <Th>Items</Th>
+                  <Th>Payment</Th>
+                  <Th right>Total</Th>
+                  <Th right>Status · Time</Th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-[var(--oc-rule)]">
+                {recent.map((o) => {
+                  const meta = STATUS_META[o.status];
+                  const cancelled = o.status === "cancelled";
+                  const paid = o.paymentStatus === "paid";
+                  return (
+                    <tr
+                      key={o.orderId}
+                      tabIndex={0}
+                      onClick={() => onSelectOrder(o)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          onSelectOrder(o);
+                        }
+                      }}
+                      className="oc-row cursor-pointer hover:bg-[var(--color-gold)]/[0.05]"
+                    >
+                      <td className="px-4 py-3.5">
+                        <div className="text-[var(--color-cream)]">{locText(o)}</div>
+                        <div className="oc-num mt-0.5 text-[11px] text-[var(--color-muted-foreground)]">
+                          {o.orderId}
+                        </div>
+                      </td>
+                      <td
+                        className={cn(
+                          "max-w-[220px] px-4 py-3.5",
+                          cancelled
+                            ? "text-[var(--color-muted-foreground)] line-through"
+                            : "text-[var(--color-cream)]/85",
+                        )}
+                      >
+                        <p className="truncate">{itemsSummary(o)}</p>
+                      </td>
+                      <td className="px-4 py-3.5 text-[12px] text-[var(--color-muted-foreground)]">
+                        {paid && o.paymentMethod ? (
+                          <span className="inline-flex items-center gap-1.5">
+                            {o.paymentMethod === "Cash" ? (
+                              <Wallet className="h-3 w-3" strokeWidth={1.5} />
+                            ) : (
+                              <ArrowLeftRight className="h-3 w-3" strokeWidth={1.5} />
+                            )}
+                            {o.paymentMethod}
+                          </span>
+                        ) : (
+                          <span
+                            className={
+                              o.paymentStatus === "unpaid"
+                                ? "text-[var(--color-vermillion-text)]"
+                                : "text-[var(--color-muted-foreground)]/60"
+                            }
+                          >
+                            {o.paymentStatus === "unpaid" ? "Unpaid" : "—"}
+                          </span>
+                        )}
+                      </td>
+                      <td
+                        className={cn(
+                          "oc-num px-4 py-3.5 text-right text-[15px]",
+                          cancelled ? "text-[var(--color-muted-foreground)]" : "text-[var(--color-gold)]",
+                        )}
+                      >
+                        {baht(o.totalPrice)}
+                      </td>
+                      <td className="px-4 py-3.5 text-right">
+                        {/* nowrap: "Out for Delivery" otherwise wraps and
+                            strands its status dot on a line of its own. */}
+                        <span className="inline-flex items-center justify-end gap-2 whitespace-nowrap text-[12px] text-[var(--color-cream)]/90">
+                          <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", meta.dotClass)} />
+                          {meta.labelEn}
+                        </span>
+                        <div className="oc-num mt-0.5 text-[11px] text-[var(--color-muted-foreground)]">
+                          {o.time}
+                        </div>
+                        {cancelled && o.cancellationReason && (
+                          <div className="mt-0.5 text-[10.5px] italic leading-tight text-[var(--color-muted-foreground)]/60">
+                            {o.cancellationReason}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </Slab>
+  );
+}
+
+/* ---------- Payment Mix — segmented ring ---------- */
+// The ring represents COLLECTED money only, so it always fills to 100% and the
+// centre value equals the ring total. Unpaid is shown as a separate ember row
+// below — it is never folded into collected. Empty state draws only the faint
+// track (no fake slice). All values are real.
+const RING_R = 62;
+const RING_C = 2 * Math.PI * RING_R;
+
+function PaymentMix({
+  collected,
+  cash,
+  transfer,
+  unpaid,
+  unpaidCount,
+}: {
+  collected: number;
+  cash: number;
+  transfer: number;
+  unpaid: number;
+  unpaidCount: number;
+}) {
+  const [drawn, setDrawn] = useState(false);
+  const [hovered, setHovered] = useState<string | null>(null);
+  useEffect(() => {
+    let id = requestAnimationFrame(() => {
+      id = requestAnimationFrame(() => setDrawn(true));
+    });
+    return () => cancelAnimationFrame(id);
+  }, []);
+
+  const segments = [
+    { key: "cash", value: cash, stroke: "var(--color-gold)" },
+    { key: "transfer", value: transfer, stroke: "var(--color-gold-soft)" },
+  ].filter((s) => s.value > 0);
+
+  const gap = segments.length > 1 ? 3 : 0;
+  let cursor = 0;
+  const arcs = segments.map((s) => {
+    const frac = collected > 0 ? s.value / collected : 0;
+    const len = Math.max(0, frac * RING_C - gap);
+    const arc = { ...s, len, offset: -cursor };
+    cursor += frac * RING_C;
+    return arc;
+  });
+
+  const pct = (v: number) => (collected > 0 ? Math.round((v / collected) * 100) : 0);
+
+  return (
+    <Slab index={3} className="overflow-hidden">
+      <PanelHead eyebrow="Collection Breakdown · 收款組成" title="Payment Mix" />
+
+      <div className="flex flex-col items-center gap-7 px-5 py-6 sm:px-6">
+        <div
+          className="relative h-[176px] w-[176px] shrink-0"
+          role="img"
+          aria-label={`Collected ${baht(collected)} — Cash ${baht(cash)}, Transfer ${baht(
+            transfer,
+          )}. Unpaid ${baht(unpaid)} not counted as collected.`}
+        >
+          <svg viewBox="0 0 144 144" className="h-full w-full">
+            <circle cx="72" cy="72" r={RING_R} fill="none" stroke="var(--color-charcoal)" strokeWidth="14" />
+            <g transform="rotate(-90 72 72)">
+              {arcs.map((a, i) => (
+                <circle
+                  key={a.key}
+                  cx="72"
+                  cy="72"
+                  r={RING_R}
+                  fill="none"
+                  stroke={a.stroke}
+                  // The hovered arc thickens rather than changing colour:
+                  // the identity of a segment must not move when you point
+                  // at it, only its emphasis.
+                  strokeWidth={hovered === a.key ? 18 : 14}
+                  strokeLinecap="butt"
+                  style={{
+                    strokeDasharray: drawn ? `${a.len} ${RING_C - a.len}` : `0 ${RING_C}`,
+                    strokeDashoffset: a.offset,
+                    transition: `stroke-dasharray 900ms var(--ease-fluid) ${i * 150}ms, stroke-width 200ms var(--ease-fluid)`,
+                  }}
+                />
+              ))}
+            </g>
+          </svg>
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center text-center">
+            <span className="text-[10px] uppercase tracking-[0.2em] text-[var(--color-gold-soft)]/80">
+              Collected
+            </span>
+            <span
+              className={cn(
+                "mt-1.5 text-[24px] leading-none",
+                collected > 0 ? "text-[var(--color-gold)]" : "text-[var(--color-gold)]/60",
+              )}
+            >
+              <Money value={collected} />
+            </span>
+            <span className="mt-1.5 text-[10.5px] text-[var(--color-muted-foreground)]">tonight</span>
+          </div>
+        </div>
+
+        <div className="w-full min-w-0">
+          {collected > 0 ? (
+            <div className="space-y-1">
+              <MixRow
+                dot="bg-[var(--color-gold)]"
+                label="Cash 現金"
+                value={baht(cash)}
+                pct={pct(cash)}
+                onHover={(on) => setHovered(on ? "cash" : null)}
+              />
+              <MixRow
+                dot="bg-[var(--color-gold-soft)]"
+                label="Transfer 轉帳"
+                value={baht(transfer)}
+                pct={pct(transfer)}
+                onHover={(on) => setHovered(on ? "transfer" : null)}
+              />
+            </div>
+          ) : (
+            <p className="text-[13px] text-[var(--color-muted-foreground)]">
+              沒有收款 · Nothing collected yet tonight.
+            </p>
+          )}
+
+          {/* Unpaid sits below a rule, never inside the ring. Collected means
+              money that exists. */}
+          <div className="mt-5 flex items-start justify-between gap-3 border-t border-[var(--oc-rule)] pt-4">
+            <span className="flex items-start gap-2.5 text-[13px]">
+              <AlertTriangle
+                className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[var(--color-vermillion-text)]"
+                strokeWidth={1.5}
+              />
+              <span>
+                <span className="block text-[var(--color-cream)]/90">Unpaid 未付</span>
+                <span className="block text-[11px] text-[var(--color-muted-foreground)]">
+                  not counted as collected
+                  {unpaidCount > 0
+                    ? ` · ${unpaidCount} ${unpaidCount === 1 ? "order" : "orders"}`
+                    : ""}
+                </span>
+              </span>
+            </span>
+            <span className="oc-num shrink-0 text-[16px] text-[var(--color-vermillion-text)]">
+              {baht(unpaid)}
+            </span>
+          </div>
+        </div>
+      </div>
+    </Slab>
+  );
+}
+
+function MixRow({
+  dot,
+  label,
+  value,
+  pct,
+  onHover,
+}: {
+  dot: string;
+  label: string;
+  value: string;
+  pct: number;
+  onHover: (on: boolean) => void;
+}) {
+  return (
+    <div
+      onPointerEnter={() => onHover(true)}
+      onPointerLeave={() => onHover(false)}
+      className="-mx-2 flex items-center justify-between gap-3 rounded-lg px-2 py-2 text-[13px] transition-colors hover:bg-[var(--color-gold)]/[0.06]"
+    >
+      <span className="flex min-w-0 items-center gap-2.5 text-[var(--color-cream)]/90">
+        <span aria-hidden className={cn("h-2.5 w-2.5 shrink-0 rounded-[2px]", dot)} />
+        <span className="truncate">{label}</span>
+      </span>
+      <span className="flex shrink-0 items-baseline gap-3">
+        <span className="oc-num text-[15px] text-[var(--color-gold)]">{value}</span>
+        <span className="oc-num w-9 text-right text-[11px] text-[var(--color-muted-foreground)]">
+          {pct}%
+        </span>
+      </span>
+    </div>
+  );
+}
+
+/* ---------- Revenue Trend ---------- */
+// Groups paid (cash + transfer, non-cancelled) orders by local hour for `day`.
+// Uses paidAt when present (when payment was recorded), falls back to createdAt
+// (order time). Returns a map of { hour → revenue }.
+function paidRevenueByHour(orders: readonly StaffOrder[], day: Date): Record<number, number> {
+  const map: Record<number, number> = {};
+  for (const o of orders) {
+    if (o.paymentStatus !== "paid" || o.status === "cancelled") continue;
+    const ts = o.paidAt ?? o.createdAt;
+    if (!ts) continue;
+    const d = new Date(ts);
+    if (
+      d.getFullYear() !== day.getFullYear() ||
+      d.getMonth() !== day.getMonth() ||
+      d.getDate() !== day.getDate()
+    )
+      continue;
+    const h = d.getHours();
+    map[h] = (map[h] ?? 0) + o.totalPrice;
+  }
+  return map;
+}
+
+type TrendPoint = { hour: string; today: number; yesterday?: number };
+
+// Builds the hour-indexed data array for the chart. Hours range from the
+// earliest activity (min of OPEN_HOUR and first data hour) to nowHour+1 for
+// today-only, or through 23 when yesterday data is also present.
+function buildTrendData(
+  todayMap: Record<number, number>,
+  yestMap: Record<number, number> | null,
+  nowHour: number,
+): TrendPoint[] {
+  const OPEN_HOUR = 10;
+  const todayKeys = Object.keys(todayMap).map(Number);
+  const yestKeys = yestMap ? Object.keys(yestMap).map(Number) : [];
+  const allKeys = [...todayKeys, ...yestKeys];
+  const startH = allKeys.length > 0 ? Math.min(OPEN_HOUR, Math.min(...allKeys)) : OPEN_HOUR;
+  const endH = yestMap ? 23 : Math.min(nowHour + 1, 23);
+
+  const points: TrendPoint[] = [];
+  for (let h = startH; h <= endH; h++) {
+    const pt: TrendPoint = {
+      hour: `${String(h).padStart(2, "0")}:00`,
+      today: todayMap[h] ?? 0,
+    };
+    if (yestMap) pt.yesterday = yestMap[h] ?? 0;
+    points.push(pt);
+  }
+  return points;
+}
+
+function RevenueTrendTooltip({ active, payload, label }: TooltipProps<number, string>) {
+  if (!active || !payload?.length) return null;
+  // Recharts stacks an Area and a Line on the same key; show the series once.
+  const seen = new Set<string>();
+  return (
+    <div
+      className="rounded-xl border border-[var(--oc-rule-lit)] px-3.5 py-3 text-[12px] shadow-[0_18px_40px_-24px_oklch(0.09_0.02_45)]"
+      style={{ background: "oklch(0.20 0.014 60 / 0.97)" }}
+    >
+      <div className="oc-num mb-2 text-[10.5px] uppercase tracking-[0.16em] text-[var(--color-gold-soft)]/80">
+        {label}
+      </div>
+      {payload.map((entry) => {
+        const name = String(entry.name);
+        if (seen.has(name)) return null;
+        seen.add(name);
+        const isToday = name === "today";
+        return (
+          <div key={name} className="flex items-center justify-between gap-6 py-0.5">
+            <span className="flex items-center gap-2 text-[var(--color-cream)]/80">
+              <span
+                aria-hidden
+                className="h-[2px] w-4 rounded-full"
+                style={{
+                  background: isToday ? "var(--color-gold)" : "var(--color-muted-foreground)",
+                  opacity: isToday ? 1 : 0.7,
+                }}
+              />
+              {isToday ? "Today" : "Yesterday"}
+            </span>
+            <span
+              className="oc-num font-medium"
+              style={{
+                color: isToday ? "var(--color-gold)" : "var(--color-muted-foreground)",
+              }}
+            >
+              {baht(entry.value ?? 0)}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function RevenueTrend({ orders, now }: { orders: readonly StaffOrder[]; now: Date }) {
+  const yesterday = useMemo(() => {
+    const d = new Date(now);
+    d.setDate(d.getDate() - 1);
+    return d;
+  }, [now]);
+
+  const todayMap = useMemo(() => paidRevenueByHour(orders, now), [orders, now]);
+  const yestMap = useMemo(() => paidRevenueByHour(orders, yesterday), [orders, yesterday]);
+
+  const hasYestData = Object.keys(yestMap).length > 0;
+  const hasTodayData = Object.keys(todayMap).length > 0;
+
+  const chartData = useMemo(
+    () => buildTrendData(todayMap, hasYestData ? yestMap : null, now.getHours()),
+    [todayMap, yestMap, hasYestData, now],
+  );
+
+  // One direct label instead of a number on every point: the hour that
+  // actually earned the most is the only point worth naming.
+  const peak = useMemo(() => {
+    let hour = -1;
+    let value = 0;
+    for (const [h, v] of Object.entries(todayMap)) {
+      if (v > value) {
+        value = v;
+        hour = Number(h);
+      }
+    }
+    return hour >= 0 ? { hour, value } : null;
+  }, [todayMap]);
+
+  return (
+    // The chart grows into whatever height the Payment Mix beside it sets,
+    // rather than leaving a band of empty slab under a fixed 190px plot.
+    <Slab index={1} className="flex flex-col overflow-hidden">
+      <PanelHead
+        eyebrow="Sales Movement · 收款趨勢"
+        title="Revenue Trend"
+        meta={
+          <div className="flex flex-col items-end gap-1.5 text-[11px] text-[var(--color-muted-foreground)]">
+            <span className="flex items-center gap-2">
+              <span aria-hidden className="h-[2px] w-5 rounded-full bg-[var(--color-gold)]" />
+              Today
+            </span>
+            {hasYestData && (
+              <span className="flex items-center gap-2 opacity-70">
+                <span
+                  aria-hidden
+                  className="h-0 w-5 border-t-2 border-dashed border-[var(--color-muted-foreground)]"
+                />
+                Yesterday
+              </span>
+            )}
+          </div>
+        }
+      />
+
+      <div className="flex flex-1 flex-col px-3 pb-5 pt-5 sm:px-5">
+        <p className="mb-4 px-2 text-[12px] text-[var(--color-muted-foreground)]">
+          Paid cash and transfer only.
+          {peak && (
+            <>
+              {" "}Busiest hour{" "}
+              <span className="oc-num text-[var(--color-gold-soft)]">
+                {String(peak.hour).padStart(2, "0")}:00
+              </span>{" "}
+              at <span className="oc-num text-[var(--color-gold)]">{baht(peak.value)}</span>.
+            </>
+          )}
+        </p>
+
+        {!hasTodayData ? (
+          <div className="relative min-h-[190px] flex-1 overflow-hidden rounded-xl">
+            {/* Ghost grid — conveys chart structure without inventing data. */}
+            <svg
+              viewBox="0 0 400 100"
+              className="absolute inset-0 h-full w-full"
+              preserveAspectRatio="none"
+              aria-hidden
+            >
+              {[20, 45, 70].map((y) => (
+                <line key={y} x1="0" y1={y} x2="400" y2={y} stroke="oklch(0.72 0.11 75 / 0.09)" strokeWidth="1" />
+              ))}
+              <line x1="0" y1="93" x2="400" y2="93" stroke="oklch(0.72 0.11 75 / 0.2)" strokeWidth="1" />
+            </svg>
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5">
+              <p className="text-[13px] text-[var(--color-muted-foreground)]">No paid sales yet today.</p>
+              <p className="text-[11.5px] text-[var(--color-muted-foreground)]/60">
+                Paid sales appear here by the hour.
+              </p>
+            </div>
+          </div>
+        ) : (
+          <div className="min-h-[190px] flex-1">
+            <ResponsiveContainer width="100%" height="100%">
+              <ComposedChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+                <defs>
+                  <linearGradient id="oc-trend-fill" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0%" stopColor="var(--color-gold)" stopOpacity="0.24" />
+                    <stop offset="100%" stopColor="var(--color-gold)" stopOpacity="0" />
+                  </linearGradient>
+                </defs>
+                <CartesianGrid vertical={false} stroke="oklch(0.72 0.11 75 / 0.08)" />
+                <XAxis
+                  dataKey="hour"
+                  tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
+                  tickLine={false}
+                  axisLine={false}
+                  interval="preserveStartEnd"
+                />
+                <YAxis
+                  tickFormatter={(v: number) =>
+                    v === 0 ? "฿0" : `฿${v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v}`
+                  }
+                  tick={{ fontSize: 10, fill: "var(--color-muted-foreground)" }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={46}
+                />
+                <Tooltip
+                  content={<RevenueTrendTooltip />}
+                  cursor={{ stroke: "oklch(0.72 0.11 75 / 0.28)", strokeWidth: 1 }}
+                />
+                {/* Yesterday is a dashed neutral, not a second gold. Two tints
+                    of one hue are indistinguishable to a colourblind reader;
+                    the dash pattern carries the difference on its own. */}
+                {hasYestData && (
+                  <Line
+                    type="monotone"
+                    dataKey="yesterday"
+                    name="yesterday"
+                    stroke="var(--color-muted-foreground)"
+                    strokeWidth={1.5}
+                    strokeDasharray="4 4"
+                    strokeOpacity={0.7}
+                    dot={false}
+                    activeDot={{ r: 3, fill: "var(--color-muted-foreground)", strokeWidth: 0 }}
+                    animationDuration={900}
+                    animationBegin={150}
+                    animationEasing="ease-out"
+                  />
+                )}
+                <Area
+                  type="monotone"
+                  dataKey="today"
+                  name="today"
+                  stroke="none"
+                  fill="url(#oc-trend-fill)"
+                  animationDuration={1000}
+                  animationEasing="ease-out"
+                />
+                <Line
+                  type="monotone"
+                  dataKey="today"
+                  name="today"
+                  stroke="var(--color-gold)"
+                  strokeWidth={2}
+                  dot={false}
+                  activeDot={{ r: 4, fill: "var(--color-gold)", strokeWidth: 0 }}
+                  animationDuration={1000}
+                  animationEasing="ease-out"
+                />
+              </ComposedChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+
+        {!hasYestData && hasTodayData && (
+          <p className="mt-2 px-2 text-[11px] text-[var(--color-muted-foreground)]/70">
+            Yesterday data not available — showing today only.
+          </p>
+        )}
+      </div>
+    </Slab>
+  );
+}
+
+/* ---------- Expenses Today ---------- */
+// Today's purchase log from the same expense feed the staff form writes to.
+// Amounts render in vermillion (cost out) to contrast with gold revenue.
+// Gross sales figures are never touched here.
+
+const EXPENSE_CATEGORY_COLOR: Record<string, string> = {
+  Drinks:        "bg-sky-500/15 text-sky-300",
+  Ingredient:    "bg-emerald-500/15 text-emerald-300",
+  "Stock Refill":"bg-amber-500/15 text-amber-300",
+  Utility:       "bg-violet-500/15 text-violet-300",
+  Delivery:      "bg-orange-500/15 text-orange-300",
+  Other:         "bg-stone-500/15 text-stone-300",
+};
+
+const PAID_FROM_ROWS: { key: string; label: string; zh: string }[] = [
+  { key: "Cash",       label: "Cash",       zh: "現金"  },
+  { key: "Transfer",   label: "Transfer",   zh: "轉帳"  },
+  { key: "Owner Paid", label: "Owner Paid", zh: "老闆付" },
+  { key: "Other",      label: "Other",      zh: "其他"  },
+];
+
+function fmtExpTime(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : hhmm(d);
+}
+
+function ExpenseSummary({
+  expenses,
+  loadState,
+  onRetry,
+}: {
+  expenses: Expense[];
+  loadState: LoadState;
+  onRetry: () => void;
+}) {
+  const total = useMemo(() => expenses.reduce((s, e) => s + e.amount, 0), [expenses]);
+
+  const byPaidFrom = useMemo(() => {
+    const acc: Record<string, number> = {};
+    for (const e of expenses) acc[e.paidFrom] = (acc[e.paidFrom] ?? 0) + e.amount;
+    return acc;
+  }, [expenses]);
+
+  const recent = expenses.slice(0, 10);
+
+  return (
+    <Slab index={4} className="overflow-hidden">
+      <PanelHead
+        eyebrow="Purchase Log · 支出記錄"
+        title="Expenses Today"
+        meta={
+          loadState === "ready" && expenses.length > 0 ? (
+            <span className="oc-num text-[19px] text-[var(--color-vermillion-text)]">
+              {baht(total)}
+            </span>
+          ) : undefined
+        }
+      />
+
+      {/* Skeleton, not a spinner: the shape of what is coming reads as loading
+          without hiding the layout the owner is about to get. */}
+      {loadState === "loading" && (
+        <ul className="divide-y divide-[var(--oc-rule)]">
+          {[0, 1, 2].map((i) => (
+            <li key={i} className="flex items-center gap-3 px-5 py-4 sm:px-6">
+              <span className="h-3 flex-1 animate-pulse rounded bg-[var(--color-cream)]/8" style={{ animationDelay: `${i * 140}ms` }} />
+              <span className="h-3 w-14 animate-pulse rounded bg-[var(--color-cream)]/8" style={{ animationDelay: `${i * 140 + 70}ms` }} />
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {loadState === "error" && (
+        <div className="px-6 py-8 text-center">
+          <p className="text-[13px] text-[var(--color-muted-foreground)]">Could not load expenses.</p>
+          <button
+            type="button"
+            onClick={onRetry}
+            className="oc-press mt-3 rounded-lg border border-[var(--oc-rule)] px-3.5 py-2 text-[12px] text-[var(--color-gold-soft)]/85 transition hover:border-[var(--oc-rule-lit)] hover:text-[var(--color-cream)]"
+          >
+            Try again
+          </button>
+        </div>
+      )}
+
+      {loadState === "ready" && expenses.length === 0 && (
+        <p className="px-6 py-8 text-center text-[13px] text-[var(--color-muted-foreground)]">
+          沒有支出 · No expenses logged today.
+        </p>
+      )}
+
+      {loadState === "ready" && expenses.length > 0 && (
+        <>
+          <div className="space-y-2.5 border-b border-[var(--oc-rule)] px-5 py-4 sm:px-6">
+            {PAID_FROM_ROWS.map(({ key, label, zh }) => {
+              const amount = byPaidFrom[key] ?? 0;
+              if (amount === 0) return null;
+              return (
+                <div key={key} className="flex items-center justify-between gap-3 text-[13px]">
+                  <span className="min-w-0 text-[var(--color-cream)]/80">
+                    {label} <span className="text-[11px] text-[var(--color-muted-foreground)]">{zh}</span>
+                  </span>
+                  <span className="oc-num shrink-0 text-[var(--color-vermillion-text)]">
+                    {baht(amount)}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          <ul className="divide-y divide-[var(--oc-rule)]">
+            {recent.map((exp) => (
+              <li
+                key={exp.id}
+                className="flex items-start gap-3 px-5 py-3.5 transition-colors hover:bg-[var(--color-gold)]/[0.04] sm:px-6"
+              >
+                <div className="min-w-0 flex-1">
+                  <div className="truncate text-[13px] text-[var(--color-cream)]/95">{exp.itemName}</div>
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    <span
+                      className={cn(
+                        "inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium",
+                        EXPENSE_CATEGORY_COLOR[exp.category] ?? "bg-stone-500/15 text-stone-300",
+                      )}
+                    >
+                      {exp.category}
+                    </span>
+                    <span className="text-[11px] text-[var(--color-muted-foreground)]">{exp.paidFrom}</span>
+                    {exp.reviewStatus && exp.reviewStatus !== "Pending" && (
+                      <span className="text-[11px] text-emerald-400/80">{exp.reviewStatus}</span>
+                    )}
+                    {exp.note && exp.note.length <= 45 && (
+                      <span className="truncate text-[11px] text-[var(--color-muted-foreground)]/65">
+                        {exp.note}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="shrink-0 text-right">
+                  <div className="oc-num text-[15px] text-[var(--color-vermillion-text)]">
+                    {baht(exp.amount)}
+                  </div>
+                  <div className="oc-num mt-0.5 text-[10.5px] text-[var(--color-muted-foreground)]">
+                    {fmtExpTime(exp.createdAt)}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </Slab>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Orders view
+   ═══════════════════════════════════════════════════════════════════════ */
 
 type OrderFilter = "all" | "active" | "delivery" | "unpaid" | "cancelled" | "completed";
 
@@ -446,103 +2315,112 @@ function OwnerOrdersView({
   const visible = useMemo(() => applyOrderFilter(orders, filter), [orders, filter]);
 
   return (
-    <div className="mx-auto w-full max-w-[1400px] px-5 py-6 lg:px-8">
-      {/* Header */}
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="font-display text-[22px] leading-none text-[var(--color-cream)]">
-            Orders · 今日訂單
-          </h2>
-          <p className="mt-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted-foreground)]">
-            {now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
-            {" · "}{orders.length} total · order audit trail
-          </p>
-        </div>
-      </div>
+    <Deck>
+      <ViewHead
+        title="Orders"
+        titleZh="今日訂單"
+        meta={`${longDate(now)} · ${orders.length} total · audit trail`}
+      />
 
-      {/* Filter pills */}
       <div className="mb-5 flex flex-wrap gap-2">
-        {ORDER_FILTERS.map(({ id, label, labelZh }) => {
-          const count = applyOrderFilter(orders, id).length;
-          const isActive = filter === id;
-          return (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setFilter(id)}
-              className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-medium tracking-[0.06em] transition-colors ${
-                isActive
-                  ? "border-[var(--color-gold)]/60 bg-[var(--color-gold)]/12 text-[var(--color-gold)]"
-                  : "border-[var(--color-gold)]/15 text-[var(--color-muted-foreground)] hover:border-[var(--color-gold)]/30 hover:text-[var(--color-cream)]/70"
-              }`}
-            >
-              {label} · {labelZh}
-              <span
-                className={`rounded-full px-1.5 py-0.5 text-[10px] tabular-nums ${
-                  isActive
-                    ? "bg-[var(--color-gold)]/20 text-[var(--color-gold)]"
-                    : "bg-[var(--color-gold)]/8 text-[var(--color-muted-foreground)]"
-                }`}
-              >
-                {count}
-              </span>
-            </button>
-          );
-        })}
+        {ORDER_FILTERS.map(({ id, label, labelZh }) => (
+          <FilterPill
+            key={id}
+            label={label}
+            labelZh={labelZh}
+            count={applyOrderFilter(orders, id).length}
+            active={filter === id}
+            onClick={() => setFilter(id)}
+          />
+        ))}
       </div>
 
-      {/* Table */}
       {visible.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <p className="text-[14px] text-[var(--color-muted-foreground)]">No orders match this filter.</p>
-        </div>
+        <TableShell>
+          <EmptyNote
+            zh="沒有符合的訂單"
+            en="No orders match this filter."
+            hint="Pick a different filter above."
+          />
+        </TableShell>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-[var(--color-gold)]/12 bg-[var(--color-charcoal-soft)]/40">
-          <table className="w-full text-[13px]">
+        <TableShell>
+          <table className="w-full min-w-[840px] text-[13px]">
             <thead>
-              <tr className="border-b border-[var(--color-gold)]/12">
-                {["Order / Location", "Items", "Payment", "Total", "Status", "Time"].map((h) => (
-                  <th
-                    key={h}
-                    className="px-4 py-3 text-left text-[11px] uppercase tracking-[0.14em] font-medium text-[var(--color-muted-foreground)]"
-                  >
-                    {h}
-                  </th>
-                ))}
+              <tr className="border-b border-[var(--oc-rule)]">
+                <Th>Order · Location</Th>
+                <Th>Items</Th>
+                <Th>Payment</Th>
+                <Th right>Total</Th>
+                <Th>Status</Th>
+                <Th right>Time</Th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[var(--color-gold)]/8">
+            <tbody className="divide-y divide-[var(--oc-rule)]">
               {visible.map((order) => (
-                <OwnerOrderRow key={order.orderId} order={order} onClick={() => onSelectOrder(order)} />
+                <OwnerOrderRow key={order.orderId} order={order} onSelect={() => onSelectOrder(order)} />
               ))}
             </tbody>
           </table>
-        </div>
+        </TableShell>
       )}
-    </div>
+    </Deck>
   );
 }
 
-// Dark-background-appropriate status badge classes for the owner orders table.
-// STATUS_META.badgeClass uses text-[var(--color-ink)] for done/delivered/cancelled
-// which is near-invisible on the dark charcoal owner dashboard.
+// Dark-background status badges for the console tables. STATUS_META.badgeClass
+// is tuned for the parchment staff cards and uses text-[var(--color-ink)] for
+// done/delivered/cancelled, which is near-invisible on charcoal.
 const OWNER_STATUS_BADGE: Record<
   StaffOrderStatus,
   { bg: string; text: string; border: string; dot: string }
 > = {
-  new:              { bg: "bg-[var(--color-vermillion)]/12", text: "text-[var(--color-vermillion)]",  border: "border-[var(--color-vermillion)]/28", dot: "bg-[var(--color-vermillion)]"   },
-  preparing:        { bg: "bg-amber-500/12",                 text: "text-amber-300",                  border: "border-amber-400/28",                  dot: "bg-amber-400"                  },
-  ready:            { bg: "bg-emerald-500/12",               text: "text-emerald-300",                border: "border-emerald-400/28",                dot: "bg-emerald-400"               },
-  out_for_delivery: { bg: "bg-sky-500/12",                   text: "text-sky-300",                    border: "border-sky-400/28",                    dot: "bg-sky-400"                    },
-  delivered:        { bg: "bg-emerald-500/8",                text: "text-emerald-300/80",             border: "border-emerald-400/20",                dot: "bg-emerald-400/70"            },
-  done:             { bg: "bg-[var(--color-cream)]/6",       text: "text-[var(--color-cream)]/55",    border: "border-[var(--color-cream)]/12",       dot: "bg-[var(--color-cream)]/45"   },
-  cancelled:        { bg: "bg-[var(--color-vermillion)]/8",  text: "text-[var(--color-vermillion)]/60", border: "border-[var(--color-vermillion)]/18", dot: "bg-[var(--color-vermillion)]/55" },
+  new:              { bg: "bg-[var(--color-vermillion)]/12", text: "text-[var(--color-vermillion-text)]", border: "border-[var(--color-vermillion)]/28", dot: "bg-[var(--color-vermillion)]"   },
+  preparing:        { bg: "bg-amber-500/12",                 text: "text-amber-300",                      border: "border-amber-400/28",                  dot: "bg-amber-400"                  },
+  ready:            { bg: "bg-emerald-500/12",               text: "text-emerald-300",                    border: "border-emerald-400/28",                dot: "bg-emerald-400"               },
+  out_for_delivery: { bg: "bg-sky-500/12",                   text: "text-sky-300",                        border: "border-sky-400/28",                    dot: "bg-sky-400"                    },
+  delivered:        { bg: "bg-emerald-500/8",                text: "text-emerald-300/80",                 border: "border-emerald-400/20",                dot: "bg-emerald-400/70"            },
+  done:             { bg: "bg-[var(--color-cream)]/6",       text: "text-[var(--color-cream)]/55",        border: "border-[var(--color-cream)]/12",       dot: "bg-[var(--color-cream)]/45"   },
+  cancelled:        { bg: "bg-[var(--color-vermillion)]/8",  text: "text-[var(--color-vermillion-text)]/70", border: "border-[var(--color-vermillion)]/18", dot: "bg-[var(--color-vermillion)]/55" },
 };
 
-function OwnerOrderRow({ order, onClick }: { order: StaffOrder; onClick: () => void }) {
-  const statusMeta = STATUS_META[order.status];
+function StatusBadge({ status }: { status: StaffOrderStatus }) {
+  const meta = STATUS_META[status];
+  const dark = OWNER_STATUS_BADGE[status];
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-medium tracking-[0.04em]",
+        dark.bg,
+        dark.text,
+        dark.border,
+      )}
+    >
+      <span aria-hidden className={cn("h-1.5 w-1.5 shrink-0 rounded-full", dark.dot)} />
+      {meta.labelEn} · {meta.labelZh}
+    </span>
+  );
+}
+
+/** Rows are focusable and respond to Enter/Space — the console has to be
+ *  operable without a mouse, and a click-only row simply isn't.
+ *  No role override: a `role="button"` on a <tr> would strip the row out of
+ *  the table for screen readers, which costs more than it buys. */
+function rowActivation(onSelect: () => void) {
+  return {
+    tabIndex: 0,
+    onClick: onSelect,
+    onKeyDown: (e: ReactKeyboardEvent) => {
+      if (e.key === "Enter" || e.key === " ") {
+        e.preventDefault();
+        onSelect();
+      }
+    },
+  };
+}
+
+function OwnerOrderRow({ order, onSelect }: { order: StaffOrder; onSelect: () => void }) {
   const payMeta = PAYMENT_META[order.paymentStatus];
-  const statusDark = OWNER_STATUS_BADGE[order.status];
   const loc = orderLocation(order);
   const cancelled = order.status === "cancelled";
   const totalQty = order.items.reduce((s, i) => s + i.quantity, 0);
@@ -553,80 +2431,73 @@ function OwnerOrderRow({ order, onClick }: { order: StaffOrder; onClick: () => v
 
   return (
     <tr
-      onClick={onClick}
-      className={`group cursor-pointer transition-colors hover:bg-[var(--color-gold)]/[0.04] ${
-        cancelled ? "opacity-55" : ""
-      }`}
+      {...rowActivation(onSelect)}
+      className={cn(
+        "oc-row cursor-pointer hover:bg-[var(--color-gold)]/[0.05]",
+        cancelled && "opacity-60",
+      )}
     >
-      {/* Order / Location */}
-      <td className="px-4 py-3">
-        <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--color-muted-foreground)] tabular-nums">
+      <td className="px-4 py-3.5">
+        <p className="oc-num text-[11px] uppercase tracking-[0.12em] text-[var(--color-muted-foreground)]">
           {order.orderId}
         </p>
-        <p className="mt-0.5 font-medium text-[var(--color-cream)]/85">
+        <p className="mt-0.5 font-medium text-[var(--color-cream)]/90">
           {loc.big}
-          {loc.num !== undefined && (
-            <span className="ml-1.5 tabular-nums text-[var(--color-gold)]">{loc.num}</span>
-          )}
+          {loc.num !== undefined && <span className="oc-num ml-1.5 text-[var(--color-gold)]">{loc.num}</span>}
           <span className="ml-2 text-[11px] text-[var(--color-muted-foreground)]">{loc.zh}</span>
         </p>
         {order.orderType === "delivery" && order.customerName && (
-          <p className="mt-0.5 text-[11px] text-[var(--color-muted-foreground)] truncate max-w-[160px]">
+          <p className="mt-0.5 max-w-[180px] truncate text-[11px] text-[var(--color-muted-foreground)]">
             {order.customerName}
             {order.customerPhone && ` · ${order.customerPhone}`}
           </p>
         )}
         {cancelled && order.cancellationReason && (
-          <p className="mt-0.5 text-[11px] text-[var(--color-vermillion)]/70 truncate max-w-[160px]">
+          <p className="mt-0.5 max-w-[180px] truncate text-[11px] text-[var(--color-vermillion-text)]/75">
             {order.cancellationReason}
           </p>
         )}
       </td>
 
-      {/* Items */}
-      <td className="px-4 py-3 text-[var(--color-cream)]/70 max-w-[180px]">
+      <td className="max-w-[200px] px-4 py-3.5 text-[var(--color-cream)]/70">
         <p className="truncate">{itemSummary}</p>
       </td>
 
-      {/* Payment */}
-      <td className="px-4 py-3">
+      <td className="px-4 py-3.5">
         <span
-          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium tracking-[0.05em] ${payMeta.badgeClass}`}
+          className={cn(
+            "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-medium",
+            payMeta.badgeClass,
+          )}
         >
-          <span className={`h-1.5 w-1.5 rounded-full ${payMeta.dotClass}`} />
+          <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", payMeta.dotClass)} />
           {payMeta.labelEn}
         </span>
         {order.paymentStatus === "paid" && order.paymentMethod && (
-          <p className="mt-0.5 text-[10px] text-[var(--color-muted-foreground)] uppercase tracking-[0.1em]">
+          <p className="mt-1 text-[10px] uppercase tracking-[0.1em] text-[var(--color-muted-foreground)]">
             {order.paymentMethod}
           </p>
         )}
       </td>
 
-      {/* Total */}
-      <td className="px-4 py-3 tabular-nums text-[var(--color-cream)]/85 font-medium">
-        ฿{order.totalPrice.toLocaleString("en-US")}
+      <td className="oc-num px-4 py-3.5 text-right font-medium text-[var(--color-cream)]/90">
+        {baht(order.totalPrice)}
       </td>
 
-      {/* Status */}
-      <td className="px-4 py-3">
-        <span
-          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium tracking-[0.05em] ${statusDark.bg} ${statusDark.text} ${statusDark.border}`}
-        >
-          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDark.dot}`} />
-          {statusMeta.labelEn} · {statusMeta.labelZh}
-        </span>
+      <td className="px-4 py-3.5">
+        <StatusBadge status={order.status} />
       </td>
 
-      {/* Time */}
-      <td className="px-4 py-3 tabular-nums text-[var(--color-muted-foreground)] text-[12px] whitespace-nowrap">
+      <td className="oc-num whitespace-nowrap px-4 py-3.5 text-right text-[12px] text-[var(--color-muted-foreground)]">
         {order.time}
       </td>
     </tr>
   );
 }
 
-/* ---------- Payments view ---------- */
+/* ═══════════════════════════════════════════════════════════════════════
+   Payments view
+   ═══════════════════════════════════════════════════════════════════════ */
 // Read-only payment audit over today's orders (same data the Orders view uses).
 // Cancelled orders never count toward money totals; they only appear under "All"
 // so the audit trail stays complete. "Risk" = food handed out (done/delivered)
@@ -699,149 +2570,84 @@ function OwnerPaymentsView({
   }, [orders]);
 
   return (
-    <div className="mx-auto w-full max-w-[1400px] px-5 py-6 lg:px-8">
-      {/* Header */}
-      <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h2 className="font-display text-[22px] leading-none text-[var(--color-cream)]">
-            Payments · 今日收款
-          </h2>
-          <p className="mt-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted-foreground)]">
-            {now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
-            {" · "}payment audit · read-only
-          </p>
-        </div>
-      </div>
+    <Deck>
+      <ViewHead title="Payments" titleZh="今日收款" meta={`${longDate(now)} · read-only audit`} />
 
-      {/* Summary cards */}
-      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-5">
-        <SupportCard
-          icon={Banknote}
-          label="Paid"
-          labelZh="已付"
-          value={baht(totals.paid)}
-          sub="collected today"
-          tone="money"
-          animDelay={60}
-        />
-        <SupportCard
+      <div className="mb-6 grid grid-cols-2 gap-5 lg:grid-cols-5">
+        <StatTile icon={Banknote} label="Paid" labelZh="已付" value={totals.paid} money sub="collected today" tone="money" index={0} />
+        <StatTile
           icon={AlertTriangle}
           label="Unpaid"
           labelZh="未付"
-          value={baht(totals.unpaid)}
+          value={totals.unpaid}
+          money
           sub="outstanding"
           tone={totals.unpaid > 0 ? "warn" : "muted"}
-          animDelay={120}
+          index={1}
         />
-        <SupportCard
-          icon={Wallet}
-          label="Cash"
-          labelZh="現金"
-          value={baht(totals.cash)}
-          sub="paid in cash"
-          tone="money"
-          animDelay={180}
-        />
-        <SupportCard
-          icon={ArrowLeftRight}
-          label="Transfer"
-          labelZh="轉帳"
-          value={baht(totals.transfer)}
-          sub="paid by transfer"
-          tone="money"
-          animDelay={240}
-        />
-        <SupportCard
+        <StatTile icon={Wallet} label="Cash" labelZh="現金" value={totals.cash} money sub="paid in cash" tone="money" index={2} />
+        <StatTile icon={ArrowLeftRight} label="Transfer" labelZh="轉帳" value={totals.transfer} money sub="paid by transfer" tone="money" index={3} />
+        <StatTile
           icon={Receipt}
-          label="Risk"
+          label="At Risk"
           labelZh="風險"
-          value={String(totals.riskCount)}
-          sub="done/delivered, unpaid"
+          value={totals.riskCount}
+          sub="closed, not paid"
           tone={totals.riskCount > 0 ? "alert" : "muted"}
-          animDelay={300}
+          index={4}
         />
       </div>
 
-      {/* Filter pills */}
       <div className="mb-5 flex flex-wrap gap-2">
-        {PAYMENT_FILTERS.map(({ id, label, labelZh }) => {
-          const count = applyPaymentFilter(orders, id).length;
-          const isActive = filter === id;
-          const isRisk = id === "risk";
-          return (
-            <button
-              key={id}
-              type="button"
-              onClick={() => setFilter(id)}
-              className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-medium tracking-[0.06em] transition-colors ${
-                isActive
-                  ? isRisk
-                    ? "border-[var(--color-vermillion)]/60 bg-[var(--color-vermillion)]/12 text-[var(--color-vermillion)]"
-                    : "border-[var(--color-gold)]/60 bg-[var(--color-gold)]/12 text-[var(--color-gold)]"
-                  : "border-[var(--color-gold)]/15 text-[var(--color-muted-foreground)] hover:border-[var(--color-gold)]/30 hover:text-[var(--color-cream)]/70"
-              }`}
-            >
-              {label} · {labelZh}
-              <span
-                className={`rounded-full px-1.5 py-0.5 text-[10px] tabular-nums ${
-                  isActive
-                    ? isRisk
-                      ? "bg-[var(--color-vermillion)]/20 text-[var(--color-vermillion)]"
-                      : "bg-[var(--color-gold)]/20 text-[var(--color-gold)]"
-                    : "bg-[var(--color-gold)]/8 text-[var(--color-muted-foreground)]"
-                }`}
-              >
-                {count}
-              </span>
-            </button>
-          );
-        })}
+        {PAYMENT_FILTERS.map(({ id, label, labelZh }) => (
+          <FilterPill
+            key={id}
+            label={label}
+            labelZh={labelZh}
+            count={applyPaymentFilter(orders, id).length}
+            active={filter === id}
+            danger={id === "risk"}
+            onClick={() => setFilter(id)}
+          />
+        ))}
       </div>
 
-      {/* Table */}
       {visible.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-20 text-center">
-          <p className="text-[14px] text-[var(--color-muted-foreground)]">
-            No payments match this filter.
-          </p>
-        </div>
+        <TableShell>
+          <EmptyNote
+            zh="沒有符合的收款"
+            en="No payments match this filter."
+            hint="Pick a different filter above."
+          />
+        </TableShell>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-[var(--color-gold)]/12 bg-[var(--color-charcoal-soft)]/40">
-          <table className="w-full text-[13px]">
+        <TableShell>
+          <table className="w-full min-w-[920px] text-[13px]">
             <thead>
-              <tr className="border-b border-[var(--color-gold)]/12">
-                {["Order / Location", "Payment", "Method", "Total", "Paid At", "Status", "Proof"].map(
-                  (h) => (
-                    <th
-                      key={h}
-                      className="px-4 py-3 text-left text-[11px] uppercase tracking-[0.14em] font-medium text-[var(--color-muted-foreground)]"
-                    >
-                      {h}
-                    </th>
-                  ),
-                )}
+              <tr className="border-b border-[var(--oc-rule)]">
+                <Th>Order · Location</Th>
+                <Th>Payment</Th>
+                <Th>Method</Th>
+                <Th right>Total</Th>
+                <Th right>Paid At</Th>
+                <Th>Status</Th>
+                <Th>Proof</Th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-[var(--color-gold)]/8">
+            <tbody className="divide-y divide-[var(--oc-rule)]">
               {visible.map((order) => (
-                <OwnerPaymentRow
-                  key={order.orderId}
-                  order={order}
-                  onClick={() => onSelectOrder(order)}
-                />
+                <OwnerPaymentRow key={order.orderId} order={order} onSelect={() => onSelectOrder(order)} />
               ))}
             </tbody>
           </table>
-        </div>
+        </TableShell>
       )}
-    </div>
+    </Deck>
   );
 }
 
-function OwnerPaymentRow({ order, onClick }: { order: StaffOrder; onClick: () => void }) {
-  const statusMeta = STATUS_META[order.status];
+function OwnerPaymentRow({ order, onSelect }: { order: StaffOrder; onSelect: () => void }) {
   const payMeta = PAYMENT_META[order.paymentStatus];
-  const statusDark = OWNER_STATUS_BADGE[order.status];
   const loc = orderLocation(order);
   const cancelled = order.status === "cancelled";
   const risk = isPaymentRisk(order);
@@ -850,53 +2656,59 @@ function OwnerPaymentRow({ order, onClick }: { order: StaffOrder; onClick: () =>
 
   return (
     <tr
-      onClick={onClick}
-      className={`group cursor-pointer transition-colors hover:bg-[var(--color-gold)]/[0.04] ${
-        cancelled ? "opacity-55" : ""
-      }`}
+      {...rowActivation(onSelect)}
+      className={cn(
+        "oc-row cursor-pointer hover:bg-[var(--color-gold)]/[0.05]",
+        cancelled && "opacity-60",
+        // The row-hover gold rule lands on exactly the same 2px as the risk
+        // edge below, which would repaint a warning gold — the one colour in
+        // this console that means money is fine. Risk rows keep their edge.
+        risk && "[&>:first-child]:before:hidden",
+      )}
     >
-      {/* Order / Location */}
+      {/* Risk rows carry a vermillion edge: money should exist for this order
+          and doesn't, which is the single thing this table is for. */}
       <td
-        className={`border-l-2 px-4 py-3 ${
-          risk ? "border-[var(--color-vermillion)]" : "border-transparent"
-        }`}
+        className={cn(
+          "border-l-2 px-4 py-3.5",
+          risk ? "border-[var(--color-vermillion)]" : "border-transparent",
+        )}
       >
-        <p className="text-[11px] uppercase tracking-[0.14em] text-[var(--color-muted-foreground)] tabular-nums">
+        <p className="oc-num text-[11px] uppercase tracking-[0.12em] text-[var(--color-muted-foreground)]">
           {order.orderId}
         </p>
-        <p className="mt-0.5 font-medium text-[var(--color-cream)]/85">
+        <p className="mt-0.5 font-medium text-[var(--color-cream)]/90">
           {loc.big}
-          {loc.num !== undefined && (
-            <span className="ml-1.5 tabular-nums text-[var(--color-gold)]">{loc.num}</span>
-          )}
+          {loc.num !== undefined && <span className="oc-num ml-1.5 text-[var(--color-gold)]">{loc.num}</span>}
           <span className="ml-2 text-[11px] text-[var(--color-muted-foreground)]">{loc.zh}</span>
         </p>
         {order.orderType === "delivery" && order.customerName && (
-          <p className="mt-0.5 text-[11px] text-[var(--color-muted-foreground)] truncate max-w-[160px]">
+          <p className="mt-0.5 max-w-[180px] truncate text-[11px] text-[var(--color-muted-foreground)]">
             {order.customerName}
           </p>
         )}
       </td>
 
-      {/* Payment status */}
-      <td className="px-4 py-3">
+      <td className="px-4 py-3.5">
         <span
-          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium tracking-[0.05em] ${payMeta.badgeClass}`}
+          className={cn(
+            "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2.5 py-1 text-[11px] font-medium",
+            payMeta.badgeClass,
+          )}
         >
-          <span className={`h-1.5 w-1.5 rounded-full ${payMeta.dotClass}`} />
+          <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", payMeta.dotClass)} />
           {payMeta.labelEn}
         </span>
         {risk && (
-          <p className="mt-1 text-[10px] uppercase tracking-[0.1em] text-[var(--color-vermillion)]">
+          <p className="mt-1 text-[10px] uppercase tracking-[0.1em] text-[var(--color-vermillion-text)]">
             Risk · 風險
           </p>
         )}
       </td>
 
-      {/* Method */}
-      <td className="px-4 py-3 text-[12px]">
+      <td className="px-4 py-3.5 text-[12px]">
         {paid && order.paymentMethod ? (
-          <span className="inline-flex items-center gap-1.5 text-[var(--color-cream)]/80">
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-[var(--color-cream)]/80">
             {order.paymentMethod === "Cash" ? (
               <Wallet className="h-3 w-3" strokeWidth={1.5} />
             ) : (
@@ -909,19 +2721,18 @@ function OwnerPaymentRow({ order, onClick }: { order: StaffOrder; onClick: () =>
         )}
       </td>
 
-      {/* Total */}
       <td
-        className={`px-4 py-3 tabular-nums font-medium ${
+        className={cn(
+          "oc-num px-4 py-3.5 text-right font-medium",
           cancelled
             ? "text-[var(--color-muted-foreground)] line-through"
-            : "text-[var(--color-cream)]/85"
-        }`}
+            : "text-[var(--color-cream)]/90",
+        )}
       >
-        ฿{order.totalPrice.toLocaleString("en-US")}
+        {baht(order.totalPrice)}
       </td>
 
-      {/* Paid at */}
-      <td className="px-4 py-3 tabular-nums text-[12px] whitespace-nowrap">
+      <td className="oc-num whitespace-nowrap px-4 py-3.5 text-right text-[12px]">
         {paid && paidAtLabel ? (
           <span className="text-[var(--color-cream)]/75">{paidAtLabel}</span>
         ) : (
@@ -929,18 +2740,11 @@ function OwnerPaymentRow({ order, onClick }: { order: StaffOrder; onClick: () =>
         )}
       </td>
 
-      {/* Order status */}
-      <td className="px-4 py-3">
-        <span
-          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium tracking-[0.05em] ${statusDark.bg} ${statusDark.text} ${statusDark.border}`}
-        >
-          <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDark.dot}`} />
-          {statusMeta.labelEn} · {statusMeta.labelZh}
-        </span>
+      <td className="px-4 py-3.5">
+        <StatusBadge status={order.status} />
       </td>
 
-      {/* Proof */}
-      <td className="px-4 py-3 text-[12px] whitespace-nowrap">
+      <td className="whitespace-nowrap px-4 py-3.5 text-[12px]">
         {order.hasPaymentProof ? (
           order.paymentProofUrl ? (
             <a
@@ -948,7 +2752,7 @@ function OwnerPaymentRow({ order, onClick }: { order: StaffOrder; onClick: () =>
               target="_blank"
               rel="noopener noreferrer"
               onClick={(e) => e.stopPropagation()}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-teal-700/40 bg-teal-600/10 px-2.5 py-1 text-[11px] font-medium text-teal-300 transition hover:bg-teal-600/20"
+              className="oc-press inline-flex items-center gap-1.5 rounded-lg border border-teal-700/40 bg-teal-600/10 px-2.5 py-1.5 text-[11px] font-medium text-teal-300 transition hover:bg-teal-600/20"
             >
               <ExternalLink size={10} strokeWidth={1.5} />
               View
@@ -964,8 +2768,10 @@ function OwnerPaymentRow({ order, onClick }: { order: StaffOrder; onClick: () =>
   );
 }
 
-/* ---------- Reports view ---------- */
-// Daily business report v1 — pure math over the same today-orders/expenses state
+/* ═══════════════════════════════════════════════════════════════════════
+   Reports view
+   ═══════════════════════════════════════════════════════════════════════ */
+// Daily business report — pure math over the same today-orders/expenses state
 // the other views use. No fetching, no polling, read-only. Cancelled orders are
 // excluded from every money figure (they only appear as counts / audit rows).
 // TODO(separation): use historical Supabase orders for day/week/month analytics
@@ -1062,115 +2868,92 @@ function OwnerReportsView({
 
   const expLoading = expLoadState !== "ready";
   const net = r.collected - expensesTotal;
+  const topQty = bestSellers[0]?.qty ?? 0;
 
   return (
-    <div className="mx-auto w-full max-w-[1400px] px-5 py-6 lg:px-8">
-      {/* Header */}
-      <div className="mb-5">
-        <h2 className="font-display text-[22px] leading-none text-[var(--color-cream)]">
-          Reports · 每日報表
-        </h2>
-        <p className="mt-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted-foreground)]">
-          {now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}
-          {" · "}daily business report · read-only
-        </p>
-      </div>
+    <Deck>
+      <ViewHead title="Reports" titleZh="每日報表" meta={`${longDate(now)} · daily business report`} />
 
-      {/* A — top summary cards */}
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
-        <SupportCard
-          icon={Banknote}
-          label="Gross Sales"
-          labelZh="總營業額"
-          value={baht(r.gross)}
-          sub="billed today, excl. cancelled"
-          tone="money"
-          animDelay={40}
-        />
-        <SupportCard
+      <div className="grid grid-cols-2 gap-5 lg:grid-cols-3">
+        <StatTile icon={Banknote} label="Gross Sales" labelZh="總營業額" value={r.gross} money sub="billed today, excl. cancelled" tone="money" index={0} />
+        <StatTile
           icon={Scale}
           label="Net Today"
           labelZh="今日淨額"
-          value={expLoading ? "…" : baht(net)}
+          value={expLoading ? "…" : net}
+          money
           sub="collected minus expenses"
           tone={expLoading ? "muted" : net < 0 ? "alert" : "money"}
-          animDelay={100}
+          index={1}
         />
-        <SupportCard
+        <StatTile
           icon={TrendingDown}
           label="Expenses"
           labelZh="今日支出"
-          value={expLoading ? "…" : baht(expensesTotal)}
+          value={expLoading ? "…" : expensesTotal}
+          money
           sub="logged outflows"
           tone={expLoading ? "muted" : "cost"}
-          animDelay={160}
+          index={2}
         />
-        <SupportCard
-          icon={ClipboardList}
-          label="Orders"
-          labelZh="訂單數"
-          value={String(r.orderCount)}
-          sub="placed today"
-          tone="muted"
-          animDelay={220}
-        />
-        <SupportCard
+        <StatTile icon={ClipboardList} label="Orders" labelZh="訂單數" value={r.orderCount} sub="placed today" tone="muted" index={3} />
+        <StatTile
           icon={XCircle}
           label="Cancelled"
           labelZh="已取消"
-          value={String(r.cancelled.length)}
+          value={r.cancelled.length}
           sub="orders today"
           tone={r.cancelled.length > 0 ? "warn" : "muted"}
-          animDelay={280}
+          index={4}
         />
-        <SupportCard
+        <StatTile
           icon={Bike}
           label="Delivery Orders"
           labelZh="外送訂單"
-          value={String(r.typeCounts.delivery)}
+          value={r.typeCounts.delivery}
           sub={`${baht(r.deliveryRevenue)} billed`}
           tone="muted"
-          animDelay={340}
+          index={5}
         />
       </div>
 
-      {/* B / C / D — breakdown panels */}
-      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <ReportPanel title="Payment Breakdown" titleZh="收款組成" animDelay={120}>
-          <ReportRow label="Cash 現金" value={baht(r.cash)} accent="gold" />
-          <ReportRow label="Transfer 轉帳" value={baht(r.transfer)} accent="gold" />
+      <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-3">
+        <ReportPanel title="Payment Breakdown" titleZh="收款組成" index={0}>
+          <ReportRow label="Cash" labelZh="現金" value={baht(r.cash)} accent="gold" />
+          <ReportRow label="Transfer" labelZh="轉帳" value={baht(r.transfer)} accent="gold" />
           <ReportRow
-            label="Unpaid 未付"
+            label="Unpaid"
+            labelZh="未付"
             value={baht(r.unpaidTotal)}
             accent={r.unpaidTotal > 0 ? "vermillion" : undefined}
           />
-          <ReportRow label="Paid orders 已付單" value={String(r.paidCount)} />
-          <ReportRow label="Unpaid orders 未付單" value={String(r.unpaidCount)} />
+          <ReportRow label="Paid orders" labelZh="已付單" value={String(r.paidCount)} />
+          <ReportRow label="Unpaid orders" labelZh="未付單" value={String(r.unpaidCount)} />
         </ReportPanel>
 
-        <ReportPanel title="Order Types" titleZh="訂單類型" animDelay={180}>
-          <ReportRow label="Dine-in 堂食" value={String(r.typeCounts.dine_in)} />
-          <ReportRow label="Pickup 自取" value={String(r.typeCounts.pickup)} />
-          <ReportRow label="Delivery 外送" value={String(r.typeCounts.delivery)} />
-          <ReportRow label="Delivery billed 外送金額" value={baht(r.deliveryRevenue)} accent="gold" />
+        <ReportPanel title="Order Types" titleZh="訂單類型" index={1}>
+          <ReportRow label="Dine-in" labelZh="堂食" value={String(r.typeCounts.dine_in)} />
+          <ReportRow label="Pickup" labelZh="自取" value={String(r.typeCounts.pickup)} />
+          <ReportRow label="Delivery" labelZh="外送" value={String(r.typeCounts.delivery)} />
+          <ReportRow label="Delivery billed" labelZh="外送金額" value={baht(r.deliveryRevenue)} accent="gold" />
         </ReportPanel>
 
-        <ReportPanel title="Status Breakdown" titleZh="狀態分佈" animDelay={240}>
+        <ReportPanel title="Status Breakdown" titleZh="狀態分佈" index={2}>
           {REPORT_STATUS_ROWS.map(({ status, labelEn, labelZh }) => (
             <div key={status} className="flex items-center justify-between gap-3 text-[13px]">
               <span className="flex min-w-0 items-center gap-2 text-[var(--color-cream)]/85">
-                <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${OWNER_STATUS_BADGE[status].dot}`} />
+                <span aria-hidden className={cn("h-1.5 w-1.5 shrink-0 rounded-full", OWNER_STATUS_BADGE[status].dot)} />
                 <span className="truncate">
-                  {labelEn}{" "}
-                  <span className="text-[11px] text-[var(--color-muted-foreground)]">{labelZh}</span>
+                  {labelEn} <span className="text-[11px] text-[var(--color-muted-foreground)]">{labelZh}</span>
                 </span>
               </span>
               <span
-                className={`staff-num shrink-0 ${
+                className={cn(
+                  "oc-num shrink-0",
                   r.statusCounts[status] > 0
                     ? "text-[var(--color-cream)]"
-                    : "text-[var(--color-muted-foreground)]/60"
-                }`}
+                    : "text-[var(--color-muted-foreground)]/60",
+                )}
               >
                 {r.statusCounts[status]}
               </span>
@@ -1179,153 +2962,145 @@ function OwnerReportsView({
         </ReportPanel>
       </div>
 
-      {/* E — risk / audit */}
-      <div className="mt-6 grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
         <AuditList
           title="Done / Delivered — unpaid"
           titleZh="已完成未付"
           tone="var(--color-vermillion)"
           orders={r.doneUnpaid}
-          empty="None — every closed order is paid."
+          empty="Every closed order is paid."
           onSelectOrder={onSelectOrder}
-          animDelay={160}
+          index={0}
         />
         <AuditList
           title="Unpaid — still active"
           titleZh="未付進行中"
           tone="var(--color-gold-soft)"
           orders={r.unpaidActive}
-          empty="None — all active orders are settled."
+          empty="All active orders are settled."
           onSelectOrder={onSelectOrder}
-          animDelay={220}
+          index={1}
         />
         <AuditList
           title="Deliveries not yet delivered"
           titleZh="外送未送達"
           tone="oklch(0.72 0.13 230)"
           orders={r.deliveriesPending}
-          empty="None — no deliveries in flight."
+          empty="No deliveries in flight."
           onSelectOrder={onSelectOrder}
-          animDelay={280}
+          index={2}
         />
         <AuditList
           title="Cancelled — with reasons"
           titleZh="今日取消"
           tone="var(--color-muted-foreground)"
           orders={r.cancelled}
-          empty="None — no cancellations today."
+          empty="No cancellations today."
           onSelectOrder={onSelectOrder}
           showReason
-          animDelay={340}
+          index={3}
         />
       </div>
 
-      {/* F — best sellers */}
-      <section
-        className="owner-float-card mt-6 overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 hover:border-[var(--color-gold)]/25"
-        style={{ animation: "owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 300ms both" }}
-      >
-        <div className="flex items-center gap-2.5 border-b border-[var(--color-gold)]/15 px-6 py-4">
-          <Flame className="h-3.5 w-3.5 text-[var(--color-vermillion)]/80" strokeWidth={1.5} />
-          <span className="text-[11px] uppercase tracking-[0.25em] text-[var(--color-gold-soft)]/90">
-            Best Sellers Today · 今日熱賣
-          </span>
-        </div>
-        {bestSellers.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-[13px]">
-              <thead>
-                <tr className="border-b border-[var(--color-gold)]/10 text-[11px] uppercase tracking-[0.12em] text-[var(--color-muted-foreground)]">
-                  <th className="px-6 py-3 text-left font-normal">#</th>
-                  <th className="py-3 text-left font-normal">Item</th>
-                  <th className="py-3 text-right font-normal">Qty</th>
-                  <th className="px-6 py-3 text-right font-normal">Sales</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[var(--color-gold)]/8">
-                {bestSellers.map((item, idx) => (
-                  <tr key={item.name}>
-                    <td className="staff-num px-6 py-3 text-[var(--color-muted-foreground)]">
+      <div className="mt-5">
+        <Slab index={4} className="overflow-hidden">
+          <PanelHead eyebrow="Best Sellers Today · 今日熱賣" icon={Flame} />
+          {bestSellers.length > 0 ? (
+            <ul className="divide-y divide-[var(--oc-rule)]">
+              {bestSellers.map((item, idx) => (
+                <li key={item.name} className="relative px-5 py-3.5 sm:px-6">
+                  {/* The number gives the rank, the bar gives the gap between
+                      ranks — #2 selling half of #1 is invisible in a list of
+                      numbers. Kept just above the threshold where it reads as
+                      a comparison rather than as a rendering artifact. */}
+                  <span
+                    aria-hidden
+                    className="absolute inset-y-0 left-0 bg-[var(--color-gold)]/[0.11]"
+                    style={{ width: `${topQty > 0 ? (item.qty / topQty) * 100 : 0}%` }}
+                  />
+                  <div className="relative flex items-baseline gap-3">
+                    <span className="oc-num w-5 shrink-0 text-[11px] text-[var(--color-muted-foreground)]">
                       {idx + 1}
-                    </td>
-                    <td className="py-3 text-[var(--color-cream)]/90">{item.name}</td>
-                    <td className="staff-num py-3 text-right text-[var(--color-cream)]/85">
-                      {item.qty}
-                    </td>
-                    <td className="staff-num px-6 py-3 text-right text-[var(--color-gold)]">
+                    </span>
+                    <span className="min-w-0 flex-1 truncate text-[13.5px] text-[var(--color-cream)]/90">
+                      {item.name}
+                    </span>
+                    <span className="oc-num shrink-0 text-[12px] text-[var(--color-cream)]/70">
+                      ×{item.qty}
+                    </span>
+                    <span className="oc-num w-24 shrink-0 text-right text-[13.5px] text-[var(--color-gold)]">
                       {baht(item.revenue)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="px-6 py-10 text-center">
-            <p className="font-display text-[18px] text-[var(--color-gold-soft)]/80">
-              尚無銷售資料 · No item data yet
-            </p>
-            <p className="mx-auto mt-2 max-w-[420px] text-[12px] leading-relaxed text-[var(--color-muted-foreground)]">
-              Item analytics will unlock after order-item data is connected during backend
-              separation.
-            </p>
-          </div>
-        )}
-      </section>
-    </div>
+                    </span>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <EmptyNote
+              zh="尚無銷售資料"
+              en="No item data yet."
+              hint="Item analytics unlock once order-item data is connected during backend separation."
+            />
+          )}
+        </Slab>
+      </div>
+    </Deck>
   );
 }
 
 function ReportPanel({
   title,
   titleZh,
-  animDelay = 0,
+  index = 0,
   children,
 }: {
   title: string;
   titleZh: string;
-  animDelay?: number;
+  index?: number;
   children: ReactNode;
 }) {
   return (
-    <section
-      className="owner-float-card overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 hover:border-[var(--color-gold)]/25"
-      style={{ animation: `owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) ${animDelay}ms both` }}
-    >
-      <div className="border-b border-[var(--color-gold)]/15 px-6 py-4">
-        <span className="text-[11px] uppercase tracking-[0.25em] text-[var(--color-gold-soft)]/90">
-          {title} · {titleZh}
-        </span>
-      </div>
-      <div className="space-y-3 px-6 py-5">{children}</div>
-    </section>
+    <Slab index={index} className="overflow-hidden">
+      <PanelHead eyebrow={`${title} · ${titleZh}`} />
+      <div className="space-y-3 px-5 py-5 sm:px-6">{children}</div>
+    </Slab>
   );
 }
 
 function ReportRow({
   label,
+  labelZh,
   value,
   accent,
 }: {
   label: string;
+  labelZh?: string;
   value: string;
   accent?: "gold" | "vermillion";
 }) {
-  const valueClass =
-    accent === "gold"
-      ? "text-[var(--color-gold)]"
-      : accent === "vermillion"
-      ? "text-[var(--color-vermillion)]"
-      : "text-[var(--color-cream)]/85";
   return (
     <div className="flex items-center justify-between gap-3 text-[13px]">
-      <span className="min-w-0 truncate text-[var(--color-cream)]/85">{label}</span>
-      <span className={`staff-num shrink-0 ${valueClass}`}>{value}</span>
+      <span className="min-w-0 truncate text-[var(--color-cream)]/85">
+        {label}
+        {labelZh && <span className="ml-1.5 text-[11px] text-[var(--color-muted-foreground)]">{labelZh}</span>}
+      </span>
+      <span
+        className={cn(
+          "oc-num shrink-0",
+          accent === "gold"
+            ? "text-[var(--color-gold)]"
+            : accent === "vermillion"
+            ? "text-[var(--color-vermillion-text)]"
+            : "text-[var(--color-cream)]/85",
+        )}
+      >
+        {value}
+      </span>
     </div>
   );
 }
 
-// Compact clickable audit list — rows open the read-only order modal.
+/** Compact clickable audit list — rows open the read-only order modal. */
 function AuditList({
   title,
   titleZh,
@@ -1334,7 +3109,7 @@ function AuditList({
   empty,
   onSelectOrder,
   showReason,
-  animDelay = 0,
+  index = 0,
 }: {
   title: string;
   titleZh: string;
@@ -1343,71 +3118,73 @@ function AuditList({
   empty: string;
   onSelectOrder: (o: StaffOrder) => void;
   showReason?: boolean;
-  animDelay?: number;
+  index?: number;
 }) {
   return (
-    <section
-      className="owner-float-card overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 hover:border-[var(--color-gold)]/25"
-      style={{ animation: `owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) ${animDelay}ms both` }}
-    >
-      <div className="flex items-center gap-2.5 border-b border-[var(--color-gold)]/15 px-6 py-4">
-        <span className="h-4 w-1 rounded-full" style={{ background: tone }} />
-        <span className="min-w-0 truncate text-[11px] uppercase tracking-[0.2em] text-[var(--color-gold-soft)]/90">
-          {title} · {titleZh}
-        </span>
-        <span className="staff-num ml-auto shrink-0 text-[12px] text-[var(--color-muted-foreground)]">
-          {orders.length}
-        </span>
-      </div>
+    <Slab index={index} className="overflow-hidden">
+      <PanelHead
+        eyebrow={`${title} · ${titleZh}`}
+        tone={tone}
+        meta={
+          <span className="oc-num text-[12px] text-[var(--color-muted-foreground)]">
+            {orders.length}
+          </span>
+        }
+      />
       {orders.length > 0 ? (
-        <ul className="divide-y divide-[var(--color-gold)]/8">
+        <ul className="divide-y divide-[var(--oc-rule)]">
           {orders.slice(0, 6).map((o) => (
-            <li
-              key={o.orderId}
-              onClick={() => onSelectOrder(o)}
-              className="flex cursor-pointer items-start gap-3 px-6 py-3 transition-colors hover:bg-[var(--color-gold)]/[0.07]"
-            >
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[13px] text-[var(--color-cream)]/90">
-                  {locText(o)}
-                  <span className="ml-2 text-[11px] text-[var(--color-muted-foreground)]">
-                    {STATUS_META[o.status].labelEn}
-                  </span>
-                </div>
-                <div className="staff-num mt-0.5 truncate text-[11px] text-[var(--color-muted-foreground)]">
-                  {o.orderId} · {o.time}
-                </div>
-                {showReason && o.cancellationReason && (
-                  <div className="mt-0.5 truncate text-[11.5px] italic text-[var(--color-muted-foreground)]/70">
-                    {o.cancellationReason}
-                  </div>
-                )}
-              </div>
-              <span
-                className={`staff-num shrink-0 whitespace-nowrap text-[14px] ${
-                  o.status === "cancelled"
-                    ? "text-[var(--color-muted-foreground)] line-through"
-                    : "text-[var(--color-gold)]"
-                }`}
+            <li key={o.orderId}>
+              <button
+                type="button"
+                onClick={() => onSelectOrder(o)}
+                className="flex w-full items-start gap-3 px-5 py-3 text-left transition-colors hover:bg-[var(--color-gold)]/[0.06] sm:px-6"
               >
-                {baht(o.totalPrice)}
-              </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] text-[var(--color-cream)]/90">
+                    {locText(o)}
+                    <span className="ml-2 text-[11px] text-[var(--color-muted-foreground)]">
+                      {STATUS_META[o.status].labelEn}
+                    </span>
+                  </span>
+                  <span className="oc-num block truncate text-[11px] text-[var(--color-muted-foreground)]">
+                    {o.orderId} · {o.time}
+                  </span>
+                  {showReason && o.cancellationReason && (
+                    <span className="mt-0.5 block truncate text-[11.5px] italic text-[var(--color-muted-foreground)]/70">
+                      {o.cancellationReason}
+                    </span>
+                  )}
+                </span>
+                <span
+                  className={cn(
+                    "oc-num shrink-0 whitespace-nowrap text-[14px]",
+                    o.status === "cancelled"
+                      ? "text-[var(--color-muted-foreground)] line-through"
+                      : "text-[var(--color-gold)]",
+                  )}
+                >
+                  {baht(o.totalPrice)}
+                </span>
+              </button>
             </li>
           ))}
           {orders.length > 6 && (
-            <li className="px-6 py-2.5 text-[11px] text-[var(--color-muted-foreground)]">
-              +{orders.length - 6} more — see Orders tab
+            <li className="px-5 py-2.5 text-[11px] text-[var(--color-muted-foreground)] sm:px-6">
+              {orders.length - 6} more in Orders
             </li>
           )}
         </ul>
       ) : (
-        <p className="px-6 py-6 text-[12.5px] text-[var(--color-muted-foreground)]">{empty}</p>
+        <p className="px-5 py-6 text-[12.5px] text-[var(--color-muted-foreground)] sm:px-6">{empty}</p>
       )}
-    </section>
+    </Slab>
   );
 }
 
-/* ---------- Menu view (read-only) ---------- */
+/* ═══════════════════════════════════════════════════════════════════════
+   Menu view (read-only)
+   ═══════════════════════════════════════════════════════════════════════ */
 // Read-only snapshot of the menu bundled with the app (src/data/menu.ts — the
 // same data the customer menu renders from). No fetching here: live availability
 // is operated on the staff Menu board, and full menu management (editing prices,
@@ -1419,7 +3196,7 @@ const MENU_CATEGORY_LABEL: Record<MenuCategoryId, string> = Object.fromEntries(
   CATEGORIES.map((c) => [c.id, c.nameEn]),
 ) as Record<MenuCategoryId, string>;
 
-// Status facet for the summary cards. Combines with the category pills (AND):
+// Status facet for the summary tiles. Combines with the category pills (AND):
 // pick a category, then narrow it to available / popular / needs-price.
 type MenuStatusFilter = "all" | "available" | "popular" | "needs_price";
 
@@ -1436,7 +3213,7 @@ function OwnerMenuView() {
   const [category, setCategory] = useState<MenuCategoryId | "all">("all");
   const [statusFilter, setStatusFilter] = useState<MenuStatusFilter>("all");
 
-  // Clicking an already-active card returns to "all items".
+  // Clicking an already-active tile returns to "all items".
   const toggleStatus = (f: MenuStatusFilter) =>
     setStatusFilter((prev) => (prev === f && f !== "all" ? "all" : f));
 
@@ -1456,978 +3233,178 @@ function OwnerMenuView() {
   const needsPriceCount = MENU.filter((i) => i.price === undefined).length;
 
   return (
-    <div className="mx-auto w-full max-w-[1400px] px-5 py-6 lg:px-8">
-      {/* Header */}
-      <div className="mb-5">
-        <h2 className="font-display text-[22px] leading-none text-[var(--color-cream)]">
-          Menu · 菜單總覽
-        </h2>
-        <p className="mt-1 text-[12px] uppercase tracking-[0.14em] text-[var(--color-muted-foreground)]">
-          read-only · menu overview
-        </p>
-      </div>
+    <Deck>
+      <ViewHead title="Menu" titleZh="菜單總覽" meta="read-only · menu snapshot" />
 
-      {/* Summary cards — click to filter the table below */}
-      <div className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <MenuStatCard
+      <div className="mb-6 grid grid-cols-2 gap-5 lg:grid-cols-4">
+        <StatTile
           icon={UtensilsCrossed}
           label="Items"
           labelZh="品項"
-          value={String(MENU.length)}
+          value={MENU.length}
           sub={`${CATEGORIES.length} categories`}
           tone="muted"
           active={statusFilter === "all"}
           onClick={() => toggleStatus("all")}
-          animDelay={40}
+          index={0}
         />
-        <MenuStatCard
+        <StatTile
           icon={Receipt}
           label="Available"
           labelZh="供應中"
-          value={String(availableCount)}
-          sub="on the menu snapshot"
+          value={availableCount}
+          sub="on the snapshot"
           tone="money"
           active={statusFilter === "available"}
           onClick={() => toggleStatus("available")}
-          animDelay={100}
+          index={1}
         />
-        <MenuStatCard
+        <StatTile
           icon={Star}
           label="Popular"
           labelZh="人氣"
-          value={String(popularCount)}
+          value={popularCount}
           sub="marked bestsellers"
           tone={popularCount > 0 ? "warn" : "muted"}
           active={statusFilter === "popular"}
           onClick={() => toggleStatus("popular")}
-          animDelay={160}
+          index={2}
         />
-        <MenuStatCard
+        <StatTile
           icon={AlertTriangle}
           label="Needs Price"
           labelZh="待定價"
-          value={String(needsPriceCount)}
+          value={needsPriceCount}
           sub="price to confirm"
           tone={needsPriceCount > 0 ? "alert" : "muted"}
           active={statusFilter === "needs_price"}
           onClick={() => toggleStatus("needs_price")}
-          animDelay={220}
+          index={3}
         />
       </div>
 
-      {/* Category filter pills */}
       <div className="mb-5 flex flex-wrap gap-2">
-        {[{ id: "all" as const, nameEn: "All" }, ...CATEGORIES].map((c) => {
-          const isActive = category === c.id;
-          const count = MENU.filter(
-            (i) =>
-              (c.id === "all" || i.category === c.id) && matchesMenuStatus(i, statusFilter),
-          ).length;
-          return (
-            <button
-              key={c.id}
-              type="button"
-              onClick={() => setCategory(c.id)}
-              className={`flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-medium tracking-[0.06em] transition-colors ${
-                isActive
-                  ? "border-[var(--color-gold)]/60 bg-[var(--color-gold)]/12 text-[var(--color-gold)]"
-                  : "border-[var(--color-gold)]/15 text-[var(--color-muted-foreground)] hover:border-[var(--color-gold)]/30 hover:text-[var(--color-cream)]/70"
-              }`}
-            >
-              {c.nameEn}
-              <span
-                className={`rounded-full px-1.5 py-0.5 text-[10px] tabular-nums ${
-                  isActive
-                    ? "bg-[var(--color-gold)]/20 text-[var(--color-gold)]"
-                    : "bg-[var(--color-gold)]/8 text-[var(--color-muted-foreground)]"
-                }`}
-              >
-                {count}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
-      {/* Menu table */}
-      {items.length === 0 ? (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-[var(--color-gold)]/12 bg-[var(--color-charcoal-soft)]/40 py-20 text-center">
-          <p className="text-[14px] text-[var(--color-muted-foreground)]">
-            沒有符合的品項 · No items match this view.
-          </p>
-          <p className="mt-1.5 text-[12px] text-[var(--color-muted-foreground)]/60">
-            Adjust the category or the summary filter above.
-          </p>
-        </div>
-      ) : (
-      <div className="overflow-x-auto rounded-xl border border-[var(--color-gold)]/12 bg-[var(--color-charcoal-soft)]/40">
-        <table className="w-full text-[13px]">
-          <thead>
-            <tr className="border-b border-[var(--color-gold)]/12">
-              {["Item", "Category", "Price", "Unit", "Availability", "Tags"].map((h) => (
-                <th
-                  key={h}
-                  className="px-4 py-3 text-left text-[11px] uppercase tracking-[0.14em] font-medium text-[var(--color-muted-foreground)]"
-                >
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-[var(--color-gold)]/8">
-            {items.map((item) => (
-              <tr key={item.id} className={item.available ? "" : "opacity-55"}>
-                <td className="px-4 py-3">
-                  <p className="font-medium text-[var(--color-cream)]/90">{item.nameEn}</p>
-                  <p className="mt-0.5 text-[10.5px] uppercase tracking-[0.12em] text-[var(--color-muted-foreground)] tabular-nums">
-                    {item.id}
-                  </p>
-                </td>
-                <td className="px-4 py-3 text-[var(--color-cream)]/70">
-                  {MENU_CATEGORY_LABEL[item.category]}
-                </td>
-                <td className="staff-num px-4 py-3 tabular-nums">
-                  {item.price !== undefined ? (
-                    <span className="text-[var(--color-gold)]">{baht(item.price)}</span>
-                  ) : (
-                    <span className="text-[11px] uppercase tracking-[0.08em] text-[var(--color-vermillion)]/75">
-                      To confirm
-                    </span>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-[12px] text-[var(--color-muted-foreground)]">
-                  {item.unit ?? "—"}
-                </td>
-                <td className="px-4 py-3">
-                  {item.available ? (
-                    <span className="inline-flex items-center gap-1 rounded-full border border-emerald-400/28 bg-emerald-500/12 px-2 py-0.5 text-[11px] font-medium tracking-[0.05em] text-emerald-300">
-                      <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                      Available
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1 rounded-full border border-[var(--color-cream)]/12 bg-[var(--color-cream)]/6 px-2 py-0.5 text-[11px] font-medium tracking-[0.05em] text-[var(--color-cream)]/55">
-                      <span className="h-1.5 w-1.5 rounded-full bg-[var(--color-cream)]/45" />
-                      Off menu
-                    </span>
-                  )}
-                </td>
-                <td className="px-4 py-3">
-                  {item.popular && (
-                    <span className="inline-flex items-center gap-1 rounded-full border border-[var(--color-gold)]/30 bg-[var(--color-gold)]/10 px-2 py-0.5 text-[11px] font-medium tracking-[0.05em] text-[var(--color-gold)]">
-                      <Star className="h-2.5 w-2.5" strokeWidth={2} />
-                      Popular
-                    </span>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      )}
-
-      {/* Planned management note */}
-      <section
-        className="owner-float-card mt-6 rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 px-6 py-5"
-        style={{ animation: "owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 200ms both" }}
-      >
-        <div className="text-[11px] uppercase tracking-[0.25em] text-[var(--color-gold-soft)]/90">
-          Menu Management · 菜單管理
-        </div>
-        <p className="mt-2 max-w-[640px] text-[13px] leading-relaxed text-[var(--color-muted-foreground)]">
-          This is the menu snapshot bundled with the app — the same data the customer menu renders
-          from. Day-to-day availability is operated on the staff Menu board. Full menu management
-          connects after backend separation, when the owner will be able to:
-        </p>
-        <ul className="mt-3 grid max-w-[640px] grid-cols-1 gap-1.5 text-[12.5px] text-[var(--color-cream)]/75 sm:grid-cols-2">
-          {[
-            "View the live menu",
-            "Toggle item availability",
-            "Edit prices",
-            "Track low stock",
-            "Manage categories",
-          ].map((f) => (
-            <li key={f} className="flex items-center gap-2">
-              <span className="h-1 w-1 shrink-0 rounded-full bg-[var(--color-gold)]/60" />
-              {f}
-            </li>
-          ))}
-        </ul>
-      </section>
-    </div>
-  );
-}
-
-// SupportCard's look as a filter toggle — same metrics layout, but a real
-// button with a clear pressed state so the cards read as filters, not decor.
-function MenuStatCard({
-  icon: Icon,
-  label,
-  labelZh,
-  value,
-  sub,
-  tone,
-  active,
-  onClick,
-  animDelay = 0,
-}: {
-  icon: LucideIcon;
-  label: string;
-  labelZh: string;
-  value: string;
-  sub: string;
-  tone: Tone;
-  active: boolean;
-  onClick: () => void;
-  animDelay?: number;
-}) {
-  const accent = toneColor(tone);
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={`owner-float-card group relative w-full cursor-pointer overflow-hidden rounded-xl border px-5 py-5 text-left transition-colors ${
-        active
-          ? "border-[var(--color-gold)]/55 bg-[var(--color-gold)]/[0.07]"
-          : "border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 hover:border-[var(--color-gold)]/35"
-      }`}
-      style={{ animation: `owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) ${animDelay}ms both` }}
-    >
-      <span
-        aria-hidden
-        className={`absolute bottom-5 left-0 top-5 w-[2px] rounded-r-full transition-opacity ${
-          active ? "opacity-100" : "opacity-60 group-hover:opacity-100"
-        }`}
-        style={{ background: accent }}
-      />
-      <div className="flex items-center justify-between gap-2 text-[12px] text-[var(--color-gold-soft)]/90">
-        <span className="flex min-w-0 items-center gap-2">
-          <Icon className="h-4 w-4 shrink-0" strokeWidth={1.5} style={{ color: accent, opacity: 0.85 }} />
-          <span className="truncate">{label}</span>
-        </span>
-        <span className="shrink-0 text-[var(--color-muted-foreground)]">{labelZh}</span>
-      </div>
-      <div
-        className="mt-3 staff-num break-all text-[24px] leading-none sm:text-[28px]"
-        style={{ color: tone === "muted" ? "var(--color-cream)" : accent }}
-      >
-        {value}
-      </div>
-      <div className="mt-2 flex items-center justify-between gap-2 text-[12px] text-[var(--color-muted-foreground)]">
-        <span className="truncate">{sub}</span>
-        {active && (
-          <span className="shrink-0 text-[10px] uppercase tracking-[0.14em] text-[var(--color-gold)]/80">
-            filtering
-          </span>
-        )}
-      </div>
-    </button>
-  );
-}
-
-/* ---------- Sidebar (static, desktop only) ---------- */
-
-type OwnerSection = "overview" | "orders" | "payments" | "reports" | "menu";
-
-const NAV_ITEMS: { id: OwnerSection | null; label: string; icon: LucideIcon }[] = [
-  { id: "overview", label: "Overview", icon: LayoutGrid     },
-  { id: "orders",   label: "Orders",   icon: ClipboardList  },
-  { id: "menu",     label: "Menu",     icon: UtensilsCrossed },
-  { id: "payments", label: "Payments", icon: Banknote       },
-  { id: "reports",  label: "Reports",  icon: LineChartIcon  },
-  { id: null,       label: "Settings", icon: Settings       },
-];
-
-function OwnerSidebar({
-  activeSection,
-  onSectionChange,
-}: {
-  activeSection: OwnerSection;
-  onSectionChange: (s: OwnerSection) => void;
-}) {
-  const [hintLabel, setHintLabel] = useState<string | null>(null);
-  const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  function showHint(label: string) {
-    if (hintTimer.current) clearTimeout(hintTimer.current);
-    setHintLabel(label);
-    hintTimer.current = setTimeout(() => setHintLabel(null), 2500);
-  }
-
-  return (
-    <aside className="sticky top-0 hidden h-screen w-[240px] shrink-0 flex-col border-r border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/40 lg:flex">
-      <div className="border-b border-[var(--color-gold)]/15 px-6 pb-6 pt-7">
-        <div className="flex items-center gap-2.5">
-          <BrandMark className="h-7 w-7" />
-          <span className="text-[10px] uppercase tracking-[0.3em] text-[var(--color-gold-soft)]/70">
-            東主 · Owner
-          </span>
-        </div>
-        <p className="mt-3 font-display text-[24px] leading-[1.1] text-[var(--color-cream)]">
-          The <span className="text-[var(--color-vermillion)]">Third</span> Place
-        </p>
-        <p className="mt-1 text-[11px] uppercase tracking-[0.18em] text-[var(--color-gold-soft)]/70">
-          Chinese BBQ &amp; Lounge
-        </p>
-      </div>
-
-      <nav className="flex-1 space-y-0.5 px-3 py-5">
-        {NAV_ITEMS.map(({ id, label, icon: Icon }) => {
-          const isActive = id !== null && id === activeSection;
-          const isLive = id !== null;
-          return (
-            <button
-              key={label}
-              type="button"
-              aria-current={isActive ? "page" : undefined}
-              onClick={
-                isActive ? undefined
-                : isLive ? () => onSectionChange(id)
-                : () => showHint(label)
-              }
-              className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-[14px] transition-colors ${
-                isActive
-                  ? "bg-[var(--color-charcoal-soft)] text-[var(--color-cream)] shadow-[inset_2px_0_0_var(--color-gold)]"
-                  : isLive
-                  ? "text-[var(--color-gold-soft)]/65 hover:bg-[var(--color-gold)]/[0.06] hover:text-[var(--color-cream)]/80"
-                  : "cursor-default text-[var(--color-gold-soft)]/40 hover:bg-[var(--color-gold)]/[0.04] hover:text-[var(--color-gold-soft)]/60"
-              }`}
-            >
-              <Icon
-                className="h-[15px] w-[15px]"
-                strokeWidth={1.5}
-                style={{ opacity: isActive ? 0.85 : isLive ? 0.60 : 0.38 }}
-              />
-              <span className="flex-1 text-left">{label}</span>
-              {!isLive && (
-                <span
-                  className="shrink-0 rounded-sm px-1.5 py-0.5 text-[9px] uppercase tracking-[0.1em] text-[var(--color-muted-foreground)]"
-                  style={{ border: "1px solid oklch(0.72 0.11 75 / 0.18)" }}
-                >
-                  Soon
-                </span>
-              )}
-            </button>
-          );
-        })}
-      </nav>
-
-      {/* Footer — flashes section name on click, otherwise shows release note */}
-      <div className="border-t border-[var(--color-gold)]/15 px-6 py-4">
-        {hintLabel ? (
-          <p className="text-[10.5px] leading-relaxed text-[var(--color-gold-soft)]/75 transition-opacity">
-            <span className="font-medium text-[var(--color-gold-soft)]">{hintLabel}</span>
-            {" "}— arriving in a later release.
-          </p>
-        ) : (
-          <p className="text-[10.5px] leading-relaxed text-[var(--color-muted-foreground)]">
-            Overview, Orders, Menu, Payments &amp; Reports are live. Settings arriving soon.
-          </p>
-        )}
-      </div>
-    </aside>
-  );
-}
-
-// Round grill / fire-ring brand emblem (decorative, no data).
-function BrandMark({ className = "" }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 32 32" className={className} fill="none" aria-hidden>
-      <circle
-        cx="16"
-        cy="16"
-        r="13.5"
-        stroke="var(--color-gold)"
-        strokeOpacity="0.55"
-        strokeWidth="0.8"
-      />
-      <circle
-        cx="16"
-        cy="16"
-        r="9.5"
-        stroke="var(--color-gold)"
-        strokeOpacity="0.35"
-        strokeWidth="0.6"
-      />
-      <line
-        x1="6"
-        y1="16"
-        x2="26"
-        y2="16"
-        stroke="var(--color-gold)"
-        strokeOpacity="0.55"
-        strokeWidth="0.6"
-      />
-      <line
-        x1="8"
-        y1="12"
-        x2="24"
-        y2="12"
-        stroke="var(--color-gold)"
-        strokeOpacity="0.3"
-        strokeWidth="0.5"
-      />
-      <line
-        x1="8"
-        y1="20"
-        x2="24"
-        y2="20"
-        stroke="var(--color-gold)"
-        strokeOpacity="0.3"
-        strokeWidth="0.5"
-      />
-      <circle cx="16" cy="16" r="1.4" fill="var(--color-vermillion)" />
-    </svg>
-  );
-}
-
-/* ---------- Header ---------- */
-
-function OwnerHeader({
-  now,
-  live,
-  onRefresh,
-}: {
-  now: Date;
-  live: boolean;
-  onRefresh: () => void;
-}) {
-  return (
-    <header className="mx-auto w-full max-w-[1600px] border-b border-[var(--color-gold)]/15 px-5 pb-5 pt-6 lg:px-8">
-      <div className="flex items-end justify-between gap-6">
-        <div className="min-w-0">
-          <h1 className="font-display text-[34px] leading-[1.02] text-[var(--color-cream)] sm:text-[42px]">
-            {greeting(now)}, <span className="text-[var(--color-gold)]">{OWNER_NAME}</span>.
-          </h1>
-          <div className="mt-3 flex items-center gap-3 text-[11px] uppercase tracking-[0.28em] text-[var(--color-gold-soft)]/80">
-            <span className="h-px w-7 bg-[var(--color-gold)]/40" />
-            Dinner Service · {dateLabel(now)}
-          </div>
-          <p className="mt-2 flex items-center gap-2 text-[12px] text-[var(--color-gold-soft)]/80">
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-            {live ? "Live · 今晚營業" : "Connecting…"}
-          </p>
-        </div>
-
-        <button
-          type="button"
-          onClick={onRefresh}
-          className="group hidden items-center gap-2 rounded-md border border-[var(--color-gold)]/20 bg-[var(--color-charcoal-soft)]/60 px-3.5 py-2.5 text-[13px] text-[var(--color-gold-soft)]/90 transition-colors hover:text-[var(--color-cream)] sm:flex"
-        >
-          <RefreshCw
-            className="h-3.5 w-3.5 transition-transform duration-500 group-hover:rotate-180"
-            strokeWidth={1.5}
+        {[{ id: "all" as const, nameEn: "All" }, ...CATEGORIES].map((c) => (
+          <FilterPill
+            key={c.id}
+            label={c.nameEn}
+            count={
+              MENU.filter(
+                (i) => (c.id === "all" || i.category === c.id) && matchesMenuStatus(i, statusFilter),
+              ).length
+            }
+            active={category === c.id}
+            onClick={() => setCategory(c.id)}
           />
-          <span className="staff-num">Updated {hhmm(now)}</span>
-        </button>
-      </div>
-    </header>
-  );
-}
-
-/* ---------- Hero — Collected Tonight ---------- */
-
-function Hero({ summary }: { summary: ReturnType<typeof summarizeToday> }) {
-  return (
-    <section
-      className="owner-float-card relative overflow-hidden rounded-2xl border px-7 py-7"
-      style={{
-        background:
-          "linear-gradient(155deg, oklch(0.21 0.012 50) 0%, oklch(0.17 0.007 55) 55%, oklch(0.15 0.005 60) 100%)",
-        borderColor: "oklch(0.72 0.11 75 / 0.32)",
-        boxShadow: "0 24px 50px -30px oklch(0 0 0 / 0.9)",
-        animation: "owner-fade-up 0.65s cubic-bezier(0.22, 1, 0.36, 1) both",
-      }}
-    >
-      <div
-        aria-hidden
-        className="pointer-events-none absolute -right-24 -top-24 h-72 w-72 rounded-full"
-        style={{
-          background: "radial-gradient(circle, oklch(0.55 0.19 27 / 0.12) 0%, transparent 60%)",
-        }}
-      />
-      <div className="relative flex items-start justify-between gap-4">
-        <div className="min-w-0">
-          <div className="text-[11px] uppercase tracking-[0.25em] text-[var(--color-gold-soft)]/90">
-            Collected Tonight · 今晚收款
-          </div>
-          <div className="mt-1 text-[12px] text-[var(--color-muted-foreground)]">
-            Paid cash + paid transfer only
-          </div>
-        </div>
-        <span className="staff-num shrink-0 text-[12px] text-[var(--color-gold-soft)]/80">
-          {summary.orderCount} {summary.orderCount === 1 ? "order" : "orders"}
-        </span>
-      </div>
-      <div className="relative mt-5 staff-num break-all text-[38px] leading-none text-[var(--color-gold)] sm:text-[52px] lg:text-[60px]">
-        {baht(summary.collected)}
-      </div>
-      <div className="relative mt-3 break-words text-[13px] text-[var(--color-muted-foreground)]">
-        Cash {baht(summary.cash)} · Transfer {baht(summary.transfer)}
-      </div>
-    </section>
-  );
-}
-
-/* ---------- Metrics ---------- */
-
-function MetricsGrid({ summary }: { summary: ReturnType<typeof summarizeToday> }) {
-  return (
-    <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-      <SupportCard
-        icon={Wallet}
-        label="Cash"
-        labelZh="現金"
-        value={baht(summary.cash)}
-        sub="collected"
-        tone="money"
-        animDelay={80}
-      />
-      <SupportCard
-        icon={ArrowLeftRight}
-        label="Transfer"
-        labelZh="轉帳"
-        value={baht(summary.transfer)}
-        sub="collected"
-        tone="money"
-        animDelay={150}
-      />
-      <SupportCard
-        icon={AlertTriangle}
-        label="Unpaid"
-        labelZh="未付"
-        value={baht(summary.unpaidTotal)}
-        sub={`${summary.unpaidCount} ${summary.unpaidCount === 1 ? "order" : "orders"}`}
-        tone={summary.unpaidTotal > 0 ? "warn" : "muted"}
-        animDelay={220}
-      />
-      <SupportCard
-        icon={Receipt}
-        label="Closed · Unpaid"
-        labelZh="已完成未付"
-        value={String(summary.doneUnpaidCount)}
-        sub="done or delivered, not paid"
-        tone={summary.doneUnpaidCount > 0 ? "alert" : "muted"}
-        animDelay={290}
-      />
-    </div>
-  );
-}
-
-type Tone = "money" | "warn" | "alert" | "muted" | "cost";
-
-function toneColor(tone: Tone): string {
-  switch (tone) {
-    case "money":
-      return "var(--color-gold)";
-    case "warn":
-      return "var(--color-gold-soft)";
-    case "alert":
-      return "var(--color-vermillion)";
-    case "cost":
-      return "oklch(0.62 0.155 27 / 0.88)";
-    default:
-      return "var(--color-cream)";
-  }
-}
-
-function SupportCard({
-  icon: Icon,
-  label,
-  labelZh,
-  value,
-  sub,
-  tone,
-  animDelay = 0,
-}: {
-  icon: LucideIcon;
-  label: string;
-  labelZh: string;
-  value: string;
-  sub: string;
-  tone: Tone;
-  animDelay?: number;
-}) {
-  const accent = toneColor(tone);
-  return (
-    <div
-      className="owner-float-card group relative overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 px-5 py-5 hover:border-[var(--color-gold)]/28"
-      style={{ animation: `owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) ${animDelay}ms both` }}
-    >
-      <span
-        aria-hidden
-        className="absolute bottom-5 left-0 top-5 w-[2px] rounded-r-full opacity-60 transition-opacity group-hover:opacity-100"
-        style={{ background: accent }}
-      />
-      <div className="flex items-center justify-between gap-2 text-[12px] text-[var(--color-gold-soft)]/90">
-        <span className="flex min-w-0 items-center gap-2">
-          <Icon className="h-4 w-4 shrink-0" strokeWidth={1.5} style={{ color: accent, opacity: 0.85 }} />
-          <span className="truncate">{label}</span>
-        </span>
-        <span className="shrink-0 text-[var(--color-muted-foreground)]">{labelZh}</span>
-      </div>
-      <div
-        className="mt-3 staff-num break-all text-[24px] leading-none sm:text-[28px]"
-        style={{ color: tone === "muted" ? "var(--color-cream)" : accent }}
-      >
-        {value}
-      </div>
-      <div className="mt-2 text-[12px] text-[var(--color-muted-foreground)]">{sub}</div>
-    </div>
-  );
-}
-
-/* ---------- Expense + Net row ---------- */
-
-function ExpenseNetRow({
-  expensesTotal,
-  collected,
-  expLoadState,
-}: {
-  expensesTotal: number;
-  collected: number;
-  expLoadState: LoadState;
-}) {
-  const loading = expLoadState === "loading";
-  const net = collected - expensesTotal;
-  const netTone: Tone = loading ? "muted" : net < 0 ? "alert" : "money";
-
-  return (
-    <div className="grid grid-cols-2 gap-4">
-      <SupportCard
-        icon={TrendingDown}
-        label="Expenses Today"
-        labelZh="今日支出"
-        value={loading ? "…" : baht(expensesTotal)}
-        sub="logged outflows"
-        tone={loading ? "muted" : "cost"}
-        animDelay={360}
-      />
-      <SupportCard
-        icon={Scale}
-        label="Net Today"
-        labelZh="今日淨額"
-        value={loading ? "…" : baht(net)}
-        sub="collected minus logged expenses"
-        tone={netTone}
-        animDelay={430}
-      />
-    </div>
-  );
-}
-
-/* ---------- Payment Mix — segmented ring (Cash + Transfer = Collected) ---------- */
-// SVG donut via stroke-dasharray. The ring represents COLLECTED money only, so it
-// always fills to 100% and the center value equals the ring total. Unpaid is shown
-// as a separate ember warning row below — it is never folded into collected. Empty
-// state draws only the faint track (no fake slice). All values are real.
-const RING_R = 62;
-const RING_C = 2 * Math.PI * RING_R;
-
-function PaymentMix({
-  collected,
-  cash,
-  transfer,
-  unpaid,
-  unpaidCount,
-}: {
-  collected: number;
-  cash: number;
-  transfer: number;
-  unpaid: number;
-  unpaidCount: number;
-}) {
-  const [drawn, setDrawn] = useState(false);
-  useEffect(() => {
-    let id = requestAnimationFrame(() => {
-      id = requestAnimationFrame(() => setDrawn(true));
-    });
-    return () => cancelAnimationFrame(id);
-  }, []);
-
-  const segments = [
-    { key: "cash", value: cash, stroke: "var(--color-gold)" },
-    { key: "transfer", value: transfer, stroke: "var(--color-gold-soft)" },
-  ].filter((s) => s.value > 0);
-
-  const gap = segments.length > 1 ? 3 : 0;
-  let cursor = 0;
-  const arcs = segments.map((s) => {
-    const frac = collected > 0 ? s.value / collected : 0;
-    const len = Math.max(0, frac * RING_C - gap);
-    const arc = { ...s, len, offset: -cursor };
-    cursor += frac * RING_C;
-    return arc;
-  });
-
-  const pct = (v: number) => (collected > 0 ? Math.round((v / collected) * 100) : 0);
-
-  return (
-    <section
-      className="owner-float-card overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 px-6 py-6 hover:border-[var(--color-gold)]/25"
-      style={{ animation: "owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 300ms both" }}
-    >
-      <div className="text-[11px] uppercase tracking-[0.25em] text-[var(--color-gold-soft)]/90">
-        Collection Breakdown · 收款組成
-      </div>
-      <h2 className="mt-1 font-display text-[22px] leading-tight text-[var(--color-cream)]">
-        Payment Mix
-      </h2>
-
-      <div className="mt-5 flex flex-col items-center gap-7 sm:flex-row sm:gap-9">
-        {/* Ring */}
-        <div
-          className="relative h-[176px] w-[176px] shrink-0"
-          role="img"
-          aria-label={`Collected ${baht(collected)} — Cash ${baht(cash)}, Transfer ${baht(
-            transfer,
-          )}. Unpaid ${baht(unpaid)} not counted as collected.`}
-        >
-          <svg viewBox="0 0 144 144" className="h-full w-full">
-            <circle
-              cx="72"
-              cy="72"
-              r={RING_R}
-              fill="none"
-              stroke="var(--color-charcoal)"
-              strokeWidth="14"
-            />
-            <g transform="rotate(-90 72 72)">
-              {arcs.map((a, i) => (
-                <circle
-                  key={a.key}
-                  cx="72"
-                  cy="72"
-                  r={RING_R}
-                  fill="none"
-                  stroke={a.stroke}
-                  strokeWidth="14"
-                  strokeLinecap="butt"
-                  style={{
-                    strokeDasharray: drawn
-                      ? `${a.len} ${RING_C - a.len}`
-                      : `0 ${RING_C}`,
-                    strokeDashoffset: a.offset,
-                    transition: `stroke-dasharray 0.9s cubic-bezier(0.22, 1, 0.36, 1) ${i * 0.15}s`,
-                  }}
-                />
-              ))}
-            </g>
-          </svg>
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
-            <span className="text-[10px] uppercase tracking-[0.22em] text-[var(--color-gold-soft)]/80">
-              Collected
-            </span>
-            <span
-              className={`mt-1.5 staff-num text-[26px] leading-none ${
-                collected > 0 ? "text-[var(--color-gold)]" : "text-[var(--color-gold)]/70"
-              }`}
-            >
-              {baht(collected)}
-            </span>
-            <span className="mt-1.5 text-[10.5px] text-[var(--color-muted-foreground)]">
-              tonight
-            </span>
-          </div>
-        </div>
-
-        {/* Breakdown */}
-        <div className="w-full min-w-0 flex-1">
-          {collected > 0 ? (
-            <div className="space-y-3.5">
-              <MixRow
-                dot="bg-[var(--color-gold)]"
-                label="Cash 現金"
-                value={baht(cash)}
-                pct={pct(cash)}
-              />
-              <MixRow
-                dot="bg-[var(--color-gold-soft)]"
-                label="Transfer 轉帳"
-                value={baht(transfer)}
-                pct={pct(transfer)}
-              />
-            </div>
-          ) : (
-            <p className="text-[13px] text-[var(--color-muted-foreground)]">
-              沒有收款 · Nothing collected yet tonight.
-            </p>
-          )}
-
-          {/* Unpaid — explicitly excluded from collected */}
-          <div className="mt-5 flex items-start justify-between gap-3 border-t border-[var(--color-gold)]/15 pt-4">
-            <span className="flex items-center gap-2.5 text-[13px]">
-              <AlertTriangle
-                className="h-3.5 w-3.5 text-[var(--color-vermillion)]"
-                strokeWidth={1.5}
-              />
-              <span>
-                <span className="block text-[var(--color-cream)]/90">Unpaid 未付</span>
-                <span className="block text-[11px] text-[var(--color-muted-foreground)]">
-                  not counted as collected
-                  {unpaidCount > 0
-                    ? ` · ${unpaidCount} ${unpaidCount === 1 ? "order" : "orders"}`
-                    : ""}
-                </span>
-              </span>
-            </span>
-            <span className="staff-num shrink-0 text-[16px] text-[var(--color-vermillion)]">
-              {baht(unpaid)}
-            </span>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function MixRow({
-  dot,
-  label,
-  value,
-  pct,
-}: {
-  dot: string;
-  label: string;
-  value: string;
-  pct: number;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3 text-[13px]">
-      <span className="flex min-w-0 items-center gap-2.5 text-[var(--color-cream)]/90">
-        <span className={`h-2.5 w-2.5 shrink-0 rounded-sm ${dot}`} />
-        <span className="truncate">{label}</span>
-      </span>
-      <span className="flex shrink-0 items-baseline gap-3">
-        <span className="staff-num text-[15px] text-[var(--color-gold)]">{value}</span>
-        <span className="staff-num w-9 text-right text-[11px] text-[var(--color-muted-foreground)]">
-          {pct}%
-        </span>
-      </span>
-    </div>
-  );
-}
-
-/* ---------- Recent Orders ---------- */
-
-function RecentOrders({
-  recent,
-  onSelectOrder,
-}: {
-  recent: StaffOrder[];
-  onSelectOrder: (o: StaffOrder) => void;
-}) {
-  return (
-    <section
-      className="owner-float-card overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 hover:border-[var(--color-gold)]/25"
-      style={{ animation: "owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 180ms both" }}
-    >
-      <div className="flex items-center justify-between border-b border-[var(--color-gold)]/15 px-6 py-5">
-        <div>
-          <div className="text-[11px] uppercase tracking-[0.25em] text-[var(--color-gold-soft)]/90">
-            Floor Activity · 最近訂單
-          </div>
-          <h2 className="mt-1 font-display text-[22px] leading-tight text-[var(--color-cream)]">
-            Recent Orders
-          </h2>
-        </div>
-        <span className="flex items-center gap-1.5 text-[12px] text-[var(--color-muted-foreground)]">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          live
-        </span>
+        ))}
       </div>
 
-      {recent.length > 0 ? (
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[560px] text-[13px]">
+      {items.length === 0 ? (
+        <TableShell>
+          <EmptyNote
+            zh="沒有符合的品項"
+            en="No items match this view."
+            hint="Adjust the category or the summary filter above."
+          />
+        </TableShell>
+      ) : (
+        <TableShell>
+          <table className="w-full min-w-[760px] text-[13px]">
             <thead>
-              <tr className="text-[11px] uppercase tracking-[0.12em] text-[var(--color-muted-foreground)]">
-                <th className="px-6 py-3 text-left font-normal">Table · Order</th>
-                <th className="py-3 text-left font-normal">Items</th>
-                <th className="py-3 text-left font-normal">Payment</th>
-                <th className="py-3 text-right font-normal">Total</th>
-                <th className="px-6 py-3 text-right font-normal">Status · Time</th>
+              <tr className="border-b border-[var(--oc-rule)]">
+                <Th>Item</Th>
+                <Th>Category</Th>
+                <Th right>Price</Th>
+                <Th>Unit</Th>
+                <Th>Availability</Th>
+                <Th>Tags</Th>
               </tr>
             </thead>
-            <tbody>
-              {recent.map((o) => {
-                const meta = STATUS_META[o.status];
-                const cancelled = o.status === "cancelled";
-                const alert = o.status === "done" && o.paymentStatus === "unpaid";
-                const paid = o.paymentStatus === "paid";
-                return (
-                  <tr key={o.orderId} onClick={() => onSelectOrder(o)} className="cursor-pointer border-t border-[var(--color-gold)]/10 transition-colors hover:bg-[var(--color-gold)]/[0.07]">
-                    <td
-                      className={`border-l-2 px-6 py-4 ${alert ? "border-[var(--color-vermillion)]" : "border-transparent"}`}
-                    >
-                      <div className="text-[var(--color-cream)]">{locText(o)}</div>
-                      <div className="staff-num mt-0.5 text-[11px] text-[var(--color-muted-foreground)]">
-                        {o.orderId}
-                      </div>
-                    </td>
-                    <td
-                      className={`py-4 ${cancelled ? "text-[var(--color-muted-foreground)] line-through" : "text-[var(--color-cream)]/85"}`}
-                    >
-                      {itemsSummary(o)}
-                    </td>
-                    <td className="py-4 text-[12px] text-[var(--color-muted-foreground)]">
-                      {paid && o.paymentMethod ? (
-                        <span className="inline-flex items-center gap-1.5">
-                          {o.paymentMethod === "Cash" ? (
-                            <Wallet className="h-3 w-3" strokeWidth={1.5} />
-                          ) : (
-                            <ArrowLeftRight className="h-3 w-3" strokeWidth={1.5} />
-                          )}
-                          {o.paymentMethod}
-                        </span>
-                      ) : (
-                        <span
-                          className={
-                            o.paymentStatus === "unpaid"
-                              ? "text-[var(--color-vermillion)]"
-                              : "text-[var(--color-muted-foreground)]/60"
-                          }
-                        >
-                          {o.paymentStatus === "unpaid" ? "Unpaid" : "—"}
-                        </span>
-                      )}
-                    </td>
-                    <td
-                      className={`staff-num py-4 text-right text-[16px] ${cancelled ? "text-[var(--color-muted-foreground)]" : "text-[var(--color-gold)]"}`}
-                    >
-                      {baht(o.totalPrice)}
-                    </td>
-                    <td className="px-6 py-4 text-right">
-                      <span className="inline-flex items-center justify-end gap-2 text-[12px] text-[var(--color-cream)]/90">
-                        <span className={`h-1.5 w-1.5 rounded-full ${meta.dotClass}`} />
-                        {meta.labelEn}
+            <tbody className="divide-y divide-[var(--oc-rule)]">
+              {items.map((item) => (
+                <tr key={item.id} className={cn("oc-row", !item.available && "opacity-60")}>
+                  <td className="px-4 py-3.5">
+                    <p className="font-medium text-[var(--color-cream)]/90">{item.nameEn}</p>
+                    <p className="oc-num mt-0.5 text-[10.5px] uppercase tracking-[0.1em] text-[var(--color-muted-foreground)]">
+                      {item.id}
+                    </p>
+                  </td>
+                  <td className="px-4 py-3.5 text-[var(--color-cream)]/70">
+                    {MENU_CATEGORY_LABEL[item.category]}
+                  </td>
+                  <td className="px-4 py-3.5 text-right">
+                    {item.price !== undefined ? (
+                      <span className="oc-num text-[var(--color-gold)]">{baht(item.price)}</span>
+                    ) : (
+                      <span className="text-[11px] uppercase tracking-[0.08em] text-[var(--color-vermillion-text)]">
+                        To confirm
                       </span>
-                      <div className="staff-num mt-0.5 text-[11px] text-[var(--color-muted-foreground)]">
-                        {o.time}
-                      </div>
-                      {cancelled && o.cancellationReason && (
-                        <div className="mt-0.5 text-[10.5px] italic leading-tight text-[var(--color-muted-foreground)]/60">
-                          {o.cancellationReason}
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
+                    )}
+                  </td>
+                  <td className="px-4 py-3.5 text-[12px] text-[var(--color-muted-foreground)]">
+                    {item.unit ?? "—"}
+                  </td>
+                  <td className="px-4 py-3.5">
+                    {item.available ? (
+                      <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-emerald-400/28 bg-emerald-500/12 px-2.5 py-1 text-[11px] font-medium text-emerald-300">
+                        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                        Available
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-[var(--color-cream)]/12 bg-[var(--color-cream)]/6 px-2.5 py-1 text-[11px] font-medium text-[var(--color-cream)]/55">
+                        <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-[var(--color-cream)]/45" />
+                        Off menu
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3.5">
+                    {item.popular && (
+                      <span className="inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border border-[var(--color-gold)]/30 bg-[var(--color-gold)]/10 px-2.5 py-1 text-[11px] font-medium text-[var(--color-gold)]">
+                        <Star className="h-2.5 w-2.5" strokeWidth={2} />
+                        Popular
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
-        </div>
-      ) : (
-        <p className="px-6 pb-6 pt-3 text-[13px] text-[var(--color-muted-foreground)]">
-          目前沒有訂單 · No orders yet tonight.
-        </p>
+        </TableShell>
       )}
-    </section>
+
+      <div className="mt-5">
+        <Slab index={5}>
+          <div className="px-5 py-5 sm:px-6">
+            <Eyebrow>Menu Management · 菜單管理</Eyebrow>
+            <p className="mt-2.5 max-w-[640px] text-[13px] leading-relaxed text-[var(--color-muted-foreground)]">
+              This is the menu snapshot bundled with the app — the same data the customer menu
+              renders from. Day-to-day availability is operated on the staff Menu board. Full menu
+              management connects after backend separation, when the owner will be able to:
+            </p>
+            <ul className="mt-3.5 grid max-w-[640px] grid-cols-1 gap-2 text-[12.5px] text-[var(--color-cream)]/75 sm:grid-cols-2">
+              {[
+                "View the live menu",
+                "Toggle item availability",
+                "Edit prices",
+                "Track low stock",
+                "Manage categories",
+              ].map((f) => (
+                <li key={f} className="flex items-center gap-2.5">
+                  <span aria-hidden className="h-1 w-1 shrink-0 rounded-full bg-[var(--color-gold)]/60" />
+                  {f}
+                </li>
+              ))}
+            </ul>
+          </div>
+        </Slab>
+      </div>
+    </Deck>
   );
 }
 
-/* ---------- Owner Order Modal (read-only, centered) ---------- */
+/* ═══════════════════════════════════════════════════════════════════════
+   Order modal (read-only)
+   ═══════════════════════════════════════════════════════════════════════ */
 
 function ownerFmtTime(iso: string | undefined): string {
   if (!iso) return "";
@@ -2435,11 +3412,46 @@ function ownerFmtTime(iso: string | undefined): string {
   return Number.isNaN(d.getTime()) ? "" : hhmm(d);
 }
 
+function DetailRow({
+  label,
+  labelZh,
+  children,
+  align = "center",
+}: {
+  label: string;
+  labelZh: string;
+  children: ReactNode;
+  align?: "center" | "start";
+}) {
+  return (
+    <div
+      className={cn(
+        "flex justify-between gap-4 border-t border-[var(--oc-rule)] pt-4",
+        align === "start" ? "items-start" : "items-center",
+      )}
+    >
+      <span className="shrink-0 text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--color-cream)]/50">
+        {label} · {labelZh}
+      </span>
+      <div className="min-w-0 text-right">{children}</div>
+    </div>
+  );
+}
+
 function OwnerOrderModal({ order, onClose }: { order: StaffOrder; onClose: () => void }) {
+  const closeRef = useRef<HTMLButtonElement>(null);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Move focus into the dialog on open and hand it back to the page on
+    // close, so a keyboard user isn't left behind the backdrop.
+    const restore = document.activeElement as HTMLElement | null;
+    closeRef.current?.focus();
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      restore?.focus?.();
+    };
   }, [onClose]);
 
   const meta = STATUS_META[order.status];
@@ -2454,132 +3466,150 @@ function OwnerOrderModal({ order, onClose }: { order: StaffOrder; onClose: () =>
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6">
-      {/* Backdrop */}
+      {/* The backdrop dims and pushes the deck back; the dialog is a blocking
+          task, so it gets a scrim rather than mere translucency. */}
       <div
-        className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+        className="absolute inset-0 bg-[oklch(0.09_0.02_45)]/70 backdrop-blur-sm"
+        style={{ animation: "tp-fade 200ms ease both" }}
         onClick={onClose}
       />
 
-      {/* Card — stopPropagation so backdrop click doesn't fire through */}
       <div
-        className="relative flex w-full max-w-[600px] max-h-[85vh] flex-col overflow-hidden rounded-2xl border border-[var(--color-gold)]/20 bg-[var(--color-charcoal-soft)] shadow-[0_24px_80px_-20px_oklch(0_0_0/0.9)]"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Order ${order.orderId}`}
         onClick={(e) => e.stopPropagation()}
+        // Modals are the one surface that keeps a centred origin: there is no
+        // single trigger in the layout for it to grow out of. The entrance
+        // rides the shared .oc-rise class rather than an inline animation so
+        // the reduced-motion override can still reach it.
+        className="oc-slab oc-rise relative flex max-h-[86dvh] w-full max-w-[620px] flex-col overflow-hidden rounded-2xl"
+        style={{ boxShadow: "var(--oc-z4)" }}
       >
-
-        {/* Header */}
-        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-[var(--color-gold)]/15 px-5 pb-4 pt-5">
+        <div className="flex shrink-0 items-start justify-between gap-3 border-b border-[var(--oc-rule)] px-5 pb-4 pt-5">
           <div className="min-w-0">
-            <p className="staff-num text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--color-gold-soft)]/70 tabular-nums">
+            <p className="oc-num text-[11px] font-medium uppercase tracking-[0.14em] text-[var(--color-gold-soft)]/70">
               {order.orderId} · {order.time} · {totalQty} {totalQty === 1 ? "item" : "items"} ·{" "}
               {formatOrderType(order.orderType)}
             </p>
-            <div className="mt-1.5 flex flex-wrap items-center gap-2">
-              <span className="font-sans text-[20px] font-semibold leading-none text-[var(--color-cream)]">
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <span className="text-[20px] font-semibold leading-none text-[var(--color-cream)]">
                 {loc.big}
-                {loc.num !== undefined && <span className="staff-num ml-1.5">{loc.num}</span>}
-                <span className="ml-2 text-[13px] tracking-[0.08em] text-[var(--color-cream)]/50">
+                {loc.num !== undefined && <span className="oc-num ml-1.5">{loc.num}</span>}
+                <span className="ml-2 text-[13px] tracking-[0.06em] text-[var(--color-cream)]/50">
                   {loc.zh}
                 </span>
               </span>
               <span
-                className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium tracking-[0.06em] ${meta.badgeClass}`}
+                className={cn(
+                  "flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium",
+                  meta.badgeClass,
+                )}
               >
-                <span className={`h-1.5 w-1.5 rounded-full ${meta.dotClass}`} />
+                <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", meta.dotClass)} />
                 {meta.labelZh} {meta.labelEn}
               </span>
             </div>
           </div>
           <button
+            ref={closeRef}
             onClick={onClose}
-            aria-label="Close"
-            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--color-cream)]/10 text-[var(--color-cream)]/60 text-[18px] transition hover:bg-[var(--color-cream)]/20"
+            aria-label="Close order details"
+            className="oc-press flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--color-cream)]/10 text-[18px] text-[var(--color-cream)]/60 transition hover:bg-[var(--color-cream)]/20"
           >
             ✕
           </button>
         </div>
 
-        {/* Scrollable body */}
         <div className="flex-1 space-y-6 overflow-y-auto px-5 py-5">
-
-          {/* Items */}
           <section>
-            <h3 className="mb-3 text-[11px] uppercase tracking-[0.22em] text-[var(--color-cream)]/45">
+            <h3 className="mb-3 text-[11px] uppercase tracking-[0.2em] text-[var(--color-cream)]/45">
               Items · 餐點
             </h3>
             <ul className="space-y-3">
               {order.items.map((item) => (
                 <li
                   key={item.id ?? item.name}
-                  className={`flex items-baseline gap-3 ${cancelled ? "opacity-50" : ""}`}
+                  className={cn("flex items-baseline gap-3", cancelled && "opacity-50")}
                 >
-                  <span className="staff-num w-9 shrink-0 text-right text-[16px] font-semibold text-[var(--color-vermillion)]">
+                  <span className="oc-num w-9 shrink-0 text-right text-[16px] font-semibold text-[var(--color-vermillion-text)]">
                     {item.quantity}
                     <span className="ml-0.5 text-[11px] font-normal text-[var(--color-cream)]/35">×</span>
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className={`truncate text-[16px] leading-snug ${cancelled ? "text-[var(--color-cream)]/60 line-through" : "text-[var(--color-cream)]"}`}>
+                    <p
+                      className={cn(
+                        "truncate text-[16px] leading-snug",
+                        cancelled ? "text-[var(--color-cream)]/60 line-through" : "text-[var(--color-cream)]",
+                      )}
+                    >
                       {item.name}
                     </p>
                     {item.unitPrice > 0 && (
-                      <p className="staff-num text-[12px] text-[var(--color-cream)]/40">
-                        ฿{item.unitPrice.toLocaleString("en-US")} each
+                      <p className="oc-num text-[12px] text-[var(--color-cream)]/40">
+                        {baht(item.unitPrice)} each
                       </p>
                     )}
                   </div>
-                  <span className={`staff-num shrink-0 text-[16px] ${cancelled ? "text-[var(--color-muted-foreground)] line-through" : "text-[var(--color-gold-soft)]"}`}>
-                    ฿{(item.quantity * item.unitPrice).toLocaleString("en-US")}
+                  <span
+                    className={cn(
+                      "oc-num shrink-0 text-[16px]",
+                      cancelled
+                        ? "text-[var(--color-muted-foreground)] line-through"
+                        : "text-[var(--color-gold-soft)]",
+                    )}
+                  >
+                    {baht(item.quantity * item.unitPrice)}
                   </span>
                 </li>
               ))}
             </ul>
           </section>
 
-          {/* Notes */}
           {order.notes && (
             <section>
-              <h3 className="mb-3 text-[11px] uppercase tracking-[0.22em] text-[var(--color-cream)]/45">
+              <h3 className="mb-3 text-[11px] uppercase tracking-[0.2em] text-[var(--color-cream)]/45">
                 Notes · 備註
               </h3>
-              <p className="rounded-xl border border-[var(--color-gold)]/20 bg-[var(--color-ink)] px-4 py-3 text-[15px] leading-relaxed text-[var(--color-cream)]/85">
+              <p className="rounded-xl border border-[var(--oc-rule)] bg-[var(--color-ink)] px-4 py-3 text-[15px] leading-relaxed text-[var(--color-cream)]/85">
                 {order.notes}
               </p>
             </section>
           )}
 
-          {/* Delivery info */}
           {order.orderType === "delivery" && (
             <section>
-              <h3 className="mb-3 text-[11px] uppercase tracking-[0.22em] text-[var(--color-cream)]/45">
+              <h3 className="mb-3 text-[11px] uppercase tracking-[0.2em] text-[var(--color-cream)]/45">
                 Delivery · 外送
               </h3>
-              <div className="space-y-2 rounded-xl border border-[var(--color-gold)]/20 bg-[var(--color-ink)] px-4 py-3 text-[14px]">
+              <div className="space-y-2 rounded-xl border border-[var(--oc-rule)] bg-[var(--color-ink)] px-4 py-3 text-[14px]">
                 {order.customerName && (
                   <div className="grid grid-cols-[16px_100px_1fr] items-center gap-2">
                     <User size={12} className="text-[var(--color-cream)]/40" />
-                    <span className="text-[13px] uppercase tracking-[0.08em] text-[var(--color-cream)]/50">Name</span>
+                    <span className="text-[13px] uppercase tracking-[0.06em] text-[var(--color-cream)]/50">Name</span>
                     <span className="text-right text-[var(--color-cream)]">{order.customerName}</span>
                   </div>
                 )}
                 {order.customerPhone && (
                   <div className="grid grid-cols-[16px_100px_1fr] items-center gap-2">
                     <Phone size={12} className="text-[var(--color-cream)]/40" />
-                    <span className="text-[13px] uppercase tracking-[0.08em] text-[var(--color-cream)]/50">Phone</span>
-                    <span className="staff-num text-right text-[var(--color-cream)]">{order.customerPhone}</span>
+                    <span className="text-[13px] uppercase tracking-[0.06em] text-[var(--color-cream)]/50">Phone</span>
+                    <span className="oc-num text-right text-[var(--color-cream)]">{order.customerPhone}</span>
                   </div>
                 )}
                 {order.deliveryAddress && (
                   <div className="grid grid-cols-[16px_100px_1fr] items-start gap-2">
                     <MapPin size={12} className="mt-0.5 text-[var(--color-cream)]/40" />
-                    <span className="text-[13px] uppercase tracking-[0.08em] text-[var(--color-cream)]/50">Address</span>
+                    <span className="text-[13px] uppercase tracking-[0.06em] text-[var(--color-cream)]/50">Address</span>
                     <span className="text-right text-[var(--color-cream)]">{order.deliveryAddress}</span>
                   </div>
                 )}
-                <div className="space-y-1.5 border-t border-[var(--color-gold)]/10 pt-2">
+                <div className="space-y-1.5 border-t border-[var(--oc-rule)] pt-2">
                   {(order.subtotalPrice ?? 0) > 0 && (
                     <div className="flex justify-between gap-3">
                       <span className="text-[var(--color-cream)]/50">Subtotal</span>
-                      <span className="staff-num text-[var(--color-cream)]/75">
-                        ฿{(order.subtotalPrice ?? 0).toLocaleString("en-US")}
+                      <span className="oc-num text-[var(--color-cream)]/75">
+                        {baht(order.subtotalPrice ?? 0)}
                       </span>
                     </div>
                   )}
@@ -2587,14 +3617,21 @@ function OwnerOrderModal({ order, onClose }: { order: StaffOrder; onClose: () =>
                     <span className="flex items-center gap-1.5 text-[var(--color-cream)]/50">
                       <Bike size={12} className="shrink-0" /> Delivery fee
                     </span>
-                    <span className="staff-num text-[var(--color-cream)]/75">
-                      ฿{displayDeliveryFee.toLocaleString("en-US")}
+                    <span className="oc-num text-[var(--color-cream)]/75">
+                      {baht(displayDeliveryFee)}
                     </span>
                   </div>
                   <div className="flex justify-between gap-3">
                     <span className="text-[var(--color-cream)]/50">Total</span>
-                    <span className={`staff-num ${cancelled ? "text-[var(--color-muted-foreground)] line-through" : "text-[var(--color-vermillion)]"}`}>
-                      ฿{order.totalPrice.toLocaleString("en-US")}
+                    <span
+                      className={cn(
+                        "oc-num",
+                        cancelled
+                          ? "text-[var(--color-muted-foreground)] line-through"
+                          : "text-[var(--color-vermillion-text)]",
+                      )}
+                    >
+                      {baht(order.totalPrice)}
                     </span>
                   </div>
                 </div>
@@ -2602,90 +3639,78 @@ function OwnerOrderModal({ order, onClose }: { order: StaffOrder; onClose: () =>
             </section>
           )}
 
-          {/* Total */}
-          <div className="flex items-baseline justify-between border-t border-[var(--color-gold)]/15 pt-4">
-            <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--color-cream)]/50">
-              Total · 合計
+          <DetailRow label="Total" labelZh="合計">
+            <span
+              className={cn(
+                "oc-num inline-flex items-baseline text-[24px] leading-none",
+                cancelled
+                  ? "text-[var(--color-muted-foreground)] line-through"
+                  : "text-[var(--color-vermillion-text)]",
+              )}
+            >
+              {baht(order.totalPrice)}
             </span>
-            <span className={`staff-num inline-flex items-baseline text-[24px] leading-none ${cancelled ? "text-[var(--color-muted-foreground)] line-through" : "text-[var(--color-vermillion)]"}`}>
-              <span className="mr-0.5 text-[15px]">฿</span>
-              {order.totalPrice.toLocaleString("en-US")}
-            </span>
-          </div>
+          </DetailRow>
 
-          {/* Payment */}
-          <div className="flex items-center justify-between border-t border-[var(--color-gold)]/15 pt-4">
-            <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--color-cream)]/50">
-              Payment · 付款
-            </span>
-            <span className={`flex items-center gap-1.5 rounded-full border border-[var(--color-gold)]/25 px-2.5 py-1 text-[12px] font-medium tracking-[0.06em] ${payMeta.badgeClass}`}>
-              <span className={`h-1.5 w-1.5 rounded-full ${payMeta.dotClass}`} />
+          <DetailRow label="Payment" labelZh="付款">
+            <span
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[12px] font-medium",
+                payMeta.badgeClass,
+              )}
+            >
+              <span aria-hidden className={cn("h-1.5 w-1.5 rounded-full", payMeta.dotClass)} />
               {payMeta.labelZh} {payMeta.labelEn}
               {paid && order.paymentMethod ? ` · ${order.paymentMethod}` : ""}
               {paid && paidAtLabel ? ` · ${paidAtLabel}` : ""}
             </span>
-          </div>
+          </DetailRow>
 
-          {/* Payment proof */}
           {order.hasPaymentProof && (
-            <div className="flex items-center justify-between border-t border-[var(--color-gold)]/15 pt-4">
-              <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--color-cream)]/50">
-                Proof · 收據
-                {order.paymentProofStatus && (
-                  <span className="ml-2 normal-case tracking-normal text-[var(--color-cream)]/40">
-                    {order.paymentProofStatus}
-                  </span>
-                )}
-              </span>
+            <DetailRow label="Proof" labelZh="收據">
               {order.paymentProofUrl ? (
                 <a
                   href={order.paymentProofUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 rounded-lg border border-teal-700/40 bg-teal-600/10 px-3 py-1.5 text-[12px] font-medium text-teal-300 transition hover:bg-teal-600/20"
+                  className="oc-press inline-flex items-center gap-1.5 rounded-lg border border-teal-700/40 bg-teal-600/10 px-3 py-1.5 text-[12px] font-medium text-teal-300 transition hover:bg-teal-600/20"
                 >
                   <ExternalLink size={11} strokeWidth={1.5} />
                   View proof
                 </a>
               ) : (
-                <span className="text-[12px] text-[var(--color-muted-foreground)]">Received (no URL)</span>
+                <span className="text-[12px] text-[var(--color-muted-foreground)]">
+                  Received (no URL)
+                </span>
               )}
-            </div>
+              {order.paymentProofStatus && (
+                <p className="mt-1 text-[11px] text-[var(--color-cream)]/40">
+                  {order.paymentProofStatus}
+                </p>
+              )}
+            </DetailRow>
           )}
 
-          {/* Cancellation */}
           {cancelled && (order.cancellationReason || order.cancelledAt) && (
-            <div className="flex items-start justify-between border-t border-[var(--color-gold)]/15 pt-4">
-              <span className="mr-3 shrink-0 text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--color-cream)]/50">
-                Cancelled · 取消
-              </span>
-              <div className="space-y-0.5 text-right">
-                {order.cancellationReason && (
-                  <p className="text-[13px] text-[var(--color-cream)]/80">{order.cancellationReason}</p>
-                )}
-                {cancelledAtLabel && (
-                  <p className="staff-num text-[11px] tabular-nums text-[var(--color-cream)]/45">
-                    at {cancelledAtLabel}
-                  </p>
-                )}
-              </div>
-            </div>
+            <DetailRow label="Cancelled" labelZh="取消" align="start">
+              {order.cancellationReason && (
+                <p className="text-[13px] text-[var(--color-cream)]/80">{order.cancellationReason}</p>
+              )}
+              {cancelledAtLabel && (
+                <p className="oc-num mt-0.5 text-[11px] text-[var(--color-cream)]/45">
+                  at {cancelledAtLabel}
+                </p>
+              )}
+            </DetailRow>
           )}
 
-          {/* Placed time */}
-          <div className="flex items-center justify-between border-t border-[var(--color-gold)]/15 pt-4">
-            <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[var(--color-cream)]/50">
-              Placed · 下單時間
-            </span>
-            <span className="staff-num tabular-nums text-[13px] text-[var(--color-cream)]/75">
-              {order.time}
-            </span>
-          </div>
+          <DetailRow label="Placed" labelZh="下單時間">
+            <span className="oc-num text-[13px] text-[var(--color-cream)]/75">{order.time}</span>
+          </DetailRow>
         </div>
 
-        {/* Footer */}
-        <div className="shrink-0 border-t border-[var(--color-gold)]/15 px-5 py-3">
-          <p className="text-center text-[11px] uppercase tracking-[0.2em] text-[var(--color-muted-foreground)]">
+        <div className="shrink-0 border-t border-[var(--oc-rule)] px-5 py-3">
+          <p className="text-center text-[11px] uppercase tracking-[0.18em] text-[var(--color-muted-foreground)]">
             Read-only · 僅供檢視
           </p>
         </div>
@@ -2694,734 +3719,81 @@ function OwnerOrderModal({ order, onClose }: { order: StaffOrder; onClose: () =>
   );
 }
 
-/* ---------- Needs Attention (sticky right rail) ---------- */
+/* ═══════════════════════════════════════════════════════════════════════
+   Loading / error
+   ═══════════════════════════════════════════════════════════════════════ */
 
-function NeedsAttention({
-  doneUnpaid,
-  unpaidOpen,
-  activeDeliveries,
-  onSelectOrder,
-}: {
-  doneUnpaid: StaffOrder[];
-  unpaidOpen: StaffOrder[];
-  activeDeliveries: StaffOrder[];
-  onSelectOrder: (o: StaffOrder) => void;
-}) {
-  const openCount = doneUnpaid.length + unpaidOpen.length;
-  const hasContent = openCount > 0 || activeDeliveries.length > 0;
-
+/** Skeleton in the shape of the deck it is about to become, rather than a
+ *  spinner in an empty room — the layout arrives before the numbers do, so
+ *  nothing jumps when the data lands. */
+function LoadingDeck() {
   return (
-    <div
-      className="owner-float-card overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 hover:border-[var(--color-gold)]/25"
-      style={{ animation: "owner-fade-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) 240ms both" }}
-    >
-      <div className="border-b border-[var(--color-gold)]/15 px-6 py-5">
-        <div className="flex items-baseline justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-[11px] uppercase tracking-[0.25em] text-[var(--color-gold-soft)]/90">
-              Control Room · 需注意
-            </div>
-            <h2 className="mt-1 font-display text-[22px] leading-tight text-[var(--color-cream)]">
-              Needs Attention
-            </h2>
-          </div>
-          <span className="shrink-0 staff-num rounded-full border border-[var(--color-vermillion)]/40 bg-[var(--color-vermillion)]/15 px-2.5 py-0.5 text-[11px] text-[var(--color-vermillion)]">
-            {openCount} open
-          </span>
-        </div>
-        <p className="mt-2 text-[12px] text-[var(--color-muted-foreground)]">
-          Owner-only · Manual refresh · 手動更新
-        </p>
+    <Deck>
+      <div className="mb-5 flex items-center gap-3">
+        <Eyebrow className="shrink-0">載入中 · Loading tonight&apos;s figures</Eyebrow>
+        <span aria-hidden className="h-px flex-1 bg-[var(--oc-rule)]" />
       </div>
-
-      {hasContent ? (
-        <div className="divide-y divide-[var(--color-gold)]/10">
-          <AttnGroup
-            title="Done / Delivered — unpaid · 已完成未付"
-            tone="var(--color-vermillion)"
-            orders={doneUnpaid}
-            emptyHidden
-            onSelectOrder={onSelectOrder}
-          />
-          <AttnGroup
-            title="Unpaid — still open · 未付進行中"
-            tone="var(--color-gold-soft)"
-            orders={unpaidOpen}
-            emptyHidden
-            onSelectOrder={onSelectOrder}
-          />
-          {activeDeliveries.length > 0 && (
-            <div className="px-6 py-5">
-              <div className="mb-3 flex items-center gap-2.5">
-                <Bike className="h-3.5 w-3.5 text-sky-400/80" strokeWidth={1.5} />
-                <span className="text-[13px] text-[var(--color-cream)]">
-                  Active deliveries · 配送
-                </span>
-                <span className="staff-num ml-auto text-[11px] text-[var(--color-muted-foreground)]">
-                  {activeDeliveries.length}
-                </span>
-              </div>
-              <ul className="space-y-1">
-                {activeDeliveries.map((o) => (
-                  <li
-                    key={o.orderId}
-                    onClick={() => onSelectOrder(o)}
-                    className="cursor-pointer -mx-3 flex items-start gap-3 rounded-md px-3 py-2 transition-colors hover:bg-[var(--color-gold)]/[0.08]"
-                  >
-                    <div className="min-w-0 flex-1">
-                      <div className="truncate text-[13px] text-[var(--color-cream)]/90">
-                        {o.customerName ?? o.customerPhone ?? "Delivery"}
-                      </div>
-                      <div className="staff-num truncate text-[11.5px] text-[var(--color-muted-foreground)]">
-                        {o.orderId} · {STATUS_META[o.status].labelEn} · {o.time}
-                      </div>
-                    </div>
-                    <div className="staff-num whitespace-nowrap text-[14px] text-[var(--color-gold)]">
-                      {baht(o.totalPrice)}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
+      <div className="grid grid-cols-12 gap-5">
+        <div className="col-span-12 xl:col-span-7">
+          <SkeletonSlab className="h-[300px]" index={0} />
         </div>
-      ) : (
-        <div className="px-6 py-10 text-center">
-          <div className="mx-auto mb-3 flex items-center justify-center gap-3">
-            <span className="h-px w-8 bg-[var(--color-gold)]/40" />
-            <span className="h-1.5 w-1.5 rounded-full bg-emerald-400/70" />
-            <span className="h-px w-8 bg-[var(--color-gold)]/40" />
-          </div>
-          <p className="font-display text-[18px] text-[var(--color-gold-soft)]/80">全部清楚</p>
-          <p className="mt-1 text-[12px] text-[var(--color-muted-foreground)]">
-            Nothing waiting — every order is settled.
-          </p>
+        <div className="col-span-12 xl:col-span-5">
+          <SkeletonSlab className="h-[300px]" index={1} />
         </div>
-      )}
-    </div>
-  );
-}
-
-function AttnGroup({
-  title,
-  tone,
-  orders,
-  emptyHidden,
-  onSelectOrder,
-}: {
-  title: string;
-  tone: string;
-  orders: StaffOrder[];
-  emptyHidden?: boolean;
-  onSelectOrder: (o: StaffOrder) => void;
-}) {
-  if (orders.length === 0 && emptyHidden) return null;
-  return (
-    <div className="px-6 py-5">
-      <div className="mb-3 flex items-center gap-2.5">
-        <span className="h-4 w-1 rounded-full" style={{ background: tone }} />
-        <span className="text-[13px] text-[var(--color-cream)]">{title}</span>
-        <span className="staff-num ml-auto text-[11px] text-[var(--color-muted-foreground)]">
-          {orders.length}
-        </span>
       </div>
-      <ul className="space-y-1">
-        {orders.map((o) => (
-          <li key={o.orderId} onClick={() => onSelectOrder(o)} className="cursor-pointer flex items-start gap-3 rounded-md px-3 py-2 -mx-3 transition-colors hover:bg-[var(--color-gold)]/[0.08]">
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-[13px] text-[var(--color-cream)]/95">{locText(o)}</div>
-              <div className="staff-num truncate text-[11.5px] text-[var(--color-muted-foreground)]">
-                {o.orderId} · {o.time}
-              </div>
-            </div>
-            <div className="staff-num whitespace-nowrap text-[15px] text-[var(--color-gold)]">
-              {baht(o.totalPrice)}
-            </div>
-          </li>
+      <div className="mt-5 grid grid-cols-2 gap-5 sm:grid-cols-3 2xl:grid-cols-6">
+        {[0, 1, 2, 3, 4, 5].map((i) => (
+          <SkeletonSlab key={i} className="h-[132px]" index={i} />
         ))}
-      </ul>
-    </div>
+      </div>
+      <div className="mt-5 grid grid-cols-12 gap-5">
+        <div className="col-span-12 xl:col-span-8">
+          <SkeletonSlab className="h-[320px]" index={0} />
+        </div>
+        <div className="col-span-12 xl:col-span-4">
+          <SkeletonSlab className="h-[320px]" index={1} />
+        </div>
+      </div>
+    </Deck>
   );
 }
 
-/* ---------- Delivery Watch ---------- */
-
-function DeliveryWatch({
-  activeCount,
-  outNowCount,
-  deliveredCount,
-}: {
-  activeCount: number;
-  outNowCount: number;
-  deliveredCount: number;
-}) {
+function SkeletonSlab({ className, index }: { className?: string; index: number }) {
   return (
-    <section
-      className="owner-float-card overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 hover:border-[var(--color-gold)]/25"
-      style={{ animation: "owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 260ms both" }}
-    >
-      <div className="flex items-center gap-2.5 border-b border-[var(--color-gold)]/15 px-6 py-4">
-        <Bike className="h-3.5 w-3.5 text-sky-400/70" strokeWidth={1.5} />
-        <span className="text-[11px] uppercase tracking-[0.25em] text-[var(--color-gold-soft)]/90">
-          Delivery Watch · 配送
-        </span>
-      </div>
-      <div className="grid grid-cols-3 divide-x divide-[var(--color-gold)]/10">
-        <DeliveryStat label="Active" labelZh="進行中" value={activeCount} dim={activeCount === 0} />
-        <DeliveryStat
-          label="Out Now"
-          labelZh="配送中"
-          value={outNowCount}
-          sky={outNowCount > 0}
-          dim={outNowCount === 0}
-        />
-        <DeliveryStat
-          label="Delivered"
-          labelZh="已送達"
-          value={deliveredCount}
-          dim={deliveredCount === 0}
+    <div className="oc-rise" style={{ "--i": index } as CSSProperties}>
+      <div className={cn("oc-slab oc-slab-recessed relative overflow-hidden rounded-2xl", className)}>
+        <span
+          aria-hidden
+          className="absolute inset-0 animate-pulse bg-[var(--color-cream)]/[0.025]"
+          style={{ animationDelay: `${index * 120}ms` }}
         />
       </div>
-    </section>
-  );
-}
-
-function DeliveryStat({
-  label,
-  labelZh,
-  value,
-  sky,
-  dim,
-}: {
-  label: string;
-  labelZh: string;
-  value: number;
-  sky?: boolean;
-  dim?: boolean;
-}) {
-  const valueClass = sky
-    ? "text-sky-400"
-    : dim
-    ? "text-[var(--color-muted-foreground)]"
-    : "text-[var(--color-cream)]";
-  return (
-    <div className="py-5 text-center">
-      <div className={`staff-num text-[28px] leading-none ${valueClass}`}>{value}</div>
-      <div className="mt-1.5 text-[10px] uppercase tracking-[0.14em] text-[var(--color-muted-foreground)]">
-        {label}
-      </div>
-      <div className="text-[10px] text-[var(--color-muted-foreground)]/55">{labelZh}</div>
-    </div>
-  );
-}
-
-/* ---------- Cancelled Today ---------- */
-
-function CancelledToday({
-  orders,
-  totalValue,
-  onSelectOrder,
-}: {
-  orders: StaffOrder[];
-  totalValue: number;
-  onSelectOrder: (o: StaffOrder) => void;
-}) {
-  return (
-    <section
-      className="owner-float-card overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 hover:border-[var(--color-gold)]/25"
-      style={{ animation: "owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 280ms both" }}
-    >
-      <div className="border-b border-[var(--color-gold)]/15 px-6 py-4">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2.5">
-            <XCircle className="h-3.5 w-3.5 text-[var(--color-muted-foreground)]" strokeWidth={1.5} />
-            <span className="text-[11px] uppercase tracking-[0.25em] text-[var(--color-gold-soft)]/90">
-              Cancelled Today · 今日取消
-            </span>
-          </div>
-          <span className="shrink-0 staff-num text-[13px] text-[var(--color-muted-foreground)]">
-            {orders.length} {orders.length === 1 ? "order" : "orders"}
-          </span>
-        </div>
-        {totalValue > 0 && (
-          <div className="mt-2 staff-num text-[18px] leading-none text-[var(--color-muted-foreground)]">
-            {baht(totalValue)}{" "}
-            <span className="text-[12px] font-normal text-[var(--color-muted-foreground)]/60">
-              cancelled value
-            </span>
-          </div>
-        )}
-      </div>
-      <ul className="divide-y divide-[var(--color-gold)]/10">
-        {orders.slice(0, 5).map((o) => (
-          <li
-            key={o.orderId}
-            onClick={() => onSelectOrder(o)}
-            className="cursor-pointer flex items-start gap-3 px-6 py-3 transition-colors hover:bg-[var(--color-gold)]/[0.07]"
-          >
-            <div className="min-w-0 flex-1">
-              <div className="flex items-baseline gap-2 text-[12px]">
-                <span className="staff-num text-[var(--color-muted-foreground)]">{o.orderId}</span>
-                <span className="text-[var(--color-muted-foreground)]/55">
-                  · {locText(o)} · {o.time}
-                </span>
-              </div>
-              {o.cancellationReason && (
-                <div className="mt-0.5 text-[11.5px] italic text-[var(--color-muted-foreground)]/70">
-                  {o.cancellationReason}
-                </div>
-              )}
-            </div>
-            <span className="shrink-0 staff-num text-[13px] text-[var(--color-muted-foreground)] line-through">
-              {baht(o.totalPrice)}
-            </span>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
-
-/* ---------- Revenue Trend chart ---------- */
-// Groups paid (cash + transfer, non-cancelled) orders by local hour for `day`.
-// Uses paidAt when present (when payment was recorded), falls back to createdAt
-// (order time). Returns a map of { hour → revenue }.
-function paidRevenueByHour(orders: readonly StaffOrder[], day: Date): Record<number, number> {
-  const map: Record<number, number> = {};
-  for (const o of orders) {
-    if (o.paymentStatus !== "paid" || o.status === "cancelled") continue;
-    const ts = o.paidAt ?? o.createdAt;
-    if (!ts) continue;
-    const d = new Date(ts);
-    if (
-      d.getFullYear() !== day.getFullYear() ||
-      d.getMonth() !== day.getMonth() ||
-      d.getDate() !== day.getDate()
-    )
-      continue;
-    const h = d.getHours();
-    map[h] = (map[h] ?? 0) + o.totalPrice;
-  }
-  return map;
-}
-
-type TrendPoint = { hour: string; today: number; yesterday?: number };
-
-// Builds the hour-indexed data array for the chart. Hours range from the
-// earliest activity (min of OPEN_HOUR and first data hour) to nowHour+1 for
-// today-only, or through 23 when yesterday data is also present.
-function buildTrendData(
-  todayMap: Record<number, number>,
-  yestMap: Record<number, number> | null,
-  nowHour: number,
-): TrendPoint[] {
-  const OPEN_HOUR = 10;
-  const todayKeys = Object.keys(todayMap).map(Number);
-  const yestKeys = yestMap ? Object.keys(yestMap).map(Number) : [];
-  const allKeys = [...todayKeys, ...yestKeys];
-  const startH = allKeys.length > 0 ? Math.min(OPEN_HOUR, Math.min(...allKeys)) : OPEN_HOUR;
-  const endH = yestMap ? 23 : Math.min(nowHour + 1, 23);
-
-  const points: TrendPoint[] = [];
-  for (let h = startH; h <= endH; h++) {
-    const pt: TrendPoint = {
-      hour: `${String(h).padStart(2, "0")}:00`,
-      today: todayMap[h] ?? 0,
-    };
-    if (yestMap) pt.yesterday = yestMap[h] ?? 0;
-    points.push(pt);
-  }
-  return points;
-}
-
-function RevenueTrendTooltip({ active, payload, label }: TooltipProps<number, string>) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div
-      className="rounded-lg border border-[var(--color-gold)]/20 px-3 py-2.5 text-[12px]"
-      style={{ background: "oklch(0.20 0.014 60 / 0.97)" }}
-    >
-      <div className="mb-1.5 text-[10px] uppercase tracking-[0.18em] text-[var(--color-gold-soft)]/80">
-        {label}
-      </div>
-      {payload.map((entry) => (
-        <div key={entry.name} className="flex items-center justify-between gap-4">
-          <span className="flex items-center gap-1.5" style={{ color: entry.color }}>
-            <span
-              className="h-1.5 w-1.5 rounded-full"
-              style={{ background: entry.color as string }}
-            />
-            {entry.name === "today" ? "Today" : "Yesterday"}
-          </span>
-          <span className="staff-num font-medium" style={{ color: entry.color }}>
-            {baht(entry.value ?? 0)}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function RevenueTrend({
-  orders,
-  now,
-}: {
-  orders: readonly StaffOrder[];
-  now: Date;
-}) {
-  const yesterday = useMemo(() => {
-    const d = new Date(now);
-    d.setDate(d.getDate() - 1);
-    return d;
-  }, [now]);
-
-  const todayMap = useMemo(() => paidRevenueByHour(orders, now), [orders, now]);
-  const yestMap = useMemo(() => paidRevenueByHour(orders, yesterday), [orders, yesterday]);
-
-  const hasYestData = Object.keys(yestMap).length > 0;
-  const hasTodayData = Object.keys(todayMap).length > 0;
-
-  const chartData = useMemo(
-    () => buildTrendData(todayMap, hasYestData ? yestMap : null, now.getHours()),
-    [todayMap, yestMap, hasYestData, now],
-  );
-
-  const GOLD = "var(--color-gold)";
-  const GOLD_SOFT = "var(--color-gold-soft)";
-
-  return (
-    <section
-      className="owner-float-card rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 px-7 py-7 hover:border-[var(--color-gold)]/25"
-      style={{ animation: "owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 95ms both" }}
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <div className="text-[11px] uppercase tracking-[0.25em] text-[var(--color-gold-soft)]/90">
-            Sales Movement · 收款趨勢
-          </div>
-          <h2 className="mt-1 font-display text-[22px] leading-tight text-[var(--color-cream)]">
-            Revenue Trend
-          </h2>
-          <p className="mt-0.5 text-[12px] text-[var(--color-muted-foreground)]">
-            Paid cash + transfer only
-          </p>
-        </div>
-        <div className="flex shrink-0 flex-col items-end gap-1.5 pt-1 text-[11px] text-[var(--color-muted-foreground)]">
-          <span className="flex items-center gap-1.5">
-            <span className="h-[2px] w-5 rounded-full bg-[var(--color-gold)]" />
-            Today
-          </span>
-          {hasYestData && (
-            <span className="flex items-center gap-1.5 opacity-60">
-              <span className="h-[2px] w-5 rounded-full bg-[var(--color-gold-soft)]" />
-              Yesterday
-            </span>
-          )}
-        </div>
-      </div>
-
-      {!hasTodayData ? (
-        <div className="relative mt-5 h-[160px] overflow-hidden rounded-lg">
-          {/* Ghost grid — conveys chart structure without fake data */}
-          <svg
-            viewBox="0 0 400 100"
-            className="absolute inset-0 h-full w-full"
-            preserveAspectRatio="none"
-            aria-hidden
-          >
-            <line x1="0" y1="20" x2="400" y2="20" stroke="oklch(0.72 0.11 75 / 0.1)" strokeWidth="1" />
-            <line x1="0" y1="45" x2="400" y2="45" stroke="oklch(0.72 0.11 75 / 0.1)" strokeWidth="1" />
-            <line x1="0" y1="70" x2="400" y2="70" stroke="oklch(0.72 0.11 75 / 0.1)" strokeWidth="1" />
-            <line x1="0" y1="93" x2="400" y2="93" stroke="oklch(0.72 0.11 75 / 0.22)" strokeWidth="1" />
-          </svg>
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5">
-            <p className="text-[13px] text-[var(--color-muted-foreground)]">
-              No paid sales yet today.
-            </p>
-            <p className="text-[11px] text-[var(--color-muted-foreground)]/60">
-              Paid sales will appear here by hour.
-            </p>
-          </div>
-        </div>
-      ) : (
-        <div className="mt-5 h-[160px]">
-          <ResponsiveContainer width="100%" height="100%">
-            <LineChart data={chartData} margin={{ top: 4, right: 6, bottom: 0, left: 0 }}>
-              <CartesianGrid vertical={false} stroke="oklch(0.72 0.11 75 / 0.1)" />
-              <XAxis
-                dataKey="hour"
-                tick={{
-                  fontSize: 10,
-                  fill: "var(--color-muted-foreground)",
-                  fontFamily: "var(--font-sans)",
-                }}
-                tickLine={false}
-                axisLine={false}
-                interval="preserveStartEnd"
-              />
-              <YAxis
-                tickFormatter={(v: number) =>
-                  v === 0 ? "฿0" : `฿${v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v}`
-                }
-                tick={{
-                  fontSize: 10,
-                  fill: "var(--color-muted-foreground)",
-                  fontFamily: "var(--font-sans)",
-                }}
-                tickLine={false}
-                axisLine={false}
-                width={46}
-              />
-              <Tooltip
-                content={<RevenueTrendTooltip />}
-                cursor={{ stroke: "oklch(0.72 0.11 75 / 0.2)", strokeWidth: 1 }}
-              />
-              {hasYestData && (
-                <Line
-                  type="monotone"
-                  dataKey="yesterday"
-                  name="yesterday"
-                  stroke={GOLD_SOFT}
-                  strokeWidth={1.5}
-                  strokeOpacity={0.45}
-                  dot={false}
-                  activeDot={{ r: 3, fill: GOLD_SOFT, strokeWidth: 0 }}
-                  animationDuration={900}
-                  animationBegin={150}
-                  animationEasing="ease-out"
-                />
-              )}
-              <Line
-                type="monotone"
-                dataKey="today"
-                name="today"
-                stroke={GOLD}
-                strokeWidth={2}
-                dot={false}
-                activeDot={{ r: 3.5, fill: GOLD, strokeWidth: 0 }}
-                animationDuration={1000}
-                animationBegin={0}
-                animationEasing="ease-out"
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-
-      {!hasYestData && hasTodayData && (
-        <p className="mt-2 text-[11px] text-[var(--color-muted-foreground)]/70">
-          Yesterday data not available — showing today only.
-        </p>
-      )}
-    </section>
-  );
-}
-
-/* ---------- Expenses Today (owner-side read-only view) ---------- */
-// Shows today's purchase log from the same expense feed the staff form writes to.
-// Amounts are displayed in vermillion (cost out) to visually contrast with gold revenue.
-// Gross sales figures are never touched here — expenses are always a separate section.
-
-const EXPENSE_CATEGORY_COLOR: Record<string, string> = {
-  Drinks:        "bg-sky-500/15 text-sky-300",
-  Ingredient:    "bg-emerald-500/15 text-emerald-300",
-  "Stock Refill":"bg-amber-500/15 text-amber-300",
-  Utility:       "bg-violet-500/15 text-violet-300",
-  Delivery:      "bg-orange-500/15 text-orange-300",
-  Other:         "bg-stone-500/15 text-stone-300",
-};
-
-const PAID_FROM_ROWS: { key: string; label: string; zh: string }[] = [
-  { key: "Cash",       label: "Cash",        zh: "現金" },
-  { key: "Transfer",   label: "Transfer",    zh: "轉帳" },
-  { key: "Owner Paid", label: "Owner Paid",  zh: "老闆付" },
-  { key: "Other",      label: "Other",       zh: "其他" },
-];
-
-function fmtExpTime(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "" : hhmm(d);
-}
-
-function ExpenseSummary({
-  expenses,
-  loadState,
-  onRetry,
-}: {
-  expenses: Expense[];
-  loadState: LoadState;
-  onRetry: () => void;
-}) {
-  const total = useMemo(() => expenses.reduce((s, e) => s + e.amount, 0), [expenses]);
-
-  const byPaidFrom = useMemo(() => {
-    const acc: Record<string, number> = {};
-    for (const e of expenses) acc[e.paidFrom] = (acc[e.paidFrom] ?? 0) + e.amount;
-    return acc;
-  }, [expenses]);
-
-  const recent = expenses.slice(0, 10);
-
-  return (
-    <section
-      className="owner-float-card overflow-hidden rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-charcoal-soft)]/60 hover:border-[var(--color-gold)]/25"
-      style={{ animation: "owner-fade-up 0.55s cubic-bezier(0.22, 1, 0.36, 1) 340ms both" }}
-    >
-      {/* Header */}
-      <div className="border-b border-[var(--color-gold)]/15 px-6 py-5">
-        <div className="text-[11px] uppercase tracking-[0.25em] text-[var(--color-gold-soft)]/90">
-          Purchase Log · 支出記錄
-        </div>
-        <div className="mt-1 flex items-baseline justify-between gap-3">
-          <h2 className="font-display text-[22px] leading-tight text-[var(--color-cream)]">
-            Expenses Today
-          </h2>
-          {loadState === "ready" && expenses.length > 0 && (
-            <span className="shrink-0 staff-num text-[20px] text-[var(--color-vermillion)]">
-              {baht(total)}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {/* States */}
-      {loadState === "loading" && (
-        <div className="flex items-center justify-center gap-1.5 py-8">
-          {[0, 1, 2].map((i) => (
-            <span
-              key={i}
-              className="h-2 w-2 rounded-full bg-[var(--color-gold)]/50 animate-pulse"
-              style={{ animationDelay: `${i * 150}ms` }}
-            />
-          ))}
-        </div>
-      )}
-
-      {loadState === "error" && (
-        <div className="px-6 py-8 text-center">
-          <p className="text-[13px] text-[var(--color-muted-foreground)]">
-            Could not load expenses.
-          </p>
-          <button
-            type="button"
-            onClick={onRetry}
-            className="mt-3 text-[12px] text-[var(--color-gold-soft)]/80 underline underline-offset-2 transition hover:text-[var(--color-cream)]"
-          >
-            Retry
-          </button>
-        </div>
-      )}
-
-      {loadState === "ready" && expenses.length === 0 && (
-        <p className="px-6 py-8 text-center text-[13px] text-[var(--color-muted-foreground)]">
-          沒有支出 · No expenses logged today.
-        </p>
-      )}
-
-      {loadState === "ready" && expenses.length > 0 && (
-        <>
-          {/* Payment-method breakdown */}
-          <div className="space-y-2.5 border-b border-[var(--color-gold)]/10 px-6 py-4">
-            {PAID_FROM_ROWS.map(({ key, label, zh }) => {
-              const amount = byPaidFrom[key] ?? 0;
-              if (amount === 0) return null;
-              return (
-                <div key={key} className="flex items-center justify-between gap-3 text-[13px]">
-                  <span className="min-w-0 text-[var(--color-cream)]/80">
-                    {label}{" "}
-                    <span className="text-[11px] text-[var(--color-muted-foreground)]">{zh}</span>
-                  </span>
-                  <span className="shrink-0 staff-num text-[var(--color-vermillion)]">{baht(amount)}</span>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Recent expense rows */}
-          <ul className="divide-y divide-[var(--color-gold)]/10">
-            {recent.map((exp) => (
-              <li
-                key={exp.id}
-                className="flex items-start gap-3 px-6 py-3.5 transition-colors hover:bg-[var(--color-gold)]/[0.04]"
-              >
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[13px] text-[var(--color-cream)]/95">
-                    {exp.itemName}
-                  </div>
-                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-                    <span
-                      className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ${EXPENSE_CATEGORY_COLOR[exp.category] ?? "bg-stone-500/15 text-stone-300"}`}
-                    >
-                      {exp.category}
-                    </span>
-                    <span className="text-[11px] text-[var(--color-muted-foreground)]">
-                      {exp.paidFrom}
-                    </span>
-                    {exp.reviewStatus && exp.reviewStatus !== "Pending" && (
-                      <span className="text-[11px] text-emerald-400/80">{exp.reviewStatus}</span>
-                    )}
-                    {exp.note && exp.note.length <= 45 && (
-                      <span className="truncate text-[11px] text-[var(--color-muted-foreground)]/65">
-                        {exp.note}
-                      </span>
-                    )}
-                  </div>
-                </div>
-                <div className="shrink-0 text-right">
-                  <div className="staff-num text-[15px] text-[var(--color-vermillion)]">
-                    {baht(exp.amount)}
-                  </div>
-                  <div className="staff-num mt-0.5 text-[10.5px] text-[var(--color-muted-foreground)]">
-                    {fmtExpTime(exp.createdAt)}
-                  </div>
-                </div>
-              </li>
-            ))}
-          </ul>
-        </>
-      )}
-    </section>
-  );
-}
-
-/* ---------- Loading / Error ---------- */
-
-function LoadingState() {
-  return (
-    <div className="mt-16 text-center">
-      <div className="mb-4 flex items-center justify-center gap-1.5">
-        {[0, 1, 2].map((i) => (
-          <span
-            key={i}
-            className="h-2 w-2 rounded-full bg-[var(--color-gold)]/60 animate-pulse"
-            style={{ animationDelay: `${i * 150}ms` }}
-          />
-        ))}
-      </div>
-      <p className="font-display text-[20px] text-[var(--color-gold-soft)]/80">
-        載入中 · Loading tonight&apos;s figures…
-      </p>
     </div>
   );
 }
 
 function ErrorState({ onRetry }: { onRetry: () => void }) {
   return (
-    <div className="mt-12">
-      <div className="mx-auto max-w-[440px] rounded-2xl border border-[var(--color-vermillion)]/40 bg-[var(--color-charcoal-soft)]/70 px-6 py-8 text-center">
-        <p className="font-display text-[22px] text-[var(--color-cream)]">
-          無法載入 · Can&apos;t load dashboard
-        </p>
-        <p className="mt-2 text-[13px] leading-relaxed text-[var(--color-muted-foreground)]">
-          Check the order server, then try again.
-        </p>
-        <button
-          onClick={onRetry}
-          className="mt-5 h-12 rounded-full bg-[var(--color-vermillion)] px-8 text-[15px] font-semibold tracking-[0.02em] text-[var(--color-cream)] transition active:scale-[0.97]"
-        >
-          重試 · Retry
-        </button>
+    <Deck>
+      <div className="mx-auto mt-10 max-w-[460px]">
+        <Slab className="border-[var(--color-vermillion)]/40">
+          <div className="px-6 py-8 text-center">
+            <p className="font-display text-[22px] text-[var(--color-cream)]">
+              無法載入 · Can&apos;t load the console
+            </p>
+            <p className="mt-2 text-[13px] leading-relaxed text-[var(--color-muted-foreground)]">
+              The order server didn&apos;t answer. Check it, then try again.
+            </p>
+            <button
+              type="button"
+              onClick={onRetry}
+              className="oc-press mt-6 h-12 rounded-full bg-[var(--color-vermillion)] px-8 text-[15px] font-semibold tracking-[0.01em] text-[var(--color-cream)] transition hover:bg-[var(--color-vermillion-deep)]"
+            >
+              重試 · Try again
+            </button>
+          </div>
+        </Slab>
       </div>
-    </div>
+    </Deck>
   );
 }

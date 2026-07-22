@@ -169,24 +169,6 @@
   }
 }
 
-@keyframes owner-fade-up {
-  from { opacity: 0; transform: translateY(12px); }
-  to   { opacity: 1; transform: none; }
-}
-
-/* Owner dashboard — card float hover. Unlayered so it beats @layer utilities. */
-.owner-float-card {
-  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1),
-              box-shadow 220ms cubic-bezier(0.22, 1, 0.36, 1),
-              border-color 220ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-.owner-float-card:hover {
-  transform: translateY(-5px) scale(1.005);
-  box-shadow: 0 28px 60px -20px oklch(0 0 0 / 0.88),
-              0 0 0 1px oklch(0.72 0.11 75 / 0.28),
-              0 0 28px -6px oklch(0.72 0.11 75 / 0.09);
-}
-
 @keyframes new-order-slide-up {
   from { opacity: 0; transform: translateY(16px); }
   to   { opacity: 1; transform: none; }
@@ -352,3 +334,332 @@
 
 /* Vaul's own transform is what drives the sheet, so nothing here may
    fight it — the sheet's surface treatment is border/shadow only. */
+
+/* ═══════════════════════════════════════════════════════════════════════
+   OWNER CONSOLE — 「炭」 The Brazier
+   Everything here is prefixed .oc- and used only by src/routes/owner.tsx
+   and src/components/owner. It is a sibling of the customer .tp- system,
+   not a replacement: same palette, same easings, different physics.
+
+   The rule that generates the whole surface treatment: ONE light source,
+   above and to the left. So every rim highlight sits on a top edge, every
+   shadow falls down-and-right, and shadows are tinted warm — a pure-black
+   shadow on warm charcoal reads dead, not deep.
+
+   Heat encodes attention. The more an area needs the owner, the warmer and
+   the closer to the viewer it sits. Nothing is warm for decoration.
+
+   Only transform and opacity are animated, so the console stays on the
+   compositor even while the browser is busy fetching orders.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Hairlines. Gold at low alpha rather than a grey — a neutral rule on a
+     warm charcoal reads as a rendering artifact rather than a drawn line. */
+  --oc-rule:     oklch(0.72 0.11 75 / 0.13);
+  --oc-rule-lit: oklch(0.72 0.11 75 / 0.30);
+
+  /* The light catching a lacquer edge. Always the top edge only. */
+  --oc-rim:     oklch(0.86 0.06 80 / 0.13);
+  --oc-rim-lit: oklch(0.86 0.06 80 / 0.26);
+
+  /* Warm shadow ink, never oklch(0 0 0). */
+  --oc-shade: oklch(0.09 0.02 45);
+
+  /* Lacquer slab fills. The gradient runs with the light: lit at the top
+     left corner, falling into shadow at the bottom right. */
+  --oc-slab: linear-gradient(
+    168deg,
+    oklch(0.236 0.013 58) 0%,
+    oklch(0.198 0.009 56) 54%,
+    oklch(0.179 0.007 58) 100%
+  );
+  --oc-slab-deep: linear-gradient(
+    168deg,
+    oklch(0.208 0.011 56) 0%,
+    oklch(0.168 0.007 58) 100%
+  );
+
+  /* Depth planes. z1 recessed (wells, table shells), z2 the working plane
+     (every card), z3 raised (hover, the hero), z4 lifted out of the page
+     (modal). Hover promotes a slab exactly one plane — never two, or the
+     card reads as jumping rather than rising. */
+  --oc-z1: inset 0 1px 0 var(--oc-rim), 0 4px 14px -12px var(--oc-shade);
+  --oc-z2: inset 0 1px 0 var(--oc-rim), 0 18px 38px -26px var(--oc-shade),
+           0 2px 6px -4px var(--oc-shade);
+  --oc-z3: inset 0 1px 0 var(--oc-rim-lit), 0 32px 62px -32px var(--oc-shade),
+           0 6px 16px -8px var(--oc-shade);
+  --oc-z4: inset 0 1px 0 var(--oc-rim-lit), 0 52px 96px -40px var(--oc-shade),
+           0 12px 30px -14px var(--oc-shade);
+}
+
+/* ── Surfaces ─────────────────────────────────────────────────────────── */
+
+.oc-slab {
+  position: relative;
+  background-image: var(--oc-slab);
+  border: 1px solid var(--oc-rule);
+  box-shadow: var(--oc-z2);
+  /* Transitions, not keyframes: a card can be grabbed by the pointer and
+     re-targeted mid-flight without restarting from zero. */
+  transition:
+    box-shadow 260ms var(--ease-fluid),
+    border-color 260ms var(--ease-fluid);
+}
+.oc-slab-recessed {
+  background-image: var(--oc-slab-deep);
+  box-shadow: var(--oc-z1);
+}
+
+/* Hover promotion. Gated on a real pointer so a tap on a phone doesn't
+   leave a card stuck in its hover state. */
+@media (hover: hover) and (pointer: fine) {
+  .oc-lift:hover,
+  .oc-lift:focus-within {
+    box-shadow: var(--oc-z3);
+    border-color: var(--oc-rule-lit);
+  }
+}
+
+/* ── Pointer tilt + specular ──────────────────────────────────────────
+   --rx/--ry are written straight onto the node by useTilt (never through
+   React state, which would re-render the tree on every pointermove). The
+   transition IS the smoothing: the pointer sets a target and the element
+   glides to it, so grabbing a still-moving card just re-targets. */
+
+.oc-tilt {
+  transform:
+    perspective(1200px)
+    rotateX(var(--oc-ry, 0deg))
+    rotateY(var(--oc-rx, 0deg))
+    translate3d(0, 0, 0);
+  transition: transform 240ms var(--ease-fluid);
+}
+
+/* The highlight is a gold wash tracking the cursor — the light source
+   moving over lacquer, not a white glass sheen. */
+.oc-spec::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(
+    340px circle at var(--oc-mx, 50%) var(--oc-my, 0%),
+    oklch(0.86 0.08 80 / 0.09),
+    transparent 62%
+  );
+  transition: opacity 240ms var(--ease-fluid);
+}
+@media (hover: hover) and (pointer: fine) {
+  .oc-spec:hover::after,
+  .oc-spec:focus-within::after { opacity: 1; }
+}
+
+/* Press feedback fires on pointer-down, not on release. */
+.oc-press { transition: transform 120ms var(--ease-fluid); }
+.oc-press:active { transform: scale(0.985); }
+
+/* ── Entrance ─────────────────────────────────────────────────────────
+   Never from scale(0) — a card starts at a visible size and settles.
+   --i is the stagger index; 40ms keeps a six-tile row under 250ms.
+   Kept on a WRAPPER, never on the same element as .oc-tilt: an animation's
+   final frame would otherwise pin transform and kill the tilt. */
+@keyframes oc-rise {
+  from { opacity: 0; transform: translateY(14px) scale(0.992); }
+  to   { opacity: 1; transform: none; }
+}
+.oc-rise {
+  animation: oc-rise 500ms var(--ease-fluid) both;
+  animation-delay: calc(var(--i, 0) * 40ms);
+}
+
+/* Section change. Re-keyed per section so switching views reads as the
+   console turning to face somewhere else. */
+@keyframes oc-view-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: none; }
+}
+.oc-view { animation: oc-view-in 320ms var(--ease-fluid) both; }
+
+/* ── Operational signals ──────────────────────────────────────────────
+   Ambient motion is allowed only where the movement itself is the reading.
+   Three signals total; everything else on the page is still. */
+
+/* 1. Attention. A vermillion rim that breathes while a queue is non-empty
+      and is completely still at zero, so "quiet" is visible from across
+      the room. Opacity only — no geometry moves. */
+@keyframes oc-breathe {
+  0%, 100% { opacity: 0.22; }
+  50%      { opacity: 0.72; }
+}
+.oc-alert::before {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  border: 1px solid oklch(0.55 0.19 27 / 0.55);
+  animation: oc-breathe 3.2s ease-in-out infinite;
+}
+
+/* 2. Service is live. The chop mark — the one decorative-looking element in
+      the console, and it is load-bearing: it stops when the feed stops. */
+@keyframes oc-seal {
+  0%, 100% { opacity: 0.55; transform: scale(0.92); }
+  50%      { opacity: 1;    transform: scale(1); }
+}
+.oc-seal { animation: oc-seal 4s ease-in-out infinite; }
+
+/* 3. Heat. A charcoal bed under the command bar whose brightness is set by
+      --oc-heat (0..1 = how many orders are working). It drifts slowly so
+      the room is never completely dead, at 18s — far outside the ~0.2Hz
+      band that causes motion sickness. */
+@keyframes oc-sweep {
+  0%, 100% { transform: translate3d(-27%, 0, 0); }
+  50%      { transform: translate3d(0%, 0, 0); }
+}
+.oc-ember { position: relative; overflow: hidden; }
+.oc-ember > span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 137%;
+  animation: oc-sweep 18s ease-in-out infinite;
+  background-image: linear-gradient(
+    90deg,
+    transparent 0%,
+    oklch(0.58 0.19 30 / calc(0.08 + var(--oc-heat, 0) * 0.5)) 22%,
+    oklch(0.74 0.11 76 / calc(0.06 + var(--oc-heat, 0) * 0.34)) 51%,
+    oklch(0.58 0.19 30 / calc(0.08 + var(--oc-heat, 0) * 0.42)) 79%,
+    transparent 100%
+  );
+}
+
+/* ── 米字格 — the calibration grid ────────────────────────────────────
+   The grid Chinese characters are practised on: a square, halved both ways,
+   with both diagonals. Here it is the structure the numbers are measured
+   against, faded out before it reaches the content. Not ornament — remove
+   it and the deck loses its sense of being plotted on something. */
+.oc-grid { position: relative; isolation: isolate; }
+.oc-grid::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(to right,  var(--oc-rule) 1px, transparent 1px),
+    linear-gradient(to bottom, var(--oc-rule) 1px, transparent 1px),
+    repeating-linear-gradient(45deg,  oklch(0.72 0.11 75 / 0.045) 0 1px, transparent 1px 132px),
+    repeating-linear-gradient(-45deg, oklch(0.72 0.11 75 / 0.045) 0 1px, transparent 1px 132px);
+  background-size: 92px 92px, 92px 92px, auto, auto;
+  mask-image: radial-gradient(125% 62% at 50% -4%, #000 0%, transparent 76%);
+}
+
+/* ── Chrome ───────────────────────────────────────────────────────────
+   The command bar is a translucent layer the deck scrolls under, with a
+   soft scroll edge instead of a 1px divider. */
+/* Nearly opaque on purpose. A prettier 0.7-alpha bar let the deck read
+   straight through the greeting and the tab labels — a translucent bar that
+   costs legibility is the worst of both, so the material is thick here and
+   the blur only softens the seam where content passes under it. */
+.oc-bar {
+  background-color: oklch(0.175 0.011 60 / 0.94);
+  backdrop-filter: blur(24px) saturate(150%);
+  -webkit-backdrop-filter: blur(24px) saturate(150%);
+}
+.oc-bar-edge {
+  background-image: linear-gradient(oklch(0.16 0.008 58 / 0.5), transparent);
+}
+
+/* The nav light-bar. One element that slides between rail items, so moving
+   between sections reads as a light travelling rather than two independent
+   highlights blinking. */
+.oc-navlight {
+  transform: translate3d(0, var(--oc-nav-y, 0px), 0);
+  transition: transform 340ms var(--ease-drawer);
+}
+
+/* ── Data surfaces ────────────────────────────────────────────────────
+   A row wipes a gold rule in from its centre on hover: the row is being
+   picked up off the sheet, not just tinted. */
+.oc-row { transition: background-color 160ms ease; }
+.oc-row > :first-child { position: relative; }
+.oc-row > :first-child::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  border-radius: 0 2px 2px 0;
+  background: var(--color-gold);
+  clip-path: inset(50% 0 50% 0);
+  transition: clip-path 240ms var(--ease-fluid);
+}
+.oc-row:hover > :first-child::before,
+.oc-row:focus-visible > :first-child::before { clip-path: inset(0 0 0 0); }
+
+/* Operational figures. The brand serif ships old-style figures that wander
+   off the baseline; the console runs on the platform monospace instead
+   (already tuned for legibility, and no extra webfont on the wire) with
+   tabular + lining variants so a column of totals is scannable. */
+.oc-num {
+  font-family: var(--font-mono);
+  font-variant-numeric: lining-nums tabular-nums;
+  letter-spacing: -0.012em;
+}
+
+/* Keyboard navigation must be visible everywhere in the console, including
+   on table rows and rail buttons that carry no default outline. */
+[data-owner-console] :focus-visible {
+  outline: 2px solid var(--color-gold);
+  outline-offset: 2px;
+}
+
+/* ── Preference overrides ─────────────────────────────────────────────
+   Gentler, not absent. Entrances collapse to a cross-fade so content still
+   reads as arriving; every position, scale and ambient loop is dropped. */
+@media (prefers-reduced-motion: reduce) {
+  .oc-rise,
+  .oc-view {
+    animation: tp-fade 200ms ease both !important;
+    animation-delay: 0ms !important;
+  }
+  .oc-alert::before,
+  .oc-seal,
+  .oc-ember > span {
+    animation: none !important;
+  }
+  .oc-alert::before { opacity: 0.6; }
+  .oc-tilt {
+    transform: none !important;
+    transition: none !important;
+  }
+  .oc-press:active { transform: none; }
+  .oc-navlight { transition: none; }
+  .oc-row > :first-child::before { transition: none; }
+}
+
+/* Frosted chrome becomes solid rather than merely less blurred — a half
+   transparent bar is the worst of both for legibility. */
+@media (prefers-reduced-transparency: reduce) {
+  .oc-bar {
+    background-color: oklch(0.175 0.011 60);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+/* Depth is carried by shadow, which disappears under a forced high-contrast
+   pass — so hand the edges back as real borders. */
+@media (prefers-contrast: more) {
+  .oc-slab {
+    border-color: oklch(0.72 0.11 75 / 0.45);
+    background-image: none;
+    background-color: oklch(0.21 0.011 58);
+  }
+  .oc-grid::before { display: none; }
+}
