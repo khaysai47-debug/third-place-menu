@@ -244,6 +244,50 @@ export function mapRpcError(message: string, detail: string): Response {
 
 const AUTOMATION_TIMEOUT_MS = 5_000;
 
+// Non-2xx diagnostic reason (Sunday E2E: n8n JWT Auth returns 403 with a body
+// that explains why). Extract ONLY a short, sanitized reason — never the full
+// body, never a token/secret (the body is n8n's own error text, not ours).
+// Prefers a JSON `message`/`error` field, strips CR/LF/tab/control chars,
+// collapses whitespace, truncates to 120 chars, and falls back to "unknown".
+const MAX_REASON_LEN = 120;
+
+// Redact anything credential-shaped BEFORE it can reach a log line. Deliberately
+// PATTERN-based: the configured secret values (N8N_AUTOMATION_SECRET, the JWT,
+// the webhook URL) are NEVER read from the environment or compared here —
+// reading a secret in order to redact it would itself risk logging it and would
+// couple this to secret rotation. These patterns catch an upstream body that
+// echoes a Bearer token, a JWT, a webhook URL, or any long opaque blob. Order
+// matters: Bearer/URL/JWT run before the generic long-blob rule so each
+// collapses to a SINGLE [REDACTED] rather than a string of them.
+function redactSecrets(text: string): string {
+  return text
+    .replace(/Bearer\s+\S+/gi, "[REDACTED]") // Authorization: Bearer <token>
+    .replace(/https?:\/\/\S+/gi, "[REDACTED]") // any URL (e.g. the webhook host)
+    .replace(/[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/g, "[REDACTED]") // JWT-shaped
+    .replace(/[A-Za-z0-9+/=_-]{24,}/g, "[REDACTED]"); // long opaque / base64 / base64url blob
+}
+
+function sanitizeAutomationReason(raw: string | null): string {
+  if (!raw) return "unknown";
+  let text = raw;
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object") {
+      const record = parsed as Record<string, unknown>;
+      const message = record.message ?? record.error;
+      if (typeof message === "string" && message) text = message;
+    }
+  } catch {
+    // Not JSON — fall back to the raw text, sanitized below.
+  }
+  const cleaned = redactSecrets(text)
+    .replace(/[\u0000-\u001F\u007F]+/g, " ") // control chars incl. CR/LF/TAB
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleaned) return "unknown";
+  return cleaned.length > MAX_REASON_LEN ? cleaned.slice(0, MAX_REASON_LEN) : cleaned;
+}
+
 // JWT constants + signing moved VERBATIM to orderEventJwt.server.ts in Phase
 // 3B (the order-details endpoint verifies against the same contract).
 // Re-exported so scripts/test-automation-bridge.mjs keeps importing from here.
@@ -283,9 +327,17 @@ export function fireOrderAutomation(orderNumber: string, channel: OrderEventChan
       body: JSON.stringify(event),
       signal: AbortSignal.timeout(AUTOMATION_TIMEOUT_MS),
     }).then(
-      (res) => {
+      async (res) => {
+        // Success path unchanged: 2xx never reads the body. Only a non-2xx
+        // response is read, and only for a short sanitized reason. res.text()
+        // is catch-guarded so a body-read failure never throws here.
+        let reason = "";
+        if (!res.ok) {
+          const raw = await res.text().catch(() => null);
+          reason = ` reason="${sanitizeAutomationReason(raw)}"`;
+        }
         console.log(
-          `ORDER_AUTOMATION ${orderNumber} event=${eventId} status=${res.status} ${res.ok ? "delivered" : "rejected"}`,
+          `ORDER_AUTOMATION ${orderNumber} event=${eventId} status=${res.status} ${res.ok ? "delivered" : "rejected"}${reason}`,
         );
       },
       (error: unknown) => {
