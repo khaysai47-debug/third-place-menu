@@ -89,8 +89,10 @@ import {
   PanelHead,
   Slab,
   Sparkline,
+  usePrefersReducedMotion,
 } from "@/components/owner/console";
 import { useTilt } from "@/components/owner/useTilt";
+import { DecryptedText } from "@/components/owner/DecryptedText";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/owner")({
@@ -460,17 +462,6 @@ function ConsoleRail({
   onSectionChange: (s: OwnerSection) => void;
   attentionCount: number;
 }) {
-  const [hint, setHint] = useState(false);
-  const hintTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => () => { if (hintTimer.current) clearTimeout(hintTimer.current); }, []);
-
-  function showHint() {
-    if (hintTimer.current) clearTimeout(hintTimer.current);
-    setHint(true);
-    hintTimer.current = setTimeout(() => setHint(false), 2600);
-  }
-
   const activeIndex = Math.max(0, NAV_ITEMS.findIndex((n) => n.id === activeSection));
 
   return (
@@ -548,7 +539,7 @@ function ConsoleRail({
         <div className="mt-4 border-t border-[var(--oc-rule)] pt-4">
           <button
             type="button"
-            onClick={showHint}
+            aria-disabled
             className="oc-press flex h-11 w-full cursor-default items-center gap-3 rounded-lg px-3 text-[14px] text-[var(--color-gold-soft)]/35 transition-colors hover:text-[var(--color-gold-soft)]/55"
           >
             <Settings className="h-[16px] w-[16px] shrink-0" strokeWidth={1.5} />
@@ -559,14 +550,6 @@ function ConsoleRail({
           </button>
         </div>
       </nav>
-
-      <div className="border-t border-[var(--oc-rule)] px-6 py-4">
-        <p className="text-[10.5px] leading-relaxed text-[var(--color-muted-foreground)]">
-          {hint
-            ? "Settings arrives in a later release."
-            : "Overview, Orders, Menu, Payments and Reports are live."}
-        </p>
-      </div>
     </aside>
   );
 }
@@ -644,12 +627,32 @@ function CommandBar({
   refreshing: boolean;
   onRefresh: () => void;
 }) {
+  // Full greeting animates as one line; only the OWNER_NAME range settles gold.
+  const greetingText = `${greeting(now)}, ${OWNER_NAME}.`;
+  const nameStart = greetingText.indexOf(OWNER_NAME);
+  const goldName = (i: number) =>
+    i >= nameStart && i < nameStart + OWNER_NAME.length
+      ? "text-[var(--color-gold)]"
+      : undefined;
+
   return (
     <header className="oc-bar sticky top-0 z-30">
       <div className="mx-auto flex w-full max-w-[1560px] flex-wrap items-end justify-between gap-x-6 gap-y-4 px-5 pb-5 pt-5 lg:px-8 lg:pt-6">
         <div className="min-w-0">
           <h1 className="font-display text-[30px] leading-[1.04] tracking-[-0.02em] text-[var(--color-cream)] sm:text-[38px]">
-            {greeting(now)}, <span className="text-[var(--color-gold)]">{OWNER_NAME}</span>.
+            <DecryptedText
+              text={greetingText}
+              animateOn="view"
+              sequential
+              revealDirection="start"
+              speed={28}
+              maxIterations={6}
+              characters="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"
+              className=""
+              encryptedClassName="opacity-55"
+              parentClassName="inline-block"
+              settledClassName={goldName}
+            />
           </h1>
           <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-2">
             <span className="flex items-center gap-3 text-[11px] uppercase tracking-[0.24em] text-[var(--color-gold-soft)]/75">
@@ -1080,16 +1083,18 @@ function OverviewDeck({
         </div>
       </div>
 
-      {/* Band 4 — what the floor actually did. */}
+      {/* Band 4 — what the floor did: two logs of matched weight, so neither
+          column strands the other. Delivery (a shallow stat card) moves out to
+          the closing strip rather than sitting stretched beside a tall table. */}
       <div className="mt-5 grid grid-cols-12 gap-5">
         <div className="col-span-12 xl:col-span-8">
           <RecentOrders recent={recentAll} onSelectOrder={onSelectOrder} />
         </div>
-        <div className="col-span-12 space-y-5 xl:col-span-4">
-          <DeliveryWatch
-            activeCount={activeDeliveries.length}
-            outNowCount={outForDeliveryNow.length}
-            deliveredCount={deliveredToday.length}
+        <div className="col-span-12 flex flex-col gap-5 xl:col-span-4">
+          <ExpenseSummary
+            expenses={expenses}
+            loadState={expLoadState}
+            onRetry={onRetryExpenses}
           />
           {cancelledToday.length > 0 && (
             <CancelledToday
@@ -1098,12 +1103,17 @@ function OverviewDeck({
               onSelectOrder={onSelectOrder}
             />
           )}
-          <ExpenseSummary
-            expenses={expenses}
-            loadState={expLoadState}
-            onRetry={onRetryExpenses}
-          />
         </div>
+      </div>
+
+      {/* Band 5 — the delivery pulse spans the deck, giving the overview a
+          deliberate full-width edge to end on instead of a ragged column. */}
+      <div className="mt-5">
+        <DeliveryWatch
+          activeCount={activeDeliveries.length}
+          outNowCount={outForDeliveryNow.length}
+          deliveredCount={deliveredToday.length}
+        />
       </div>
     </Deck>
   );
@@ -1676,14 +1686,16 @@ function PaymentMix({
   unpaid: number;
   unpaidCount: number;
 }) {
-  const [drawn, setDrawn] = useState(false);
+  const reduced = usePrefersReducedMotion();
+  const [drawn, setDrawn] = useState(reduced);
   const [hovered, setHovered] = useState<string | null>(null);
   useEffect(() => {
+    if (reduced) return;
     let id = requestAnimationFrame(() => {
       id = requestAnimationFrame(() => setDrawn(true));
     });
     return () => cancelAnimationFrame(id);
-  }, []);
+  }, [reduced]);
 
   const segments = [
     { key: "cash", value: cash, stroke: "var(--color-gold)" },
@@ -1733,7 +1745,9 @@ function PaymentMix({
                   style={{
                     strokeDasharray: drawn ? `${a.len} ${RING_C - a.len}` : `0 ${RING_C}`,
                     strokeDashoffset: a.offset,
-                    transition: `stroke-dasharray 900ms var(--ease-fluid) ${i * 150}ms, stroke-width 200ms var(--ease-fluid)`,
+                    transition: reduced
+                      ? "stroke-width 200ms var(--ease-fluid)"
+                      : `stroke-dasharray 900ms var(--ease-fluid) ${i * 150}ms, stroke-width 200ms var(--ease-fluid)`,
                   }}
                 />
               ))}
@@ -1938,6 +1952,7 @@ function RevenueTrendTooltip({ active, payload, label }: TooltipProps<number, st
 }
 
 function RevenueTrend({ orders, now }: { orders: readonly StaffOrder[]; now: Date }) {
+  const reduced = usePrefersReducedMotion();
   const yesterday = useMemo(() => {
     const d = new Date(now);
     d.setDate(d.getDate() - 1);
@@ -2075,6 +2090,7 @@ function RevenueTrend({ orders, now }: { orders: readonly StaffOrder[]; now: Dat
                     strokeOpacity={0.7}
                     dot={false}
                     activeDot={{ r: 3, fill: "var(--color-muted-foreground)", strokeWidth: 0 }}
+                    isAnimationActive={!reduced}
                     animationDuration={900}
                     animationBegin={150}
                     animationEasing="ease-out"
@@ -2086,6 +2102,7 @@ function RevenueTrend({ orders, now }: { orders: readonly StaffOrder[]; now: Dat
                   name="today"
                   stroke="none"
                   fill="url(#oc-trend-fill)"
+                  isAnimationActive={!reduced}
                   animationDuration={1000}
                   animationEasing="ease-out"
                 />
@@ -2097,6 +2114,7 @@ function RevenueTrend({ orders, now }: { orders: readonly StaffOrder[]; now: Dat
                   strokeWidth={2}
                   dot={false}
                   activeDot={{ r: 4, fill: "var(--color-gold)", strokeWidth: 0 }}
+                  isAnimationActive={!reduced}
                   animationDuration={1000}
                   animationEasing="ease-out"
                 />

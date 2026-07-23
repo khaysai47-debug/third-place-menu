@@ -22,6 +22,21 @@ import { useCountUp } from "@/components/menu/useCountUp";
 import { useTilt } from "@/components/owner/useTilt";
 import { cn } from "@/lib/utils";
 
+/* ---------- Reduced motion ---------- */
+
+/** Reads the reduced-motion preference once. The console's chart draws (the
+ *  trend line, the payment ring, this file's sparkline) are JS-driven inline
+ *  transitions, so the stylesheet's reduced-motion block — which only reaches
+ *  `.oc-` classes — can't turn them off. These read this instead. */
+export function usePrefersReducedMotion(): boolean {
+  const [reduced] = useState(
+    () =>
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true,
+  );
+  return reduced;
+}
+
 /* ---------- Slab ---------- */
 
 interface SlabProps extends HTMLAttributes<HTMLDivElement> {
@@ -189,16 +204,18 @@ export function Sparkline({
   className?: string;
   stroke?: string;
 }) {
-  const [drawn, setDrawn] = useState(false);
+  const reduced = usePrefersReducedMotion();
+  const [drawn, setDrawn] = useState(reduced);
   // Gradient ids are document-global; a second sparkline would otherwise
   // silently steal the first one's fill.
   const fillId = useId();
   useEffect(() => {
+    if (reduced) return;
     let id = requestAnimationFrame(() => {
       id = requestAnimationFrame(() => setDrawn(true));
     });
     return () => cancelAnimationFrame(id);
-  }, []);
+  }, [reduced]);
 
   const d = useMemo(() => {
     if (points.length < 2) return null;
@@ -229,7 +246,7 @@ export function Sparkline({
         fill={`url(#${fillId})`}
         style={{
           opacity: drawn ? 1 : 0,
-          transition: "opacity 700ms var(--ease-fluid) 260ms",
+          transition: reduced ? "none" : "opacity 700ms var(--ease-fluid) 260ms",
         }}
       />
       <path
@@ -244,7 +261,7 @@ export function Sparkline({
         style={{
           strokeDasharray: 1,
           strokeDashoffset: drawn ? 0 : 1,
-          transition: "stroke-dashoffset 900ms var(--ease-fluid) 120ms",
+          transition: reduced ? "none" : "stroke-dashoffset 900ms var(--ease-fluid) 120ms",
         }}
       />
     </svg>
