@@ -13,6 +13,7 @@ import {
   supabaseAdmin,
 } from "./orderIntake.server.js";
 import { ORDER_EVENT_CHANNELS, type OrderEventChannel } from "./orderEventJwt.server.js";
+import { supabaseAuthHeaders } from "./supabaseAuth.js";
 import { jsonError, secretMatches } from "./staffOrderWrites.server.js";
 
 // Server-only SECURE BOT SESSIONS (Phase 3D) — the ONLY trusted path that can
@@ -216,11 +217,7 @@ async function callRpc(
   try {
     return await fetch(`${base}/rest/v1/rpc/${fn}`, {
       method: "POST",
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-      },
+      headers: supabaseAuthHeaders(key, { "Content-Type": "application/json" }),
       body: JSON.stringify(args),
     });
   } catch {
@@ -444,7 +441,7 @@ async function supabaseGet(
   try {
     const response = await fetch(requestUrl, {
       method: "GET",
-      headers: { apikey: key, Authorization: `Bearer ${key}` },
+      headers: supabaseAuthHeaders(key),
     });
     if (!response.ok) {
       console.error(`MENU_SESSION read failed: ${what} responded ${response.status}`);

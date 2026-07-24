@@ -2,6 +2,8 @@ import { timingSafeEqual } from "node:crypto";
 import process from "node:process";
 import { z } from "zod";
 
+import { supabaseAuthHeaders } from "./supabaseAuth.js";
+
 // Server-only staff write handlers — order actions (Phase 2G-D/2G-D2),
 // add-expense (Phase 2G-G), and menu availability (Phase 2G-H).
 //
@@ -108,12 +110,10 @@ async function patchRowsByColumn(
       `${url.replace(/\/+$/, "")}/rest/v1/${table}?${column}=eq.${encodeURIComponent(value)}`,
       {
         method: "PATCH",
-        headers: {
-          apikey: key,
-          Authorization: `Bearer ${key}`,
+        headers: supabaseAuthHeaders(key, {
           "Content-Type": "application/json",
           Prefer: "return=representation",
-        },
+        }),
         body: JSON.stringify(patch),
       },
     );
@@ -267,12 +267,10 @@ export async function postAddExpense(request: Request): Promise<Response> {
   try {
     const response = await fetch(`${url.replace(/\/+$/, "")}/rest/v1/expenses`, {
       method: "POST",
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
+      headers: supabaseAuthHeaders(key, {
         "Content-Type": "application/json",
         Prefer: "return=representation",
-      },
+      }),
       body: JSON.stringify({
         expense_date: bangkokToday(),
         category,

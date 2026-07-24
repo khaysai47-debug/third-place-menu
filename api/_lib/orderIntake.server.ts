@@ -11,6 +11,7 @@ import {
   type OrderEventChannel,
 } from "./orderEventJwt.server.js";
 import { checkStaffSecret, jsonError } from "./staffOrderWrites.server.js";
+import { supabaseAuthHeaders } from "./supabaseAuth.js";
 
 // Server-only ORDER INTAKE (Phase 2G-I) — customer checkout + Staff Add Order.
 //
@@ -371,11 +372,7 @@ async function handleIntake(request: Request, channel: "customer" | "staff"): Pr
   try {
     response = await fetch(`${base}/rest/v1/rpc/create_order_with_items`, {
       method: "POST",
-      headers: {
-        apikey: key,
-        Authorization: `Bearer ${key}`,
-        "Content-Type": "application/json",
-      },
+      headers: supabaseAuthHeaders(key, { "Content-Type": "application/json" }),
       body: JSON.stringify({
         p_channel: channel,
         p_client_request_id: requestId,

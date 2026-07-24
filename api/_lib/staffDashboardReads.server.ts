@@ -1,6 +1,7 @@
 import process from "node:process";
 
 import { checkStaffSecret, jsonError } from "./staffOrderWrites.server.js";
+import { supabaseAuthHeaders } from "./supabaseAuth.js";
 
 // Server-only PROTECTED DASHBOARD READS (Pre-Pilot Security Hardening).
 //
@@ -113,7 +114,7 @@ async function supabaseGetRows(
   try {
     const response = await fetch(`${base}/rest/v1/${table}?${query}`, {
       method: "GET",
-      headers: { apikey: key, Authorization: `Bearer ${key}` },
+      headers: supabaseAuthHeaders(key),
     });
     if (!response.ok) {
       console.error(`DASHBOARD_READ failed: ${table} responded ${response.status}`);

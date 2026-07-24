@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { verifyOrderEventJwt, type OrderEventChannel } from "./orderEventJwt.server.js";
 import { jsonError } from "./staffOrderWrites.server.js";
+import { supabaseAuthHeaders } from "./supabaseAuth.js";
 
 // Server-only AUTHORITATIVE ORDER FETCH (Phase 3B) — n8n automation only.
 //
@@ -107,7 +108,7 @@ async function supabaseGetRows(
   try {
     const response = await fetch(requestUrl, {
       method: "GET",
-      headers: { apikey: key, Authorization: `Bearer ${key}` },
+      headers: supabaseAuthHeaders(key),
     });
     if (!response.ok) {
       console.error(`ORDER_DETAILS read failed: ${what} responded ${response.status}`);

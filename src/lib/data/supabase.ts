@@ -22,6 +22,8 @@
 // developer error. Reads THROW on failure (repository contract: the UI has
 // retry states for reads).
 
+import { supabaseAuthHeaders } from "../../../api/_lib/supabaseAuth";
+
 export async function supabaseSelect<T>(table: string, query: string): Promise<T[]> {
   const url = import.meta.env.VITE_SUPABASE_URL as string | undefined;
   const key = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
@@ -33,7 +35,7 @@ export async function supabaseSelect<T>(table: string, query: string): Promise<T
     );
   }
   const response = await fetch(`${url.replace(/\/+$/, "")}/rest/v1/${table}?${query}`, {
-    headers: { apikey: key, Authorization: `Bearer ${key}` },
+    headers: supabaseAuthHeaders(key),
     cache: "no-store",
   });
   if (!response.ok) {
