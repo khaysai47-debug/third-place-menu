@@ -1,9 +1,20 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { isCancellableStatus } from "@/lib/orderRules";
 import { fetchProofHistory, type ProofHistoryItem } from "@/lib/data/staffReadClient";
 import type { StaffOrder, StaffPaymentMethod } from "@/lib/staffOrders";
-import { AlertCircle, Bike, Copy, CreditCard, MapPin, MoreHorizontal, PackageX, Phone, PhoneOff, User, UserX } from "lucide-react";
+import { AlertCircle, Banknote, Bike, Copy, CreditCard, Eye, ImageOff, MapPin, MoreHorizontal, PackageX, Phone, PhoneOff, User, UserX } from "lucide-react";
 import { getNextAction, PAYMENT_META, STATUS_META } from "./orderStatus";
+import { PaymentSlipPreview } from "./PaymentSlipPreview";
+import { drawerHandlesDismiss, openPreview, type SlipPreviewState } from "./slipPreview";
+import {
+  canSubmitRejection,
+  needsCustomReason,
+  newestProofsFirst,
+  OTHER_REASON,
+  PROOF_REJECT_REASONS,
+  proofReviewControls,
+  resolveRejectionReason,
+} from "./proofReview";
 import { OrderLocationTitle } from "./StaffOrderCard";
 
 interface Props {
@@ -34,6 +45,17 @@ const CANCEL_REASONS = [
   { reason: "Wrong order",             icon: AlertCircle    },
   { reason: "Other",                   icon: MoreHorizontal },
 ];
+
+// Icon per preset rejection reason. The reason STRINGS live in proofReview.ts
+// (they are stored vocabulary); this map is presentation only.
+const REJECT_REASON_ICON: Record<string, typeof AlertCircle> = {
+  "Wrong amount": Banknote,
+  "Unclear image": ImageOff,
+  "Wrong slip": AlertCircle,
+  "Duplicate slip": Copy,
+  "Payment not received": CreditCard,
+  [OTHER_REASON]: MoreHorizontal,
+};
 
 const METHOD_ZH: Record<StaffPaymentMethod, string> = {
   Cash: "現金",
@@ -72,10 +94,31 @@ export function OrderDetailDrawer({
   const [showCancelForm, setShowCancelForm] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
   const [showRejectForm, setShowRejectForm] = useState(false);
-  const [rejectReason, setRejectReason] = useState("");
+  // Preset-driven rejection: one tap picks the stored English reason; only
+  // "Other" reveals the free-text field (see proofReview.ts).
+  const [rejectPreset, setRejectPreset] = useState("");
+  const [rejectCustom, setRejectCustom] = useState("");
 
   const proofStatus = order.paymentProofStatus; // "pending" | "approved" | "rejected"
-  const proofPending = order.hasPaymentProof && proofStatus === "pending" && !!order.paymentProofId;
+  const { canReview: proofPending, awaitingNewSlip } = proofReviewControls(order);
+
+  const closeRejectForm = () => {
+    setShowRejectForm(false);
+    setRejectPreset("");
+    setRejectCustom("");
+  };
+
+  // In-dashboard slip preview. It layers OVER this drawer — the drawer stays
+  // mounted, so closing the preview drops staff back mid-review. The trigger
+  // button is remembered so focus returns to it (accessibility, and it keeps
+  // keyboard staff in place in the history list).
+  const [preview, setPreview] = useState<SlipPreviewState | null>(null);
+  const previewTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const closePreview = () => {
+    setPreview(null);
+    previewTriggerRef.current?.focus();
+    previewTriggerRef.current = null;
+  };
 
   // Full proof audit history — signed previews fetched on demand (only when the
   // drawer is open), never signed on the dashboard poll. Refetches when the
@@ -102,16 +145,19 @@ export function OrderDetailDrawer({
     };
   }, [order.orderId, order.hasPaymentProof, order.paymentProofId, order.paymentProofStatus]);
 
-  // Newest first for display; the last item is the current/latest proof.
-  const historyNewestFirst = history ? [...history].reverse() : [];
+  // Newest attempt first; earlier attempts stay visible beneath it.
+  const historyNewestFirst = history ? newestProofsFirst(history) : [];
 
+  // Escape closes the DRAWER — but only when it is the top layer. With the slip
+  // preview open, Escape belongs to the preview alone (drawerHandlesDismiss),
+  // so one press peels off one layer instead of dismissing the whole review.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (drawerHandlesDismiss(e.key, preview !== null)) onClose();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, preview]);
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col justify-end">
@@ -285,7 +331,10 @@ export function OrderDetailDrawer({
                 </span>
               </div>
 
-              {/* Audit history — every proof, newest first, signed on demand. */}
+              {/* Audit history — every attempt, newest first, signed on demand.
+                  The latest attempt is the primary card; earlier ones stay
+                  visible but quieter, so a rejected slip is never hidden by a
+                  newer pending one. */}
               {historyError ? (
                 <p className="text-[12.5px] text-[var(--color-cream)]/45">
                   Couldn&apos;t load proof history — refresh to retry.
@@ -295,113 +344,185 @@ export function OrderDetailDrawer({
               ) : historyNewestFirst.length === 0 ? (
                 <p className="text-[12.5px] text-[var(--color-cream)]/45">No slip on file.</p>
               ) : (
-                <div className="space-y-2">
-                  {historyNewestFirst.map((p, i) => (
-                    <div
-                      key={p.id}
-                      className="rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-ink)]/40 px-3 py-2.5"
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[12px] text-[var(--color-cream)]/70">
-                          {i === 0 ? "Latest" : "Earlier"} ·{" "}
-                          <span
-                            className={
-                              p.status === "approved"
-                                ? "text-emerald-300"
-                                : p.status === "rejected"
-                                  ? "text-[var(--color-vermillion-text)]"
-                                  : "text-amber-300"
-                            }
-                          >
-                            {p.status}
+                <div className="space-y-1.5">
+                  {historyNewestFirst.map((p, i) => {
+                    const latest = i === 0;
+                    const tone =
+                      p.status === "approved"
+                        ? "border-emerald-600/40 bg-emerald-500/10 text-emerald-300"
+                        : p.status === "rejected"
+                          ? "border-[var(--color-vermillion)]/40 bg-[var(--color-vermillion)]/10 text-[var(--color-vermillion-text)]"
+                          : "border-amber-500/40 bg-amber-500/10 text-amber-300";
+                    return (
+                      <div
+                        key={p.id}
+                        className={[
+                          "rounded-xl border px-3 py-2",
+                          latest
+                            ? "border-[var(--color-gold)]/30 bg-[var(--color-ink)]/60"
+                            : "border-[var(--color-gold)]/12 bg-[var(--color-ink)]/30 opacity-75",
+                        ].join(" ")}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="flex min-w-0 items-center gap-1.5">
+                            <span
+                              className={`text-[11px] tracking-[0.1em] uppercase ${
+                                latest
+                                  ? "text-[var(--color-cream)]/70"
+                                  : "text-[var(--color-cream)]/40"
+                              }`}
+                            >
+                              {latest ? "Latest" : "Earlier"}
+                            </span>
+                            <span
+                              className={`shrink-0 rounded-full border px-2 py-0.5 text-[10.5px] font-medium ${tone}`}
+                            >
+                              {p.status}
+                            </span>
                           </span>
-                        </span>
-                        {/* Preview links are short-lived signed URLs minted per
-                            fetch. A legacy proof (no private object) shows a
-                            clear unavailable state — its old permanent public
-                            link is never served to the client. */}
-                        {p.proof_url ? (
-                          <a
-                            href={p.proof_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-[12px] text-teal-300 hover:underline"
-                          >
-                            View slip
-                          </a>
-                        ) : (
-                          <span className="text-[11px] text-[var(--color-cream)]/40">
-                            {p.hasFile
-                              ? "Preview unavailable — refresh"
-                              : "Legacy proof preview unavailable"}
-                          </span>
+                          {/* Previews are short-lived SIGNED urls minted per
+                              fetch, opened in-dashboard (no navigation, no new
+                              tab) so the drawer stays put underneath. A legacy
+                              proof (no private object) shows a clear
+                              unavailable state — its old permanent public link
+                              is never served to the client. */}
+                          {p.proof_url ? (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                previewTriggerRef.current = e.currentTarget;
+                                setPreview(openPreview(p));
+                              }}
+                              aria-haspopup="dialog"
+                              className={[
+                                "inline-flex h-11 shrink-0 items-center justify-center gap-1.5 rounded-xl border px-3.5 text-[13px] font-semibold tracking-[0.02em] transition active:scale-[0.98]",
+                                latest
+                                  ? "border-teal-400/55 bg-teal-500/12 text-teal-200 hover:bg-teal-500/22"
+                                  : "border-teal-400/30 bg-transparent text-teal-300/75 hover:bg-teal-500/12",
+                              ].join(" ")}
+                            >
+                              <Eye size={13} strokeWidth={1.75} />
+                              查看 · View slip
+                            </button>
+                          ) : (
+                            <span className="shrink-0 text-[11px] text-[var(--color-cream)]/40">
+                              {p.hasFile
+                                ? "Preview unavailable — refresh"
+                                : "Legacy proof preview unavailable"}
+                            </span>
+                          )}
+                        </div>
+                        {p.status === "rejected" && p.rejection_reason && (
+                          <p className="mt-1 text-[12px] break-words text-[var(--color-cream)]/55">
+                            Reason: {p.rejection_reason}
+                          </p>
+                        )}
+                        {p.reviewed_by && (
+                          <p className="mt-0.5 text-[11px] text-[var(--color-cream)]/40">
+                            reviewed by {p.reviewed_by}
+                          </p>
                         )}
                       </div>
-                      {p.status === "rejected" && p.rejection_reason && (
-                        <p className="mt-1 text-[12px] text-[var(--color-cream)]/55">
-                          Reason: {p.rejection_reason}
-                        </p>
-                      )}
-                      {p.reviewed_by && (
-                        <p className="mt-0.5 text-[11px] text-[var(--color-cream)]/40">
-                          reviewed by {p.reviewed_by}
-                        </p>
-                      )}
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
+              )}
+
+              {/* Latest slip rejected and the order is still unpaid: nothing for
+                  staff to do until a new slip arrives in the chat. No review
+                  buttons — the RPC refuses re-deciding a finished proof. */}
+              {awaitingNewSlip && (
+                <p className="mt-2 rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-ink)]/40 px-3 py-2.5 text-center text-[13px] leading-snug text-[var(--color-cream)]/60">
+                  等待顧客重新傳送收據
+                  <br />
+                  <span className="text-[12px] text-[var(--color-cream)]/45">
+                    Waiting for customer to send another slip
+                  </span>
+                </p>
               )}
 
               {proofPending &&
                 order.paymentProofId &&
                 (showRejectForm ? (
-                  <div className="mt-3 space-y-2">
-                    <input
-                      value={rejectReason}
-                      onChange={(e) => setRejectReason(e.target.value)}
-                      placeholder="Reason (required) · 拒絕原因"
-                      className="w-full h-11 rounded-xl bg-[var(--color-ink)] border border-[var(--color-gold)]/25 px-3 text-[14px] text-[var(--color-cream)] placeholder:text-[var(--color-cream)]/35 focus:outline-none focus:border-[var(--color-gold)]/50"
-                    />
+                  <div className="mt-2.5 space-y-2">
+                    <p className="text-[11px] font-medium tracking-[0.14em] uppercase text-[var(--color-cream)]/40">
+                      Select reason · 拒絕原因
+                    </p>
+                    {/* Same preset pattern as the cancellation reasons: one tap
+                        picks the stored English string, "Other" spans the row
+                        and opens free text. 44px min touch target (tablet). */}
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {PROOF_REJECT_REASONS.map(({ reason, zh }, i) => {
+                        const Icon = REJECT_REASON_ICON[reason] ?? MoreHorizontal;
+                        const active = rejectPreset === reason;
+                        return (
+                          <button
+                            key={reason}
+                            onClick={() => setRejectPreset(reason)}
+                            aria-pressed={active}
+                            className={[
+                              "flex min-h-11 items-center gap-2 rounded-xl border px-3 py-2 text-left text-[12px] leading-tight font-medium transition",
+                              i === PROOF_REJECT_REASONS.length - 1 ? "col-span-2" : "",
+                              active
+                                ? "border-[var(--color-vermillion)]/55 bg-[var(--color-vermillion)]/15 text-[var(--color-cream)]"
+                                : "border-[var(--color-gold)]/15 bg-[var(--color-ink)]/50 text-[var(--color-cream)]/50 hover:border-[var(--color-gold)]/30 hover:text-[var(--color-cream)]/80",
+                            ].join(" ")}
+                          >
+                            <Icon size={13} className="shrink-0 opacity-75" />
+                            <span className="min-w-0 break-words">
+                              {zh} · {reason}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {needsCustomReason(rejectPreset) && (
+                      <input
+                        value={rejectCustom}
+                        onChange={(e) => setRejectCustom(e.target.value)}
+                        autoFocus
+                        maxLength={300}
+                        placeholder="Reason (required) · 請輸入原因"
+                        className="h-11 w-full rounded-xl border border-[var(--color-gold)]/25 bg-[var(--color-ink)] px-3 text-[14px] text-[var(--color-cream)] transition placeholder:text-[var(--color-cream)]/35 focus:border-[var(--color-gold)]/50 focus:outline-none"
+                      />
+                    )}
+
                     <div className="flex gap-2">
                       <button
-                        onClick={() => {
-                          setShowRejectForm(false);
-                          setRejectReason("");
-                        }}
-                        className="flex-1 h-11 rounded-xl border border-[var(--color-gold)]/20 text-[var(--color-cream)]/60 text-[14px] font-medium hover:border-[var(--color-gold)]/40 transition"
+                        onClick={closeRejectForm}
+                        disabled={reviewing}
+                        className="h-12 flex-1 rounded-xl border border-[var(--color-gold)]/20 text-[14px] font-medium text-[var(--color-cream)]/60 transition hover:border-[var(--color-gold)]/40 disabled:opacity-40"
                       >
                         返回 · Back
                       </button>
                       <button
                         onClick={() => {
-                          if (rejectReason.trim())
-                            onReviewProof(
-                              order.orderId,
-                              order.paymentProofId!,
-                              "reject",
-                              rejectReason.trim(),
-                            );
+                          const reason = resolveRejectionReason(rejectPreset, rejectCustom);
+                          if (reason) {
+                            onReviewProof(order.orderId, order.paymentProofId!, "reject", reason);
+                          }
                         }}
-                        disabled={!rejectReason.trim() || reviewing}
-                        className="flex-1 h-11 rounded-xl border border-[var(--color-vermillion)]/40 bg-[var(--color-vermillion)]/10 text-[var(--color-vermillion-text)] text-[14px] font-semibold hover:bg-[var(--color-vermillion)]/20 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                        disabled={!canSubmitRejection(rejectPreset, rejectCustom) || reviewing}
+                        className="h-12 flex-1 rounded-xl border border-[var(--color-vermillion)]/40 bg-[var(--color-vermillion)]/10 text-[14px] font-semibold text-[var(--color-vermillion-text)] transition hover:bg-[var(--color-vermillion)]/20 disabled:cursor-not-allowed disabled:opacity-40"
                       >
-                        {reviewing ? "處理中…" : "確認拒絕 · Reject"}
+                        {reviewing ? "處理中…" : "確認拒絕 · Confirm Reject"}
                       </button>
                     </div>
                   </div>
                 ) : (
-                  <div className="mt-3 flex gap-2">
+                  <div className="mt-2.5 flex gap-2">
                     <button
                       onClick={() => setShowRejectForm(true)}
                       disabled={reviewing}
-                      className="flex-1 h-12 rounded-xl border border-[var(--color-vermillion)]/35 bg-[var(--color-vermillion)]/8 text-[var(--color-vermillion-text)] text-[14px] font-semibold active:scale-[0.98] transition hover:bg-[var(--color-vermillion)]/16 disabled:opacity-50"
+                      className="h-12 flex-1 rounded-xl border border-[var(--color-vermillion)]/35 bg-[var(--color-vermillion)]/8 text-[14px] font-semibold text-[var(--color-vermillion-text)] transition active:scale-[0.98] hover:bg-[var(--color-vermillion)]/16 disabled:opacity-50"
                     >
                       拒絕 · Reject
                     </button>
                     <button
                       onClick={() => onReviewProof(order.orderId, order.paymentProofId!, "approve")}
                       disabled={reviewing}
-                      className="flex-1 h-12 rounded-xl border border-emerald-500/40 bg-emerald-500/12 text-emerald-300 text-[14px] font-semibold active:scale-[0.98] transition hover:bg-emerald-500/20 disabled:opacity-50 disabled:cursor-wait"
+                      className="h-12 flex-1 rounded-xl border border-emerald-500/40 bg-emerald-500/12 text-[14px] font-semibold text-emerald-300 transition active:scale-[0.98] hover:bg-emerald-500/20 disabled:cursor-wait disabled:opacity-50"
                     >
                       {reviewing ? "處理中…" : "核准付款 · Approve"}
                     </button>
@@ -513,6 +634,13 @@ export function OrderDetailDrawer({
           )}
         </div>
       </div>
+
+      {/* Slip preview, layered above this drawer. Rendered INSIDE the drawer
+          tree on purpose: the drawer stays mounted and keeps all its state
+          (open reject form, loaded history) while staff look at the image. */}
+      {preview && (
+        <PaymentSlipPreview state={preview} onChange={setPreview} onClose={closePreview} />
+      )}
     </div>
   );
 }

@@ -18,6 +18,7 @@
     "test:status-transitions": "node scripts/test-status-transitions.mjs",
     "test:payment-proof": "node scripts/test-payment-proof.mjs",
     "test:payment-intake": "node scripts/test-payment-intake.mjs",
+    "test:proof-review": "node scripts/test-proof-review.mjs",
     "test:supabase-auth": "node scripts/test-supabase-auth.mjs",
     "lint": "eslint .",
     "format": "prettier --write ."
