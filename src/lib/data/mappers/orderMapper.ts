@@ -73,13 +73,22 @@ export interface SupabaseOrderItemRow {
   created_at?: unknown;
 }
 
-/** One `payment_proofs` row (subset the app consumes). */
+/**
+ * One `payment_proofs` row (subset the app consumes).
+ *
+ * NO URL FIELD, deliberately: the dashboard read does not select proof_url
+ * (legacy rows hold a permanent public link there) and never signs on the
+ * poll. Previews come only from /api/staff/proof-history, which signs the
+ * private storage path on demand.
+ */
 export interface SupabasePaymentProofRow {
+  /** Proof row UUID — needed by staff to approve/reject this exact proof. */
+  id?: unknown;
   order_id?: unknown;
-  proof_url?: unknown;
   status?: unknown;
   received_at?: unknown;
   created_at?: unknown;
+  rejection_reason?: unknown;
 }
 
 /* ── Small local helpers ────────────────────────────────────────────────── */
@@ -95,19 +104,18 @@ function formatTime(iso: string): string {
 
 /* ── Status write direction — THE dangerous translation ─────────────────── */
 
-// CONFIRMED (Phase 2B, real execution data): the database stores "completed"
-// where the app says "done"; "done" was never observed in the DB. "delivered"
-// stays its own value (contract §8 — never merged). The READ direction is safe
-// either way (normalizeOrderStatus accepts both spellings); this flag makes
-// the WRITE direction emit "completed" when writes migrate in Phase 2G.
+// Post-Tuesday: the app and the database share ONE frozen vocabulary, so the
+// write direction is now identity. The flag stays true (the canonical value is
+// "completed", never the old "done") and the read normalizer still maps the
+// pre-Tuesday aliases defensively.
 export const DB_STATUS_USES_COMPLETED = true;
 
-/** DB → app. Accepts both "done" and "completed"; unknown values → "new". */
+/** DB → app. Accepts the frozen set plus legacy aliases; unknown → "new". */
 export const normalizeOrderStatusFromDb = normalizeOrderStatus;
 
-/** App → DB. Emits "completed" for done only if the schema demands it. */
+/** App → DB. Identity — the app already emits the frozen DB vocabulary. */
 export function normalizeOrderStatusToDb(status: StaffOrderStatus): string {
-  return DB_STATUS_USES_COMPLETED && status === "done" ? "completed" : status;
+  return status;
 }
 
 /* Payment normalization moved to ./normalize.ts — re-exported for continuity. */
@@ -216,9 +224,15 @@ export function mapSupabaseOrderRow(row: SupabaseOrderRow): StaffOrder {
     paidAt: normalizeTimestamp(row.paid_at),
     // Contract: true or undefined, never false (UI truthiness convention).
     hasPaymentProof: proof ? true : undefined,
-    paymentProofUrl: proof ? normalizeOptionalString(proof.proof_url) : undefined,
+    paymentProofId: proof ? normalizeOptionalString(proof.id) : undefined,
+    // paymentProofUrl is INTENTIONALLY never set from Supabase: no preview URL
+    // exists on the poll (see SupabasePaymentProofRow). The drawer signs the
+    // history on demand. Only the dormant n8n rollback adapter still fills it.
     paymentProofStatus: proof ? normalizeOptionalString(proof.status) : undefined,
     paymentProofReceivedAt: proof ? normalizeTimestamp(proof.received_at) : undefined,
+    paymentProofRejectionReason: proof
+      ? normalizeOptionalString(proof.rejection_reason)
+      : undefined,
     ...normalizeCancellationFields({
       cancellationReason: row.cancellation_reason,
       cancelledAt: row.cancelled_at,

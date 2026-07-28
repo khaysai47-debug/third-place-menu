@@ -22,6 +22,29 @@ export class StaffAccessError extends Error {
   }
 }
 
+/** One proof in an order's audit history (server signs proof_url on demand). */
+export interface ProofHistoryItem {
+  id: string;
+  /** Short-lived SIGNED url, minted per request. Null when there is nothing to
+   *  sign (legacy row, hasFile false) or signing failed (hasFile true). A
+   *  stored/permanent url is never returned. */
+  proof_url: string | null;
+  /** Whether a private storage object exists for this proof. */
+  hasFile: boolean;
+  status: string; // pending | approved | rejected
+  source: string | null;
+  received_at: string | null;
+  created_at: string | null;
+  reviewed_at: string | null;
+  reviewed_by: string | null;
+  rejection_reason: string | null;
+}
+
+/** Fetches the full proof audit history for one order (signed previews). */
+export function fetchProofHistory(orderNumber: string): Promise<{ proofs: ProofHistoryItem[] }> {
+  return staffRead(`/api/staff/proof-history?order=${encodeURIComponent(orderNumber)}`);
+}
+
 /** GETs one protected /api/staff/* read with the device's secret. */
 export async function staffRead<T>(path: string): Promise<T> {
   const secret = getStaffWriteSecret();

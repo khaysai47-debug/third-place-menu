@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { isCancellableStatus } from "@/lib/orderRules";
+import { fetchProofHistory, type ProofHistoryItem } from "@/lib/data/staffReadClient";
 import type { StaffOrder, StaffPaymentMethod } from "@/lib/staffOrders";
 import { AlertCircle, Bike, Copy, CreditCard, MapPin, MoreHorizontal, PackageX, Phone, PhoneOff, User, UserX } from "lucide-react";
 import { getNextAction, PAYMENT_META, STATUS_META } from "./orderStatus";
@@ -10,10 +11,17 @@ interface Props {
   updating?: boolean;
   paying?: boolean;
   cancelling?: boolean;
+  reviewing?: boolean;
   updateError?: string | null;
   onAdvance: (orderId: string) => void;
   onMarkPaid: (orderId: string, method: StaffPaymentMethod) => void;
   onCancelOrder: (orderId: string, reason: string) => void;
+  onReviewProof: (
+    orderId: string,
+    proofId: string,
+    decision: "approve" | "reject",
+    reason?: string,
+  ) => void;
   onClose: () => void;
 }
 
@@ -43,10 +51,12 @@ export function OrderDetailDrawer({
   updating = false,
   paying = false,
   cancelling = false,
+  reviewing = false,
   updateError = null,
   onAdvance,
   onMarkPaid,
   onCancelOrder,
+  onReviewProof,
   onClose,
 }: Props) {
   const meta = STATUS_META[order.status];
@@ -61,6 +71,39 @@ export function OrderDetailDrawer({
 
   const [showCancelForm, setShowCancelForm] = useState(false);
   const [cancelReason, setCancelReason] = useState("");
+  const [showRejectForm, setShowRejectForm] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+
+  const proofStatus = order.paymentProofStatus; // "pending" | "approved" | "rejected"
+  const proofPending = order.hasPaymentProof && proofStatus === "pending" && !!order.paymentProofId;
+
+  // Full proof audit history — signed previews fetched on demand (only when the
+  // drawer is open), never signed on the dashboard poll. Refetches when the
+  // order's proof state changes (e.g. after an approve/reject reloads orders).
+  const [history, setHistory] = useState<ProofHistoryItem[] | null>(null);
+  const [historyError, setHistoryError] = useState(false);
+  useEffect(() => {
+    if (!order.hasPaymentProof) {
+      setHistory(null);
+      return;
+    }
+    let cancelled = false;
+    setHistoryError(false);
+    fetchProofHistory(order.orderId).then(
+      (data) => {
+        if (!cancelled) setHistory(data.proofs);
+      },
+      () => {
+        if (!cancelled) setHistoryError(true);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [order.orderId, order.hasPaymentProof, order.paymentProofId, order.paymentProofStatus]);
+
+  // Newest first for display; the last item is the current/latest proof.
+  const historyNewestFirst = history ? [...history].reverse() : [];
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -218,6 +261,155 @@ export function OrderDetailDrawer({
             </span>
           </div>
 
+          {/* Payment proof review */}
+          {order.hasPaymentProof && (
+            <section className="pt-3 border-t border-[var(--color-gold)]/15">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-[11px] uppercase tracking-[0.22em] text-[var(--color-cream)]/45">
+                  Payment Proof · 收據
+                </h3>
+                <span
+                  className={`pl-2 pr-2.5 py-0.5 rounded-full border text-[11px] font-medium tracking-[0.06em] ${
+                    proofStatus === "approved"
+                      ? "border-emerald-600/40 bg-emerald-500/10 text-emerald-300"
+                      : proofStatus === "rejected"
+                        ? "border-[var(--color-vermillion)]/40 bg-[var(--color-vermillion)]/10 text-[var(--color-vermillion-text)]"
+                        : "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                  }`}
+                >
+                  {proofStatus === "approved"
+                    ? "已核准 Approved"
+                    : proofStatus === "rejected"
+                      ? "已拒絕 Rejected"
+                      : "待審核 Pending"}
+                </span>
+              </div>
+
+              {/* Audit history — every proof, newest first, signed on demand. */}
+              {historyError ? (
+                <p className="text-[12.5px] text-[var(--color-cream)]/45">
+                  Couldn&apos;t load proof history — refresh to retry.
+                </p>
+              ) : history === null ? (
+                <p className="text-[12.5px] text-[var(--color-cream)]/45">Loading proof history…</p>
+              ) : historyNewestFirst.length === 0 ? (
+                <p className="text-[12.5px] text-[var(--color-cream)]/45">No slip on file.</p>
+              ) : (
+                <div className="space-y-2">
+                  {historyNewestFirst.map((p, i) => (
+                    <div
+                      key={p.id}
+                      className="rounded-xl border border-[var(--color-gold)]/15 bg-[var(--color-ink)]/40 px-3 py-2.5"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[12px] text-[var(--color-cream)]/70">
+                          {i === 0 ? "Latest" : "Earlier"} ·{" "}
+                          <span
+                            className={
+                              p.status === "approved"
+                                ? "text-emerald-300"
+                                : p.status === "rejected"
+                                  ? "text-[var(--color-vermillion-text)]"
+                                  : "text-amber-300"
+                            }
+                          >
+                            {p.status}
+                          </span>
+                        </span>
+                        {/* Preview links are short-lived signed URLs minted per
+                            fetch. A legacy proof (no private object) shows a
+                            clear unavailable state — its old permanent public
+                            link is never served to the client. */}
+                        {p.proof_url ? (
+                          <a
+                            href={p.proof_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-[12px] text-teal-300 hover:underline"
+                          >
+                            View slip
+                          </a>
+                        ) : (
+                          <span className="text-[11px] text-[var(--color-cream)]/40">
+                            {p.hasFile
+                              ? "Preview unavailable — refresh"
+                              : "Legacy proof preview unavailable"}
+                          </span>
+                        )}
+                      </div>
+                      {p.status === "rejected" && p.rejection_reason && (
+                        <p className="mt-1 text-[12px] text-[var(--color-cream)]/55">
+                          Reason: {p.rejection_reason}
+                        </p>
+                      )}
+                      {p.reviewed_by && (
+                        <p className="mt-0.5 text-[11px] text-[var(--color-cream)]/40">
+                          reviewed by {p.reviewed_by}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {proofPending &&
+                order.paymentProofId &&
+                (showRejectForm ? (
+                  <div className="mt-3 space-y-2">
+                    <input
+                      value={rejectReason}
+                      onChange={(e) => setRejectReason(e.target.value)}
+                      placeholder="Reason (required) · 拒絕原因"
+                      className="w-full h-11 rounded-xl bg-[var(--color-ink)] border border-[var(--color-gold)]/25 px-3 text-[14px] text-[var(--color-cream)] placeholder:text-[var(--color-cream)]/35 focus:outline-none focus:border-[var(--color-gold)]/50"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => {
+                          setShowRejectForm(false);
+                          setRejectReason("");
+                        }}
+                        className="flex-1 h-11 rounded-xl border border-[var(--color-gold)]/20 text-[var(--color-cream)]/60 text-[14px] font-medium hover:border-[var(--color-gold)]/40 transition"
+                      >
+                        返回 · Back
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (rejectReason.trim())
+                            onReviewProof(
+                              order.orderId,
+                              order.paymentProofId!,
+                              "reject",
+                              rejectReason.trim(),
+                            );
+                        }}
+                        disabled={!rejectReason.trim() || reviewing}
+                        className="flex-1 h-11 rounded-xl border border-[var(--color-vermillion)]/40 bg-[var(--color-vermillion)]/10 text-[var(--color-vermillion-text)] text-[14px] font-semibold hover:bg-[var(--color-vermillion)]/20 transition disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {reviewing ? "處理中…" : "確認拒絕 · Reject"}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-3 flex gap-2">
+                    <button
+                      onClick={() => setShowRejectForm(true)}
+                      disabled={reviewing}
+                      className="flex-1 h-12 rounded-xl border border-[var(--color-vermillion)]/35 bg-[var(--color-vermillion)]/8 text-[var(--color-vermillion-text)] text-[14px] font-semibold active:scale-[0.98] transition hover:bg-[var(--color-vermillion)]/16 disabled:opacity-50"
+                    >
+                      拒絕 · Reject
+                    </button>
+                    <button
+                      onClick={() => onReviewProof(order.orderId, order.paymentProofId!, "approve")}
+                      disabled={reviewing}
+                      className="flex-1 h-12 rounded-xl border border-emerald-500/40 bg-emerald-500/12 text-emerald-300 text-[14px] font-semibold active:scale-[0.98] transition hover:bg-emerald-500/20 disabled:opacity-50 disabled:cursor-wait"
+                    >
+                      {reviewing ? "處理中…" : "核准付款 · Approve"}
+                    </button>
+                  </div>
+                ))}
+            </section>
+          )}
+
           {/* Cancellation info */}
           {order.status === "cancelled" && (order.cancellationReason || order.cancelledAt) && (
             <div className="flex justify-between items-start pt-3 border-t border-[var(--color-gold)]/15">
@@ -243,19 +435,17 @@ export function OrderDetailDrawer({
           {updateError && (
             <p className="text-[13px] text-[var(--color-vermillion)] text-center">{updateError}</p>
           )}
+          {/* Manual payment is CASH ONLY. Transfer is confirmed by approving
+              the customer's payment slip (the proof section above) — there is
+              no manual Transfer button, and the server refuses one. */}
           {canTakePayment && (
-            <div className="flex gap-2">
-              {(["Cash", "Transfer"] as StaffPaymentMethod[]).map((method) => (
-                <button
-                  key={method}
-                  onClick={() => onMarkPaid(order.orderId, method)}
-                  disabled={paying}
-                  className="flex-1 h-12 rounded-xl border border-emerald-500/35 bg-emerald-500/10 text-emerald-300 text-[15px] font-semibold tracking-[0.02em] active:scale-[0.98] transition hover:bg-emerald-500/20 disabled:opacity-60 disabled:cursor-wait disabled:active:scale-100"
-                >
-                  {paying ? "更新中…" : `${METHOD_ZH[method]}已付 · Paid ${method}`}
-                </button>
-              ))}
-            </div>
+            <button
+              onClick={() => onMarkPaid(order.orderId, "Cash")}
+              disabled={paying}
+              className="w-full h-12 rounded-xl border border-emerald-500/35 bg-emerald-500/10 text-emerald-300 text-[15px] font-semibold tracking-[0.02em] active:scale-[0.98] transition hover:bg-emerald-500/20 disabled:opacity-60 disabled:cursor-wait disabled:active:scale-100"
+            >
+              {paying ? "更新中…" : `${METHOD_ZH.Cash}已付 · Paid Cash`}
+            </button>
           )}
           {action ? (
             <button

@@ -5,7 +5,13 @@ import {
 } from "./_lib/botSession.server.js";
 import { postOrderDetails } from "./_lib/orderDetails.server.js";
 import { postCustomerOrder, postStaffAddOrder } from "./_lib/orderIntake.server.js";
-import { getStaffExpenses, getStaffOrders } from "./_lib/staffDashboardReads.server.js";
+import { postAutomationPaymentProof } from "./_lib/paymentIntake.server.js";
+import { postReviewPaymentProof } from "./_lib/paymentProof.server.js";
+import {
+  getProofHistory,
+  getStaffExpenses,
+  getStaffOrders,
+} from "./_lib/staffDashboardReads.server.js";
 import {
   jsonError,
   postAddExpense,
@@ -63,6 +69,9 @@ const ROUTES: Record<string, Route> = {
   // ── Automation (trusted server-to-server) ────────────────────────────────
   "automation/bot-session": { POST: postCreateBotSession },
   "automation/order-details": { POST: postOrderDetails },
+  // Payment slips arrive from the CHAT, forwarded by n8n (x-proof-secret).
+  // There is no public proof-upload endpoint, by design.
+  "automation/payment-proof": { POST: postAutomationPaymentProof },
 
   // ── Customer-facing ──────────────────────────────────────────────────────
   "menu-session/resolve": { POST: postResolveSession },
@@ -74,12 +83,14 @@ const ROUTES: Record<string, Route> = {
   "staff/add-order": { POST: postStaffAddOrder },
   "staff/cancel-order": { POST: postCancelOrder },
   "staff/mark-paid": { POST: postMarkPaid },
+  "staff/review-payment-proof": { POST: postReviewPaymentProof },
   "staff/update-menu-availability": { POST: postUpdateMenuAvailability },
   "staff/update-status": { POST: postUpdateStatus },
 
   // ── Staff reads (x-staff-secret) ─────────────────────────────────────────
   "staff/expenses": { GET: getStaffExpenses },
   "staff/orders": { GET: getStaffOrders },
+  "staff/proof-history": { GET: getProofHistory },
 };
 
 /** Strips the mount prefix and slashes so a candidate can be matched. */

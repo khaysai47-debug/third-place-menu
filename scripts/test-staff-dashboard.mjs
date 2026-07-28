@@ -28,7 +28,7 @@ execSync(
 // Files inside node_modules get no package scope — restore ESM.
 writeFileSync(path.join(outDir, "package.json"), '{"type":"module"}\n');
 
-const { getStaffOrders, getStaffExpenses } = await import(
+const { getStaffOrders, getStaffExpenses, getProofHistory } = await import(
   pathToFileURL(path.resolve(outDir, "staffDashboardReads.server.js")).href
 );
 
@@ -72,12 +72,36 @@ const ITEM_ROW = {
   line_total: "should-never-appear", // not part of the dashboard contract
 };
 const PROOF_ROW = {
+  id: "cccccccc-dddd-eeee-ffff-000000000000",
   order_id: ORDER_ROW.id,
-  proof_url: "https://proofs.invalid/slip.jpg",
-  status: "received",
+  // Chat proofs store a PRIVATE path, not a url. The DASHBOARD selects neither
+  // (no signing on the poll); proof-history signs the path on demand. The
+  // stored proof_url below is the LEGACY n8n permanent public link — it must
+  // never appear in ANY response, which is what the assertions below prove.
+  proof_url: "https://public.invalid/permanent-legacy-slip.jpg",
+  proof_file_path: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee/secret-storage-key.jpg",
+  source: "bot_instagram",
+  status: "pending",
   received_at: "2026-07-17T12:05:00.000+00:00",
   created_at: "2026-07-17T12:05:00.000+00:00",
-  proof_file_path: "should-never-appear",
+  reviewed_at: null,
+  reviewed_by: null,
+  rejection_reason: null,
+};
+// A genuinely LEGACY proof: the old n8n workflow stored a permanent public
+// url and no private object. It must yield NO preview url at all.
+const LEGACY_PROOF_ROW = {
+  id: "dddddddd-eeee-ffff-0000-111111111111",
+  order_id: ORDER_ROW.id,
+  proof_url: "https://public.invalid/legacy-only-permanent.jpg",
+  proof_file_path: null,
+  source: "n8n_legacy",
+  status: "approved",
+  received_at: "2026-07-16T10:00:00.000+00:00",
+  created_at: "2026-07-16T10:00:00.000+00:00",
+  reviewed_at: "2026-07-16T10:30:00.000+00:00",
+  reviewed_by: "Legacy",
+  rejection_reason: null,
 };
 const EXPENSE_ROW = {
   id: "bbbbbbbb-cccc-dddd-eeee-ffffffffffff",
@@ -101,8 +125,14 @@ globalThis.fetch = async (url, init = {}) => {
   const u = String(url);
   if (u.includes("/rest/v1/orders?")) return Response.json([ORDER_ROW]);
   if (u.includes("/rest/v1/order_items?")) return Response.json([ITEM_ROW]);
-  if (u.includes("/rest/v1/payment_proofs?")) return Response.json([PROOF_ROW]);
+  if (u.includes("/rest/v1/payment_proofs?")) {
+    // The history endpoint filters by order_id; the dashboard poll does not.
+    return Response.json(u.includes("order_id=eq.") ? [LEGACY_PROOF_ROW, PROOF_ROW] : [PROOF_ROW]);
+  }
   if (u.includes("/rest/v1/expenses?")) return Response.json([EXPENSE_ROW]);
+  // Storage signed-URL request for a customer-uploaded proof.
+  if (u.includes("/storage/v1/object/sign/"))
+    return Response.json({ signedURL: "/object/sign/payment-proofs/x?token=SIGNED" });
   throw new Error("unexpected fetch target in test");
 };
 
@@ -182,17 +212,34 @@ assert.deepEqual(orders.data, {
   ],
   paymentProofs: [
     {
+      id: PROOF_ROW.id,
       order_id: ORDER_ROW.id,
-      proof_url: "https://proofs.invalid/slip.jpg",
-      status: "received",
+      // The DASHBOARD returns proof STATUS only — NO url field at all. A
+      // legacy permanent proof_url is not selected and cannot be relayed.
+      status: "pending",
       received_at: "2026-07-17T12:05:00.000+00:00",
       created_at: "2026-07-17T12:05:00.000+00:00",
+      rejection_reason: null,
     },
   ],
 });
 assert.ok(
   !JSON.stringify(orders).includes("should-never-appear"),
   "unapproved order fields must not leak",
+);
+// The private storage key (proof_file_path) must NEVER leave the server.
+assert.ok(
+  !JSON.stringify(orders).includes("secret-storage-key.jpg"),
+  "private proof_file_path must not leak to the client",
+);
+// The LEGACY permanent public url must never be relayed by the poll.
+assert.ok(
+  !JSON.stringify(orders).includes("permanent-legacy-slip"),
+  "legacy permanent proof_url must not reach the dashboard client",
+);
+assert.ok(
+  !JSON.stringify(orders).includes("proof_url"),
+  "the dashboard contract carries no proof_url field at all",
 );
 
 const expenses = await run(getStaffExpenses, { secret: SECRET, expect: 200, label: "expenses ok" });
@@ -220,14 +267,20 @@ assert.ok(
 fetchLog = [];
 await getStaffOrders(makeRequest(SECRET));
 await getStaffExpenses(makeRequest(SECRET));
-assert.equal(fetchLog.length, 4, "orders+items+proofs+expenses = 4 Supabase GETs");
-for (const call of fetchLog) {
+// The dashboard poll does NO signing — every call is a /rest/v1 GET. Signing
+// moved to the on-demand proof-history endpoint (tested separately below).
+const restCalls = fetchLog.filter((c) => c.url.includes("/rest/v1/"));
+const signCalls = fetchLog.filter((c) => c.url.includes("/storage/v1/object/sign/"));
+assert.equal(restCalls.length, 4, "orders+items+proofs+expenses = 4 Supabase REST GETs");
+assert.equal(signCalls.length, 0, "the dashboard poll signs NOTHING");
+assert.equal(restCalls.length, fetchLog.length, "no unexpected fetch targets");
+for (const call of restCalls) {
   const select = new URL(call.url).searchParams.get("select");
   assert.ok(select && select.length > 0, `explicit select on ${call.url}`);
   assert.ok(!select.includes("*"), `no select=* on ${call.url}`);
-  // Read-only guarantee: GET, no body.
-  assert.equal(call.init.method ?? "GET", "GET", `non-GET Supabase call: ${call.url}`);
-  assert.equal(call.init.body, undefined, "Supabase calls must carry no body");
+  // Read-only guarantee for data: GET, no body.
+  assert.equal(call.init.method ?? "GET", "GET", `non-GET Supabase REST call: ${call.url}`);
+  assert.equal(call.init.body, undefined, "Supabase REST calls must carry no body");
 }
 const urlFor = (table) => fetchLog.find((c) => c.url.includes(`/rest/v1/${table}?`)).url;
 assert.equal(
@@ -244,8 +297,8 @@ assert.equal(
 );
 assert.equal(
   new URL(urlFor("payment_proofs")).searchParams.get("select"),
-  "order_id,proof_url,status,received_at,created_at",
-  "payment_proofs column contract",
+  "id,order_id,status,received_at,created_at,rejection_reason",
+  "dashboard payment_proofs column contract (no proof_url, no proof_file_path)",
 );
 assert.equal(
   new URL(urlFor("expenses")).searchParams.get("select"),
@@ -382,5 +435,78 @@ assert.ok(staffPage.includes("!unlocked || accessDenied"), "staff page stays gat
 assert.ok(staffPage.includes('area="staff"'), "staff page uses staff copy");
 assert.ok(ownerPage.includes("!unlocked || accessDenied"), "owner page stays gated");
 assert.ok(ownerPage.includes('area="owner"'), "owner page uses owner copy");
+
+/* ── I. Proof history — signed previews ON DEMAND, storage key never leaks ── */
+
+behavior = "ok";
+const historyReq = (secret) =>
+  new Request("https://app.invalid/api/staff/proof-history?order=TP-20260717-120000", {
+    method: "GET",
+    headers: secret === undefined ? {} : { "x-staff-secret": secret },
+  });
+
+// Missing secret → 401, zero Supabase calls.
+fetchLog = [];
+const histDenied = await getProofHistory(historyReq(undefined));
+assert.equal(histDenied.status, 401, "proof-history requires the staff secret");
+assert.equal(fetchLog.length, 0, "no Supabase call without auth");
+
+// Authorized → the order's proofs with a SHORT-LIVED SIGNED preview url.
+fetchLog = [];
+const histRes = await getProofHistory(historyReq(SECRET));
+const hist = await histRes.json();
+assert.equal(histRes.status, 200, "proof-history ok");
+assert.equal(hist.ok, true, "proof-history ok flag");
+assert.deepEqual(hist.data.proofs, [
+  {
+    // LEGACY row: permanent public url dropped, nothing to sign, hasFile false
+    // → the drawer renders "Legacy proof preview unavailable".
+    id: LEGACY_PROOF_ROW.id,
+    proof_url: null,
+    hasFile: false,
+    status: "approved",
+    source: "n8n_legacy",
+    received_at: "2026-07-16T10:00:00.000+00:00",
+    created_at: "2026-07-16T10:00:00.000+00:00",
+    reviewed_at: "2026-07-16T10:30:00.000+00:00",
+    reviewed_by: "Legacy",
+    rejection_reason: null,
+  },
+  {
+    // Private object: a FRESH short-lived signed url, never the stored value.
+    id: PROOF_ROW.id,
+    proof_url: "https://supabase.invalid/storage/v1/object/sign/payment-proofs/x?token=SIGNED",
+    hasFile: true,
+    status: "pending",
+    source: "bot_instagram",
+    received_at: "2026-07-17T12:05:00.000+00:00",
+    created_at: "2026-07-17T12:05:00.000+00:00",
+    reviewed_at: null,
+    reviewed_by: null,
+    rejection_reason: null,
+  },
+]);
+// The private storage key must NEVER appear in the proof-history response.
+assert.ok(
+  !JSON.stringify(hist).includes("secret-storage-key.jpg"),
+  "proof-history never returns proof_file_path",
+);
+// NEITHER stored permanent url may be relayed, for either row.
+assert.ok(
+  !JSON.stringify(hist).includes("public.invalid"),
+  "proof-history never returns a stored permanent proof_url",
+);
+// It signed ONCE — only the row that actually has a private object.
+assert.equal(
+  fetchLog.filter((c) => c.url.includes("/storage/v1/object/sign/")).length,
+  1,
+  "proof-history signs only the proof with a private object",
+);
+// proof_url is not even SELECTed from the database.
+const historySelect = new URL(
+  fetchLog.find((c) => c.url.includes("/rest/v1/payment_proofs?")).url,
+).searchParams.get("select");
+assert.ok(!historySelect.includes("proof_url"), "history never reads the legacy proof_url column");
+assert.ok(historySelect.includes("proof_file_path"), "history reads the private path (to sign it)");
 
 console.log("test-staff-dashboard: all assertions passed");

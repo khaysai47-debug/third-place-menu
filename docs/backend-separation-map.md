@@ -61,9 +61,9 @@ implementations inside `src/lib/`, not rewriting screens.**
 
 ### Status vocabulary (do not change during separation)
 
-- Flow: `new → preparing → ready → done` (dine-in/pickup), `new → preparing → ready → out_for_delivery → delivered` (delivery). `delivered` is **not** merged into `done`.
+- Flow (FROZEN, Tuesday): `new → accepted → preparing → completed` (dine-in), `new → accepted → preparing → ready_for_pickup → completed` (pickup), `new → accepted → preparing → out_for_delivery → delivered → completed` (delivery). `delivered` is **not** merged into `completed`. The server guard (`staffOrderWrites.server.ts`) enforces one legal step per type.
 - Airtable calls `done` "completed" — translated **only** at the API boundary in `staffOrders.ts` (`API_STATUS_BY_UI` / `UI_STATUS_BY_API`). Keep this mapping (or retire it) inside the data layer.
-- Cancellable = `new`/`preparing` only. Payment risk = `done`/`delivered` + `unpaid`. Cancelled orders never count toward money totals.
+- Cancellable = `new`/`accepted`/`preparing`. Payment risk = `completed`/`delivered` + `unpaid`. Cancelled orders never count toward money totals.
 - All of this is encoded in `src/lib/orderRules.ts` and `nextStaffOrderStatus` in `staffOrders.ts`.
 
 ---
@@ -116,8 +116,11 @@ Supabase row mappers with the same output types.
 - `OrderPayload` shape — n8n automations downstream depend on these exact field names (snake-cased expense payload too: `item_name`, `paid_from`, …).
 - Owner dashboard's manual-refresh-only behavior and staff's 5s poll — polling
   changes are a product decision, not part of separation.
-- Payment-proof fields (`hasPaymentProof`, `paymentProofUrl`, `paymentProofStatus`) —
-  they are written by the n8n bot flow and must keep working through separation.
+- Payment-proof fields (`hasPaymentProof`, `paymentProofStatus`) — proofs now
+  arrive through the trusted Atlas intake (`POST /api/automation/payment-proof`);
+  the legacy n8n **Add Payment Proof** workflow must stay DISABLED. Staff previews
+  are short-lived signed URLs from `/api/staff/proof-history`; no permanent
+  public `proof_url` is returned by any active staff API.
 
 ---
 
@@ -161,10 +164,10 @@ contract the Supabase adapters must reproduce field-for-field.
 | `createdAt` (ISO) | owner "today" windows (`isSameLocalDay`), newest-first sort, revenue-by-hour fallback | orders without it fall out of owner views; sort treats missing as `""` |
 | `customerName` / `customerPhone` / `deliveryAddress` | staff delivery block, owner modal/rows | delivery orders only in practice |
 | `subtotalPrice`, `deliveryFee` | owner modal + staff card fee row | mapper coerces to `0` when absent; **UI displays ฿30 when `deliveryFee` is 0/absent** (`displayDeliveryFee` fallback in StaffOrderCard + OwnerOrderModal) |
-| `paymentMethod` | badges, Payment Mix, cash/transfer totals | only `"Cash"`/`"Transfer"` verbatim (Airtable select values); anything else is dropped to `undefined` by the mapper |
-| `paidAt` (ISO) | owner Paid At column, modal, revenue-by-hour (falls back to `createdAt`) | written by n8n on payment |
+| `paymentMethod` | badges, Payment Mix, cash/transfer totals | only `"Cash"`/`"Transfer"` verbatim; anything else is dropped to `undefined` by the mapper. **Manual mark-paid is Cash only** (the server refuses Transfer); Transfer is written solely by an approved proof review, which sets it explicitly. |
+| `paidAt` (ISO) | owner Paid At column, modal, revenue-by-hour (falls back to `createdAt`) | stamped once by `mark_order_paid_cash` (Cash) or `review_payment_proof` (Transfer); a DB trigger blocks any rewrite |
 | `hasPaymentProof` | proof badges/links | mapper yields `true` or `undefined`, never `false` |
-| `paymentProofUrl` | "View proof/slip" links (staff card, owner modal, Payments tab) | |
+| `paymentProofUrl` | "View proof/slip" links (staff card, owner modal, Payments tab) | **Supabase path never sets it** — no preview URL on the dashboard poll. The drawer's proof history fetches signed URLs on demand; legacy rows with only a permanent `proof_url` show "Legacy proof preview unavailable". n8n rollback adapter only. |
 | `paymentProofStatus` | owner modal small text | |
 | `paymentProofReceivedAt` | **mapped but not displayed anywhere yet** | keep mapping it |
 | `cancellationReason` | staff card/drawer, owner rows/modal/Reports | required by the cancel flow |

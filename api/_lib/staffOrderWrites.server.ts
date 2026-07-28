@@ -30,21 +30,64 @@ import { supabaseAuthHeaders } from "./supabaseAuth.js";
 // orderRepository.ts sends traffic here. Every patch replicates the n8n
 // workflow behavior in docs/n8n-workflow-side-effects.md rows 2–3.
 
-// Wire vocabulary of these routes — the app's 7 statuses (must mirror
-// ORDER_STATUS_VALUES in src/lib/data/contracts/orderContract.ts; kept local
-// so the Vercel bundle needs no vite-alias import chain). The DB stores
-// "completed" where the app says "done" (orderMapper.ts, confirmed Phase 2B).
-const APP_STATUSES = [
+// FROZEN order-status vocabulary (Tuesday) — mirrors ORDER_STATUS_VALUES in
+// src/lib/data/contracts/orderContract.ts and the orders_status_check DB
+// constraint. Kept local so the Vercel bundle needs no vite-alias import chain.
+// The app and DB now share these words; there is no done⇄completed translation.
+type OrderType = "dine_in" | "pickup" | "delivery";
+type OrderStatus =
+  | "new"
+  | "accepted"
+  | "preparing"
+  | "ready_for_pickup"
+  | "out_for_delivery"
+  | "delivered"
+  | "completed"
+  | "cancelled";
+
+const APP_STATUSES: readonly OrderStatus[] = [
   "new",
+  "accepted",
   "preparing",
-  "ready",
+  "ready_for_pickup",
   "out_for_delivery",
   "delivered",
-  "done",
+  "completed",
   "cancelled",
-] as const;
+];
 
-const statusToDb = (status: string): string => (status === "done" ? "completed" : status);
+/**
+ * THE authoritative forward-transition table (per order type). Each non-
+ * terminal state has EXACTLY ONE legal successor, so a requested status is
+ * legal iff it equals this value. That single rule rejects skipped, backward,
+ * repeated, and terminal-state transitions at once. "cancelled" is never a
+ * successor here — cancellation goes through the dedicated cancel route.
+ *   dine_in:  new → accepted → preparing → completed
+ *   pickup:   new → accepted → preparing → ready_for_pickup → completed
+ *   delivery: new → accepted → preparing → out_for_delivery → delivered → completed
+ */
+function nextStatusFor(orderType: OrderType, status: OrderStatus): OrderStatus | null {
+  switch (status) {
+    case "new":
+      return "accepted";
+    case "accepted":
+      return "preparing";
+    case "preparing":
+      return orderType === "delivery"
+        ? "out_for_delivery"
+        : orderType === "pickup"
+          ? "ready_for_pickup"
+          : "completed"; // dine_in
+    case "ready_for_pickup":
+      return "completed";
+    case "out_for_delivery":
+      return "delivered";
+    case "delivered":
+      return "completed";
+    default:
+      return null; // completed, cancelled — terminal
+  }
+}
 
 /** Uniform JSON error body — never includes stack traces or env values. */
 export function jsonError(status: number, error: string): Response {
@@ -101,13 +144,17 @@ async function patchRowsByColumn(
   value: string,
   patch: Record<string, unknown>,
   failMessage: string,
+  /** Extra PostgREST filter appended to the URL, e.g. "&status=eq.new" — the
+   *  optimistic-concurrency guard for status/payment transitions. Must be
+   *  pre-encoded by the caller. */
+  guardQuery = "",
 ): Promise<number | Response> {
   const url = process.env.VITE_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) return jsonError(500, "Server is not configured for staff writes.");
   try {
     const response = await fetch(
-      `${url.replace(/\/+$/, "")}/rest/v1/${table}?${column}=eq.${encodeURIComponent(value)}`,
+      `${url.replace(/\/+$/, "")}/rest/v1/${table}?${column}=eq.${encodeURIComponent(value)}${guardQuery}`,
       {
         method: "PATCH",
         headers: supabaseAuthHeaders(key, {
@@ -136,8 +183,42 @@ async function patchRowsByColumn(
 const patchOrderByNumber = (
   orderNumber: string,
   patch: Record<string, unknown>,
+  guardQuery = "",
 ): Promise<number | Response> =>
-  patchRowsByColumn("orders", "order_number", orderNumber, patch, "Order update failed.");
+  patchRowsByColumn("orders", "order_number", orderNumber, patch, "Order update failed.", guardQuery);
+
+/**
+ * Reads a single order's guard-relevant columns by order_number (never by the
+ * row UUID). Returns the row, null when the order does not exist, or a
+ * ready-to-send error Response on a transport/config failure. The current
+ * status and type are the inputs to the transition guard — read server-side so
+ * a client can never assert its own "current" state.
+ */
+async function readOrderByNumber(
+  orderNumber: string,
+  columns: string,
+): Promise<Record<string, unknown> | null | Response> {
+  const url = process.env.VITE_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return jsonError(500, "Server is not configured for staff writes.");
+  try {
+    const response = await fetch(
+      `${url.replace(/\/+$/, "")}/rest/v1/orders?order_number=eq.${encodeURIComponent(orderNumber)}&select=${columns}&limit=1`,
+      { method: "GET", headers: supabaseAuthHeaders(key) },
+    );
+    if (!response.ok) {
+      console.error(`Supabase order read failed: responded ${response.status}`);
+      return jsonError(502, "Order lookup failed.");
+    }
+    const rows: unknown = await response.json().catch(() => null);
+    if (!Array.isArray(rows)) return jsonError(502, "Order lookup failed.");
+    return (rows[0] as Record<string, unknown>) ?? null;
+  } catch {
+    // Never log the error object — a fetch error can carry the Supabase host.
+    console.error("Supabase order read failed: unreachable");
+    return jsonError(502, "Order lookup failed.");
+  }
+}
 
 /**
  * Cancellation patch — mirrors the n8n Update Order Status workflow:
@@ -160,9 +241,17 @@ const updateStatusBody = z.object({
 });
 
 /**
- * POST /api/staff/update-status — writes orders.status. Non-cancel statuses
- * reset the cancellation fields to null; "cancelled" stamps reason +
- * cancelled_at (exact n8n Update Order Status behavior).
+ * POST /api/staff/update-status — advances orders.status by EXACTLY ONE legal
+ * step for the order's type (nextStatusFor). The current status and type are
+ * read server-side, never trusted from the client, so a skipped, backward,
+ * repeated, or terminal-state transition is rejected with a stable 409.
+ *
+ * Cancellation is NOT accepted here — it has its own route
+ * (/api/staff/cancel-order) so the reason-capture flow stays in one place.
+ *
+ * Race-safe: the PATCH is guarded by status=eq.<currentStatus>, so a second
+ * concurrent advance matches zero rows and gets the same 409 rather than
+ * double-stepping.
  */
 export async function postUpdateStatus(request: Request): Promise<Response> {
   const denied = checkStaffSecret(request);
@@ -170,18 +259,39 @@ export async function postUpdateStatus(request: Request): Promise<Response> {
 
   const body = updateStatusBody.safeParse(await request.json().catch(() => null));
   if (!body.success) return jsonError(400, "Invalid request body.");
-  const { orderId, status, cancellationReason } = body.data;
-  if (!APP_STATUSES.includes(status as (typeof APP_STATUSES)[number])) {
+  const { orderId, status } = body.data;
+  if (!APP_STATUSES.includes(status as OrderStatus)) {
     return jsonError(400, `Unknown status "${status}".`);
   }
+  if (status === "cancelled") {
+    return jsonError(400, "Use the cancel action to cancel an order.");
+  }
 
-  const patch =
-    status === "cancelled"
-      ? cancelledPatch(cancellationReason)
-      : { status: statusToDb(status), cancellation_reason: null, cancelled_at: null };
-  const updated = await patchOrderByNumber(orderId, patch);
+  const current = await readOrderByNumber(orderId, "order_type,status");
+  if (current instanceof Response) return current;
+  if (current === null) return jsonError(404, "Order not found.");
+
+  const orderType = current.order_type as OrderType;
+  const currentStatus = current.status as OrderStatus;
+  const expected = nextStatusFor(orderType, currentStatus);
+  if (expected === null) {
+    return jsonError(409, `Order is already ${currentStatus} and cannot change.`);
+  }
+  if (status !== expected) {
+    return jsonError(409, `Cannot change ${currentStatus} → ${status}.`);
+  }
+
+  // Guarded PATCH: only updates if the row is STILL at currentStatus.
+  const updated = await patchOrderByNumber(
+    orderId,
+    { status, cancellation_reason: null, cancelled_at: null },
+    `&status=eq.${encodeURIComponent(currentStatus)}`,
+  );
   if (updated instanceof Response) return updated;
-  if (updated === 0) return jsonError(404, "Order not found.");
+  if (updated === 0) {
+    // The row moved between the read and the write (another device advanced it).
+    return jsonError(409, "Order changed — refresh and try again.");
+  }
   return Response.json({ ok: true, orderId, status });
 }
 
@@ -190,7 +300,11 @@ const cancelOrderBody = z.object({
   reason: z.string().optional(),
 });
 
-/** POST /api/staff/cancel-order — same DB write n8n performs for "cancelled". */
+/**
+ * POST /api/staff/cancel-order — cancellation is reachable from any NON-terminal
+ * state. A completed order can never be cancelled (money collected, food out);
+ * an already-cancelled order returns idempotently without restamping the reason.
+ */
 export async function postCancelOrder(request: Request): Promise<Response> {
   const denied = checkStaffSecret(request);
   if (denied) return denied;
@@ -199,20 +313,43 @@ export async function postCancelOrder(request: Request): Promise<Response> {
   if (!body.success) return jsonError(400, "Invalid request body.");
   const { orderId, reason } = body.data;
 
-  const updated = await patchOrderByNumber(orderId, cancelledPatch(reason));
+  const current = await readOrderByNumber(orderId, "status");
+  if (current instanceof Response) return current;
+  if (current === null) return jsonError(404, "Order not found.");
+  const currentStatus = current.status as OrderStatus;
+  if (currentStatus === "completed") {
+    return jsonError(409, "A completed order cannot be cancelled.");
+  }
+  if (currentStatus === "cancelled") {
+    // Idempotent: already cancelled, leave the original reason/timestamp intact.
+    return Response.json({ ok: true, orderId, status: "cancelled" });
+  }
+
+  // Guarded PATCH: only cancels a row that is STILL non-terminal.
+  const updated = await patchOrderByNumber(
+    orderId,
+    cancelledPatch(reason),
+    `&status=eq.${encodeURIComponent(currentStatus)}`,
+  );
   if (updated instanceof Response) return updated;
-  if (updated === 0) return jsonError(404, "Order not found.");
+  if (updated === 0) return jsonError(409, "Order changed — refresh and try again.");
   return Response.json({ ok: true, orderId, status: "cancelled" });
 }
 
 const markPaidBody = z.object({
   orderId: z.string().min(1),
+  // The schema still accepts the shape, but the handler refuses Transfer:
+  // Transfer can ONLY become paid via approved payment-proof review.
   paymentMethod: z.enum(["Cash", "Transfer"]),
 });
 
 /**
- * POST /api/staff/mark-paid — payment_status "Paid", payment_method verbatim,
- * paid_at now (exact n8n Update Payment behavior). Cash/Transfer only.
+ * POST /api/staff/mark-paid — the manual CASH-ONLY path. Transfer is refused
+ * here (server-side, not just hidden in the UI): a Transfer becomes paid only
+ * inside review_payment_proof after an approved slip. Delegates to the
+ * mark_order_paid_cash RPC, which locks the order, refuses cancelled orders,
+ * and is idempotent — paid_at is stamped once and never rewritten. No route
+ * PATCHes paid_at directly (the paid_at-immutability trigger backs this).
  */
 export async function postMarkPaid(request: Request): Promise<Response> {
   const denied = checkStaffSecret(request);
@@ -221,15 +358,44 @@ export async function postMarkPaid(request: Request): Promise<Response> {
   const body = markPaidBody.safeParse(await request.json().catch(() => null));
   if (!body.success) return jsonError(400, "Invalid request body.");
   const { orderId, paymentMethod } = body.data;
+  if (paymentMethod === "Transfer") {
+    return jsonError(400, "Transfer must be confirmed by approving the customer's payment slip.");
+  }
 
-  const updated = await patchOrderByNumber(orderId, {
-    payment_status: "Paid",
-    payment_method: paymentMethod,
-    paid_at: new Date().toISOString(),
+  const url = process.env.VITE_SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return jsonError(500, "Server is not configured for staff writes.");
+  const base = url.replace(/\/+$/, "");
+
+  let response: globalThis.Response;
+  try {
+    response = await fetch(`${base}/rest/v1/rpc/mark_order_paid_cash`, {
+      method: "POST",
+      headers: supabaseAuthHeaders(key, { "Content-Type": "application/json" }),
+      body: JSON.stringify({ p_order_number: orderId }),
+    });
+  } catch {
+    console.error("mark_order_paid_cash RPC unreachable");
+    return jsonError(502, "Payment update failed.");
+  }
+
+  if (!response.ok) {
+    const err = (await response.json().catch(() => null)) as { message?: string } | null;
+    const message = err?.message ?? `HTTP ${response.status}`;
+    if (message.includes("ORDER_NOT_FOUND")) return jsonError(404, "Order not found.");
+    if (message.includes("ORDER_CANCELLED")) return jsonError(409, "A cancelled order cannot be paid.");
+    console.error(`mark_order_paid_cash rejected: ${message}`);
+    return jsonError(502, "Payment update failed.");
+  }
+
+  const result = (await response.json().catch(() => null)) as { already_paid?: boolean } | null;
+  return Response.json({
+    ok: true,
+    orderId,
+    paymentStatus: "paid",
+    paymentMethod: "Cash",
+    alreadyPaid: result?.already_paid === true,
   });
-  if (updated instanceof Response) return updated;
-  if (updated === 0) return jsonError(404, "Order not found.");
-  return Response.json({ ok: true, orderId, paymentStatus: "paid", paymentMethod });
 }
 
 /* ── Add expense (Phase 2G-G) ───────────────────────────────────────────── */

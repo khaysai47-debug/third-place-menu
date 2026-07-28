@@ -149,6 +149,8 @@ assert.deepEqual(ok, {
   ok: true,
   data: {
     eventId: EVENT_ID,
+    // Static payment QR for the chat receipt — null when PAYMENT_QR_URL is unset.
+    paymentQrUrl: null,
     order: {
       orderNumber: ORDER_NUMBER,
       channel: "customer",

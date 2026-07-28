@@ -236,10 +236,18 @@ export async function postOrderDetails(request: Request): Promise<Response> {
 
   // The safe response contract — versioned by shape, mapped field by field.
   // Adding a field here is a deliberate contract change, never an accident.
+  //
+  // THIS IS THE ELECTRONIC-RECEIPT PAYLOAD the bot repeats into the chat:
+  // order number, channel, lines (name/qty/unit price/line total), subtotal,
+  // delivery fee, total, order type, table number, payment status — plus the
+  // static payment QR. paymentQrUrl is a PUBLIC image URL from server config
+  // (PAYMENT_QR_URL), never a secret and never per-order; null when unset, in
+  // which case n8n supplies its own QR.
   return Response.json({
     ok: true,
     data: {
       eventId,
+      paymentQrUrl: process.env.PAYMENT_QR_URL || null,
       order: {
         orderNumber,
         channel: SOURCE_TO_CHANNEL[asStringOrNull(order.source) ?? ""] ?? null,

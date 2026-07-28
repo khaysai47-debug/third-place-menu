@@ -5,11 +5,11 @@
 // transport-agnostic: they survive backend separation unchanged, because they
 // depend only on the StaffOrder types — not on where the data came from.
 //
-// Vocabulary:
-// - completed  = food fully out: done (dine-in/pickup) or delivered (delivery).
-//                Delivered is intentionally NOT merged into done anywhere.
+// Vocabulary (FROZEN, Tuesday):
+// - completed  = food fully out: "completed" (dine-in/pickup) or "delivered"
+//                (delivery, en route to completed). Delivered is NOT merged.
 // - active     = still moving through the pipeline (not completed, not cancelled).
-// - cancellable = staff may cancel only before food is committed: new/preparing.
+// - cancellable = staff may cancel before food is committed: new/accepted/preparing.
 // - payment risk = completed but still unpaid — money should exist but doesn't.
 
 import type { StaffOrder, StaffOrderStatus, StaffOrderType } from "./staffOrders";
@@ -19,9 +19,9 @@ export function isDeliveryOrder(order: Pick<StaffOrder, "orderType">): boolean {
   return order.orderType === "delivery";
 }
 
-/** Food fully out: done (dine-in/pickup) or delivered (delivery). */
+/** Food fully out: completed (dine-in/pickup) or delivered (delivery). */
 export function isCompletedStatus(status: StaffOrderStatus): boolean {
-  return status === "done" || status === "delivered";
+  return status === "completed" || status === "delivered";
 }
 
 /** Order left the pipeline for any reason — completed or cancelled. */
@@ -29,14 +29,14 @@ export function isClosedStatus(status: StaffOrderStatus): boolean {
   return isCompletedStatus(status) || status === "cancelled";
 }
 
-/** Still moving through the pipeline (new/preparing/ready/out_for_delivery). */
+/** Still moving through the pipeline (any non-terminal, non-cancelled state). */
 export function isActiveStatus(status: StaffOrderStatus): boolean {
   return !isClosedStatus(status);
 }
 
 /** Staff may cancel only before food is committed to the grill/road. */
 export function isCancellableStatus(status: StaffOrderStatus): boolean {
-  return status === "new" || status === "preparing";
+  return status === "new" || status === "accepted" || status === "preparing";
 }
 
 /**

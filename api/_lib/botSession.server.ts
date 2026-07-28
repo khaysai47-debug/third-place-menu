@@ -562,6 +562,10 @@ export async function postSessionOrder(request: Request): Promise<Response> {
   }
 
   // The SAME response shape the existing client already parses (orders.ts).
+  // NO payment credential is issued here, deliberately: payment happens in the
+  // CHAT — the bot sends the receipt + QR, the customer replies with the slip
+  // image, and n8n files it via /api/automation/payment-proof. This link's one
+  // job is done, and it stays consumed.
   return Response.json(
     {
       ok: true,

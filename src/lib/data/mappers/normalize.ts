@@ -87,20 +87,21 @@ export function normalizeOptionalString(value: unknown): string | undefined {
 /* ── Closed vocabularies ────────────────────────────────────────────────── */
 
 /**
- * DB → app order status. Accepts the app's 7 statuses case-insensitively plus
- * the known legacy alias "completed" (Airtable) → "done". Anything else falls
- * back to "new": the unknown order surfaces at the top of the staff board
- * instead of vanishing, and never masquerades as done/cancelled (which would
- * corrupt money totals).
- * CONFIRMED (Phase 2B): the DB stores "completed" (never "done"), "delivered",
- * "cancelled", "new" — but n8n does NOT constrain the column, so any string
- * the frontend flow writes (preparing/ready/out_for_delivery) can appear.
+ * DB → app order status. Accepts the 8 FROZEN statuses case-insensitively plus
+ * the two pre-Tuesday aliases ("ready" → "ready_for_pickup", "done" →
+ * "completed"). Anything else falls back to "new": the unknown order surfaces
+ * at the top of the staff board instead of vanishing, and never masquerades as
+ * completed/cancelled (which would corrupt money totals).
+ * After the Tuesday migration the DB is CHECK-pinned to the frozen set, so the
+ * alias branches only matter for rows written before it (and during rollback).
  * If a NEW spelling ever shows up, extend this mapping EXPLICITLY — do not
  * rely on the fallback in production.
  */
 export function normalizeOrderStatus(value: unknown): NormalizedOrderStatus {
   const raw = asString(value).toLowerCase();
-  if (raw === "completed") return "done"; // legacy Airtable vocabulary
+  // Pre-Tuesday aliases → frozen vocabulary (legacy DB/Airtable rows).
+  if (raw === "ready") return "ready_for_pickup";
+  if (raw === "done") return "completed";
   return ORDER_STATUS_VALUES.includes(raw as NormalizedOrderStatus)
     ? (raw as NormalizedOrderStatus)
     : FALLBACK_ORDER_STATUS;

@@ -10,6 +10,7 @@ import { STATUS_META, STATUS_ORDER } from "@/components/staff/orderStatus";
 import { isCancellableStatus } from "@/lib/orderRules";
 import { getOrderRepository } from "@/lib/data/orderRepository";
 import { StaffAccessError } from "@/lib/data/staffReadClient";
+import { staffWrite } from "@/lib/data/staffWriteClient";
 import { getStaffWriteSecret } from "@/lib/staffWriteSecret";
 import {
   nextStaffOrderStatus,
@@ -81,21 +82,23 @@ const STAFF_VIEW_TITLES: Record<StaffView, string> = {
 
 const SUMMARY_STATUSES: StaffOrderStatus[] = [
   "new",
+  "accepted",
   "preparing",
-  "ready",
+  "ready_for_pickup",
   "out_for_delivery",
   "delivered",
-  "done",
+  "completed",
 ];
 
 // Friendlier per-tab empty copy — the board is calm, not broken.
 const EMPTY_TAB_COPY: Record<StaffOrderStatus, { zh: string; en: string }> = {
   new: { zh: "沒有新單", en: "No new orders — all caught up" },
+  accepted: { zh: "沒有已接單", en: "No accepted orders waiting" },
   preparing: { zh: "廚房清空", en: "Nothing on the grill right now" },
-  ready: { zh: "沒有待取餐", en: "Nothing waiting to go out" },
+  ready_for_pickup: { zh: "沒有待取餐", en: "Nothing waiting to go out" },
   out_for_delivery: { zh: "沒有配送中", en: "No riders on the road" },
   delivered: { zh: "沒有已送達", en: "No deliveries completed yet" },
-  done: { zh: "沒有已完成", en: "No finished orders yet tonight" },
+  completed: { zh: "沒有已完成", en: "No finished orders yet tonight" },
   cancelled: { zh: "沒有取消", en: "No cancellations tonight" },
 };
 
@@ -106,11 +109,15 @@ const SUMMARY_CARD_STYLE: Partial<Record<StaffOrderStatus, { inactive: string; a
         "bg-[var(--color-vermillion)]/10 border-[var(--color-vermillion)]/25 hover:bg-[var(--color-vermillion)]/15",
       active: "bg-[var(--color-vermillion)]/18 border-[var(--color-vermillion)]/55",
     },
+    accepted: {
+      inactive: "bg-orange-500/10 border-orange-500/25 hover:bg-orange-500/15",
+      active: "bg-orange-500/18 border-orange-500/55",
+    },
     preparing: {
       inactive: "bg-amber-500/10 border-amber-500/25 hover:bg-amber-500/15",
       active: "bg-amber-500/18 border-amber-500/55",
     },
-    ready: {
+    ready_for_pickup: {
       inactive: "bg-emerald-500/10 border-emerald-500/25 hover:bg-emerald-500/15",
       active: "bg-emerald-500/18 border-emerald-500/55",
     },
@@ -122,7 +129,7 @@ const SUMMARY_CARD_STYLE: Partial<Record<StaffOrderStatus, { inactive: string; a
       inactive: "bg-stone-400/8 border-stone-400/15 hover:bg-stone-400/12",
       active: "bg-stone-400/14 border-stone-400/30",
     },
-    done: {
+    completed: {
       inactive: "bg-stone-500/8 border-stone-400/18 hover:bg-stone-500/12",
       active: "bg-stone-500/14 border-stone-400/35",
     },
@@ -143,6 +150,7 @@ function StaffPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [updatingIds, setUpdatingIds] = useState<ReadonlySet<string>>(new Set());
   const [payingIds, setPayingIds] = useState<ReadonlySet<string>>(new Set());
+  const [reviewingIds, setReviewingIds] = useState<ReadonlySet<string>>(new Set());
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [newOrderBanner, setNewOrderBanner] = useState(false);
 
@@ -265,11 +273,12 @@ function StaffPage() {
   const counts = useMemo(() => {
     const c: Record<StaffOrderStatus, number> = {
       new: 0,
+      accepted: 0,
       preparing: 0,
-      ready: 0,
+      ready_for_pickup: 0,
       out_for_delivery: 0,
       delivered: 0,
-      done: 0,
+      completed: 0,
       cancelled: 0,
     };
     for (const o of orders) c[o.status] += 1;
@@ -303,6 +312,44 @@ function StaffPage() {
 
   const visible = orders.filter((o) => o.status === activeTab);
   const selectedOrder = orders.find((o) => o.orderId === selectedId);
+
+  const reviewProof = async (
+    orderId: string,
+    proofId: string,
+    decision: "approve" | "reject",
+    reason?: string,
+  ) => {
+    if (reviewingIds.has(orderId)) return;
+    if (decision === "reject" && !reason?.trim()) return;
+    setUpdateError(null);
+    setReviewingIds((prev) => new Set(prev).add(orderId));
+    pendingActionsRef.current += 1;
+    try {
+      const result = await staffWrite("/api/staff/review-payment-proof", {
+        proofId,
+        decision,
+        ...(reason?.trim() ? { reason: reason.trim() } : {}),
+      });
+      if (result.success) {
+        // The proof/payment state is authoritative on the server — refresh so
+        // the drawer reflects approved+paid or rejected without guessing.
+        suppressRefreshUntilRef.current = 0;
+        await loadOrders();
+      } else {
+        setUpdateError(result.error);
+      }
+    } catch (error) {
+      console.error("Proof review threw unexpectedly", error);
+      setUpdateError("Failed to review payment. Please try again.");
+    } finally {
+      pendingActionsRef.current -= 1;
+      setReviewingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(orderId);
+        return next;
+      });
+    }
+  };
 
   const advanceOrder = async (orderId: string) => {
     const current = orders.find((o) => o.orderId === orderId);
@@ -701,10 +748,12 @@ function StaffPage() {
           updating={updatingIds.has(selectedOrder.orderId)}
           paying={payingIds.has(selectedOrder.orderId)}
           cancelling={updatingIds.has(selectedOrder.orderId)}
+          reviewing={reviewingIds.has(selectedOrder.orderId)}
           updateError={updateError}
           onAdvance={advanceOrder}
           onMarkPaid={markPaid}
           onCancelOrder={cancelOrder}
+          onReviewProof={reviewProof}
           onClose={() => setSelectedId(null)}
         />
       )}

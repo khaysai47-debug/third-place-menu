@@ -23,11 +23,11 @@
 // Shape: `NormalizedOrder` (= StaffOrder). Field-by-field consumer map lives
 // in docs/backend-separation-map.md § 5.1. The non-negotiables:
 //
-// 1. STATUS VOCABULARY — exactly the 7 values in ORDER_STATUS_VALUES below.
-//    The database may store "completed"; the UI must only ever see "done".
-//    That translation happens inside the adapter/mapper, never in a screen.
-//    Unknown status must fall back to "new" (an unknown order shows up loudly
-//    at the top of the board instead of disappearing).
+// 1. STATUS VOCABULARY — exactly the 8 FROZEN values in ORDER_STATUS_VALUES
+//    below. The app and the database now use the same words; the mapper still
+//    accepts the pre-Tuesday aliases ("ready" → "ready_for_pickup", "done" →
+//    "completed") defensively. Unknown status must fall back to "new" (an
+//    unknown order shows up loudly at the top of the board, never vanishes).
 //
 // 2. ORDER TYPE — exactly ORDER_TYPE_VALUES. Unknown → "dine_in".
 //
@@ -98,11 +98,12 @@ export type NormalizedPaymentMethod = StaffPaymentMethod;
 
 export const ORDER_STATUS_VALUES: readonly NormalizedOrderStatus[] = [
   "new",
+  "accepted",
   "preparing",
-  "ready",
+  "ready_for_pickup",
   "out_for_delivery",
   "delivered",
-  "done",
+  "completed",
   "cancelled",
 ];
 

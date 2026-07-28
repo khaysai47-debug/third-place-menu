@@ -293,8 +293,8 @@ function OwnerPage() {
         (o) =>
           o.orderType === "delivery" &&
           (o.status === "new" ||
+            o.status === "accepted" ||
             o.status === "preparing" ||
-            o.status === "ready" ||
             o.status === "out_for_delivery"),
       ),
     [today],
@@ -2394,11 +2394,12 @@ const OWNER_STATUS_BADGE: Record<
   { bg: string; text: string; border: string; dot: string }
 > = {
   new:              { bg: "bg-[var(--color-vermillion)]/12", text: "text-[var(--color-vermillion-text)]", border: "border-[var(--color-vermillion)]/28", dot: "bg-[var(--color-vermillion)]"   },
+  accepted:         { bg: "bg-orange-500/12",                text: "text-orange-300",                     border: "border-orange-400/28",                 dot: "bg-orange-400"                 },
   preparing:        { bg: "bg-amber-500/12",                 text: "text-amber-300",                      border: "border-amber-400/28",                  dot: "bg-amber-400"                  },
-  ready:            { bg: "bg-emerald-500/12",               text: "text-emerald-300",                    border: "border-emerald-400/28",                dot: "bg-emerald-400"               },
+  ready_for_pickup: { bg: "bg-emerald-500/12",               text: "text-emerald-300",                    border: "border-emerald-400/28",                dot: "bg-emerald-400"               },
   out_for_delivery: { bg: "bg-sky-500/12",                   text: "text-sky-300",                        border: "border-sky-400/28",                    dot: "bg-sky-400"                    },
   delivered:        { bg: "bg-emerald-500/8",                text: "text-emerald-300/80",                 border: "border-emerald-400/20",                dot: "bg-emerald-400/70"            },
-  done:             { bg: "bg-[var(--color-cream)]/6",       text: "text-[var(--color-cream)]/55",        border: "border-[var(--color-cream)]/12",       dot: "bg-[var(--color-cream)]/45"   },
+  completed:        { bg: "bg-[var(--color-cream)]/6",       text: "text-[var(--color-cream)]/55",        border: "border-[var(--color-cream)]/12",       dot: "bg-[var(--color-cream)]/45"   },
   cancelled:        { bg: "bg-[var(--color-vermillion)]/8",  text: "text-[var(--color-vermillion-text)]/70", border: "border-[var(--color-vermillion)]/18", dot: "bg-[var(--color-vermillion)]/55" },
 };
 
@@ -2797,10 +2798,11 @@ function OwnerPaymentRow({ order, onSelect }: { order: StaffOrder; onSelect: () 
 
 const REPORT_STATUS_ROWS: { status: StaffOrderStatus; labelEn: string; labelZh: string }[] = [
   { status: "new",              labelEn: "New",              labelZh: "新單"  },
+  { status: "accepted",         labelEn: "Accepted",         labelZh: "已接單" },
   { status: "preparing",        labelEn: "Preparing",        labelZh: "製作中" },
-  { status: "ready",            labelEn: "Ready",            labelZh: "待取餐" },
+  { status: "ready_for_pickup", labelEn: "Ready",            labelZh: "待取餐" },
   { status: "out_for_delivery", labelEn: "Out for Delivery", labelZh: "配送中" },
-  { status: "done",             labelEn: "Done",             labelZh: "已完成" },
+  { status: "completed",        labelEn: "Completed",        labelZh: "已完成" },
   { status: "delivered",        labelEn: "Delivered",        labelZh: "已送達" },
   { status: "cancelled",        labelEn: "Cancelled",        labelZh: "已取消" },
 ];
@@ -2832,8 +2834,9 @@ function OwnerReportsView({
     let deliveryRevenue = 0;
     const typeCounts = { dine_in: 0, pickup: 0, delivery: 0 };
     const statusCounts: Record<StaffOrderStatus, number> = {
-      new: 0, preparing: 0, ready: 0, out_for_delivery: 0,
-      delivered: 0, done: 0, cancelled: cancelled.length,
+      new: 0, accepted: 0, preparing: 0, ready_for_pickup: 0,
+      out_for_delivery: 0, delivered: 0, completed: 0,
+      cancelled: cancelled.length,
     };
 
     for (const o of live) {

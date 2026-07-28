@@ -57,8 +57,18 @@ const ORDER_FIELDS = [
 ];
 // Mirrors SupabaseOrderItemRow (created_at is only the server-side sort key).
 const ORDER_ITEM_FIELDS = ["order_id", "item_code", "item_name", "quantity", "unit_price"];
-// Mirrors SupabasePaymentProofRow.
-const PAYMENT_PROOF_FIELDS = ["order_id", "proof_url", "status", "received_at", "created_at"];
+// Mirrors the payment_proofs DASHBOARD response contract: metadata only. No
+// url field exists — the legacy permanent proof_url is not selected, and the
+// private proof_file_path never leaves the server. Previews come from the
+// proof-history endpoint, signed on demand.
+const PAYMENT_PROOF_FIELDS = [
+  "id",
+  "order_id",
+  "status",
+  "received_at",
+  "created_at",
+  "rejection_reason",
+];
 // Mirrors SupabaseExpenseRow (minus expense_date — only ever the day filter).
 const EXPENSE_FIELDS = [
   "id",

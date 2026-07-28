@@ -1,0 +1,246 @@
+# Tuesday — Payment Proof & Staff Operations (apply guide, CORRECTED)
+
+The Atlas half of the chat-based payment flow, and the exact order to turn it
+on. Nothing here is run by a tool — SQL is pasted manually, the storage bucket
+is created by hand.
+
+## The customer journey (frozen)
+
+```
+Customer messages on Instagram / Messenger
+  → bot sends ONE secure ordering link
+  → customer submits the order through that link   (link is now consumed)
+  → Atlas creates the order, dispatches order.created to n8n
+  → n8n fetches authoritative details from /api/automation/order-details
+  → bot sends the ELECTRONIC RECEIPT + static QR in the SAME chat
+  → customer sends the payment-slip IMAGE in the SAME chat
+  → n8n downloads it with its Meta credential and POSTs it to
+    /api/automation/payment-proof                  (trusted, server-to-server)
+  → Atlas stores it privately, files a PENDING payment_proofs row
+  → staff approve or reject in the dashboard
+  → approve → order becomes Paid (Transfer) exactly once
+    reject  → bot sends the reason to the SAME chat; customer sends a new slip
+```
+
+**There is no second customer payment link. There is no public proof-upload
+page.** The ordering link creates exactly one order, stays consumed, and can
+never carry payment proof. The chat is the only customer-facing surface after
+checkout.
+
+**Meta/n8n workflow implementation is Wednesday.** Tuesday ships only the
+protected Atlas intake/review foundation the Wednesday workflow calls.
+
+## What shipped (Atlas side)
+
+- **Frozen order-status vocabulary** — `new, accepted, preparing,
+  ready_for_pickup, out_for_delivery, delivered, completed, cancelled`, with an
+  authoritative server-side transition guard on `POST /api/staff/update-status`
+  (one legal step per order type; cancellation has its own route).
+- **Trusted proof intake** — `POST /api/automation/payment-proof`,
+  server-to-server only, authenticated with `x-proof-secret`. Resolves the order
+  from `bot_sessions` by chat identity; validates image magic bytes; stores
+  privately; inserts a `pending` proof.
+- **Staff review** — proof summary on the dashboard, full audit history in the
+  drawer with short-lived signed previews, Approve, Reject-with-required-reason.
+- **Exactly-once paid** — approving flips the order to Paid once inside
+  `review_payment_proof`, which sets `payment_method = 'Transfer'`
+  **explicitly** (a stale value on an unpaid order does not survive the
+  transition) and refuses cancelled, **completed**, and already-paid orders.
+- **Completed orders are closed for review** — both Approve and Reject raise
+  `PROOF_ORDER_COMPLETED` before any write, so the proof stays pending and
+  `payment_status`/`paid_at` cannot move. The route maps it to a 409 with a
+  staff-safe message.
+- **Cash-only manual payment** — `mark-paid` accepts Cash only (the server
+  refuses Transfer); Transfer becomes paid solely via approved proof review.
+  Both paid paths go through guarded RPCs (`mark_order_paid_cash`,
+  `review_payment_proof`).
+- **No permanent proof URLs** — the dashboard poll returns proof metadata with
+  no URL field at all, and the history endpoint returns only freshly signed,
+  short-lived URLs derived from the private path. The legacy `proof_url`
+  column is never selected, so an old permanent public link cannot reach a
+  client. Legacy rows show "Legacy proof preview unavailable" (`hasFile:
+  false`); migrating those objects into the private bucket is optional and
+  manual.
+- **System-wide `paid_at` immutability** — a trigger blocks rewriting `paid_at`
+  once set (documented admin escape for repairs); no route PATCHes `paid_at`.
+- **One pending proof per order** — DB partial unique index; rejected proofs are
+  retained for audit and free the slot for the customer's next slip.
+
+## Trusted intake contract (what Wednesday's n8n must send)
+
+`POST /api/automation/payment-proof` · `multipart/form-data` · **never from a
+browser**
+
+| Header | Value |
+| --- | --- |
+| `x-proof-secret` | `PAYMENT_PROOF_SECRET` (constant-time compared; unset → 500, wrong → 401) |
+
+| Field | Required | Rule |
+| --- | --- | --- |
+| `channel` | yes | `instagram` \| `messenger` — anything else is 400 |
+| `externalChatId` | yes | the Meta PSID/IGSID, `[A-Za-z0-9._-]{1,128}` |
+| `orderNumber` | recommended | the authoritative order number from n8n's conversation state, `[A-Za-z0-9-]{1,32}` |
+| `file` | yes | the slip image: JPEG/PNG/WebP, non-empty, ≤ 5 MB, magic bytes must match the declared MIME |
+
+Atlas never trusts a client-supplied order UUID. It resolves
+`platform + external_chat_id → bot_sessions.order_id` and only considers orders
+that came from **that** conversation. `orderNumber` narrows within that set; it
+can never widen it.
+
+**Response** — `200 {"ok":true,"status":"pending","orderNumber":"TP-IG-1"}`.
+No storage path, no URL, no chat id, ever.
+
+**Failures** — stable `code` for n8n to branch on:
+
+| HTTP | `code` | Meaning |
+| --- | --- | --- |
+| 401 | `UNAUTHORIZED` | missing/wrong `x-proof-secret` |
+| 400 | `UNSUPPORTED_CHANNEL` / `INVALID_CHAT_ID` / `INVALID_ORDER_NUMBER` / `NO_FILE` / `EMPTY_FILE` / `INVALID_BODY` | malformed submission |
+| 413 | `FILE_TOO_LARGE` | > 5 MB |
+| 415 | `UNSUPPORTED_CONTENT_TYPE` / `UNSUPPORTED_MEDIA_TYPE` / `NOT_AN_IMAGE` / `MIME_MISMATCH` | not an acceptable image |
+| 404 | `NO_ORDER_FOR_CHAT` / `NO_UNPAID_ORDER` | nothing to attach to |
+| 409 | `ORDER_CHAT_MISMATCH` | that order is not this conversation's |
+| 409 | `AMBIGUOUS_ORDER` | several unpaid orders, no `orderNumber` — **resend with one** |
+| 409 | `ORDER_CANCELLED` / `ORDER_COMPLETED` / `ORDER_ALREADY_PAID` | order can no longer take a slip |
+| 409 | `PENDING_PROOF_EXISTS` | a slip is already awaiting review — claimed **only** on a PostgreSQL `23505` naming `payment_proofs_one_pending_per_order` |
+| 502 | `STORAGE_FAILED` / `INSERT_FAILED` | transient; safe to retry. Every other conflict or integrity failure (a bare 409, a different `23505`, FK/CHECK violations) lands here — never mislabelled as a pending proof |
+
+No raw database message, constraint name, or PostgreSQL code is ever returned to
+the caller. When storage succeeded but the insert failed, Atlas deletes the
+orphan object; if that cleanup itself fails it logs one line (bucket + HTTP
+status only) and **still returns the original error** — cleanup never masks the
+real failure.
+
+n8n downloads the Meta attachment with its own private Meta credential and
+forwards the **binary** here. It holds no Supabase credential and never writes
+storage or the database directly.
+
+## Order ↔ chat correlation
+
+`bot_sessions` already carries `platform`, `external_chat_id`, and the
+`order_id` stamped when the session was consumed at checkout — that is the whole
+correlation key, so nothing new was needed:
+
+1. `platform` **must** equal the submitted `channel`.
+2. `external_chat_id` **must** equal the submitted `externalChatId`.
+3. Candidate orders = those linked to that chat. If `orderNumber` was sent, it
+   must be in that set (else `ORDER_CHAT_MISMATCH`).
+4. Eligible = not cancelled, not completed, not already paid.
+5. Exactly one eligible order → attach. Zero → 404. **More than one → refuse
+   (`AMBIGUOUS_ORDER`); never guess, never attach to an older order.**
+
+Because n8n knows the order number from the conversation it is receipting,
+sending it makes step 5 deterministic even for a repeat customer.
+
+## Electronic-receipt payload
+
+`POST /api/automation/order-details` (existing, JWT-bound to the
+`order.created` event) already returns everything the receipt needs — order
+number, channel, order type, table number, status, payment status/method, the
+line items with quantity/unit price/line total, subtotal, delivery fee, total,
+created-at. The only addition is:
+
+- `data.paymentQrUrl` — the static QR image URL from `PAYMENT_QR_URL`, or
+  `null` when unset (then n8n supplies its own QR).
+
+Customer name/phone/address stay in that payload because the delivery flow
+needs them; the bot must only echo the fields it actually needs for the receipt.
+
+## Environment variables
+
+| Name | Scope | Purpose |
+| --- | --- | --- |
+| `PAYMENT_PROOF_SECRET` | server only | `x-proof-secret` for trusted intake. Fails closed when unset. |
+| `PAYMENT_PROOFS_BUCKET` | server only | Private storage bucket. Defaults to `payment-proofs`. |
+| `PAYMENT_QR_URL` | server only | Static QR image URL returned to n8n for the chat receipt. Public image link, optional. |
+
+Never prefix any of these with `VITE_` — no browser code reads them.
+
+## Deployment sequence (forward)
+
+1. **Create the private storage bucket** (once — see below).
+2. **Run the migration** `docs/sql/2026-07-27-payment-proof-review.sql` section
+   by section, starting with the read-only `§ 0` pre-check. Do not run `§ 1+`
+   until `§ 0` shows no unclassified legacy proof/order statuses.
+3. **Set env vars** in Vercel (`PAYMENT_PROOF_SECRET` at minimum).
+4. **Deploy the app** (this branch). Until the migration runs, the intake and
+   review routes fail safe (500) and no data is touched.
+5. Hard-refresh the staff/owner devices.
+
+SQL must precede the deploy (the RPCs, the one-pending index, the status CHECK,
+and the `paid_at` trigger must exist first). Rollback is the reverse — revert
+and redeploy the app, then run the migration's `§ 9`.
+
+⛔ **Keep the legacy n8n "Add Payment Proof" workflow DISABLED.** It inserts the
+old `received` status (now rejected by the `payment_proofs_status_check`), writes
+no `proof_file_path`, and satisfies none of the trusted-intake contract above.
+
+## Manual Supabase storage bucket setup
+
+Create the bucket by hand (never from code):
+
+1. Supabase → **Storage** → **New bucket**.
+2. Name: **`payment-proofs`** (or match `PAYMENT_PROOFS_BUCKET`).
+3. **Public: OFF**.
+4. Optional hardening: allowed MIME `image/jpeg,image/png,image/webp`, max size
+   **5 MB** (mirrors the server route).
+5. **No public policies.** The server uses the service-role key; staff preview
+   uses short-lived **signed URLs** (10-min TTL) generated server-side.
+
+## Verification
+
+- `npm run typecheck`
+- `npm run test:status-transitions` (transition guard + Cash-only mark-paid + idempotency)
+- `npm run test:payment-intake` (auth, chat↔order binding, ambiguity refusal, magic bytes, cleanup)
+- `npm run test:payment-proof` (review mapping incl. cancelled / already-paid)
+- `npm run test:order-details` (receipt payload contract)
+- `npm run test:dashboard` / `test:dashboard-parity` (no signing on poll; on-demand signed history; no storage path leaks)
+- `npm run build`
+- In-database: the migration's `§ 8` (schema) and `§ 8b` (**staging only**:
+  pending-status default + legacy-value rejection, Cash idempotency, `paid_at`
+  immutability trigger, approve-once, reject-then-resubmit, cancelled-order
+  refusal, **completed-order refusal for both decisions (T7b)**, already-paid
+  refusal, **stale-method → Transfer and replay stability (T7c)**, one-pending
+  guard).
+
+## Payment rules (operational summary)
+
+- Manual mark-paid is **Cash only**. The Transfer button does not exist and the
+  server rejects a Transfer request outright.
+- **Transfer requires an approved payment proof** — that is the only path that
+  writes `payment_method = 'Transfer'`, and it sets it explicitly rather than
+  preserving whatever was there.
+- **Completed orders cannot have proofs approved or rejected**; cancelled orders
+  cannot either. Neither the proof nor the payment fields change.
+- `paid_at` is stamped once and is immutable (DB trigger, documented admin
+  escape for repairs).
+- The legacy n8n **Add Payment Proof** workflow must remain **disabled**.
+- Legacy permanent `proof_url` values are **not returned by any active staff
+  API**.
+
+## Manual test checklist (after deploy, on a staging/test order)
+
+1. Place an order via a secure bot-session link; the confirmation shows the
+   order number only — no QR, no upload control, no second link.
+2. `curl` the intake endpoint without `x-proof-secret` → 401.
+3. Submit a slip for that chat with the correct `channel`/`externalChatId` →
+   `pending`; the staff dashboard shows the proof.
+4. Submit a second slip immediately → `PENDING_PROOF_EXISTS`.
+5. Staff drawer → **Reject** with a reason → order stays unpaid; submit a new
+   slip → accepted as a new pending proof; the rejected one stays in history.
+6. **Approve** → order flips to **Paid (Transfer)** once; approving again does
+   not move `paid_at`.
+7. Confirm the drawer's **Paid Cash** button is the only manual payment option
+   and a manual Transfer is impossible.
+8. Advance the order to **completed**, then try to approve and to reject a
+   pending slip → both refused; the proof stays pending and the order stays
+   unpaid.
+9. Advance an order through its type's flow; illegal jumps are refused.
+
+## Rollback
+
+Revert/redeploy the app commit FIRST, then run the migration's `§ 9` (drop the
+RPCs, the `paid_at` trigger, the proof constraints). If you roll the app back to
+the pre-Tuesday vocabulary you MUST drop `orders_status_check` (`§ 9.4`) or the
+old app cannot write `ready`/`done`. Stored slip images are retained; delete the
+bucket manually only if no proof is needed for audit.

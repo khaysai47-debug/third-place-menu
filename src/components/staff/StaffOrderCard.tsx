@@ -58,7 +58,9 @@ export function StaffOrderCard({ order, updating = false, onAdvance, onOpen, onC
   const collectPayment =
     order.orderType !== "dine_in" &&
     order.paymentStatus === "unpaid" &&
-    (order.status === "ready" || order.status === "out_for_delivery" || order.status === "delivered");
+    (order.status === "ready_for_pickup" ||
+      order.status === "out_for_delivery" ||
+      order.status === "delivered");
   const displayDeliveryFee = order.deliveryFee && order.deliveryFee > 0 ? order.deliveryFee : 30;
 
   return (

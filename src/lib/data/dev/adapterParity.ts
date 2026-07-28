@@ -299,7 +299,8 @@ export function summarizeCoverage(orders: StaffOrder[], expenses: Expense[]): Pa
   if (!orderTypes.dine_in) gaps.push("no dine-in order");
   if (!orderTypes.delivery) gaps.push("no delivery order");
   if (!statuses.cancelled) gaps.push("no cancelled order");
-  if (!statuses.done && !statuses.delivered) gaps.push("no finished (done/delivered) order");
+  if (!statuses.completed && !statuses.delivered)
+    gaps.push("no finished (completed/delivered) order");
   if (!paymentMethods.Cash) gaps.push("no cash-paid order");
   if (!paymentMethods.Transfer) gaps.push("no transfer-paid order");
   if (ordersWithProof === 0) gaps.push("no payment-proof order (gate requires ≥1 before the flip)");

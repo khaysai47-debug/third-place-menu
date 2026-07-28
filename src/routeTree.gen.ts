@@ -15,6 +15,8 @@ import { Route as MRouteImport } from './routes/m'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ApiStaffUpdateStatusRouteImport } from './routes/api.staff.update-status'
 import { Route as ApiStaffUpdateMenuAvailabilityRouteImport } from './routes/api.staff.update-menu-availability'
+import { Route as ApiStaffReviewPaymentProofRouteImport } from './routes/api.staff.review-payment-proof'
+import { Route as ApiStaffProofHistoryRouteImport } from './routes/api.staff.proof-history'
 import { Route as ApiStaffOrdersRouteImport } from './routes/api.staff.orders'
 import { Route as ApiStaffMarkPaidRouteImport } from './routes/api.staff.mark-paid'
 import { Route as ApiStaffExpensesRouteImport } from './routes/api.staff.expenses'
@@ -24,6 +26,7 @@ import { Route as ApiStaffAddExpenseRouteImport } from './routes/api.staff.add-e
 import { Route as ApiOrderSubmitSessionRouteImport } from './routes/api.order.submit-session'
 import { Route as ApiOrderSubmitRouteImport } from './routes/api.order.submit'
 import { Route as ApiMenuSessionResolveRouteImport } from './routes/api.menu-session.resolve'
+import { Route as ApiAutomationPaymentProofRouteImport } from './routes/api.automation.payment-proof'
 import { Route as ApiAutomationOrderDetailsRouteImport } from './routes/api.automation.order-details'
 import { Route as ApiAutomationBotSessionRouteImport } from './routes/api.automation.bot-session'
 
@@ -58,6 +61,17 @@ const ApiStaffUpdateMenuAvailabilityRoute =
     path: '/api/staff/update-menu-availability',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiStaffReviewPaymentProofRoute =
+  ApiStaffReviewPaymentProofRouteImport.update({
+    id: '/api/staff/review-payment-proof',
+    path: '/api/staff/review-payment-proof',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const ApiStaffProofHistoryRoute = ApiStaffProofHistoryRouteImport.update({
+  id: '/api/staff/proof-history',
+  path: '/api/staff/proof-history',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiStaffOrdersRoute = ApiStaffOrdersRouteImport.update({
   id: '/api/staff/orders',
   path: '/api/staff/orders',
@@ -103,6 +117,12 @@ const ApiMenuSessionResolveRoute = ApiMenuSessionResolveRouteImport.update({
   path: '/api/menu-session/resolve',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAutomationPaymentProofRoute =
+  ApiAutomationPaymentProofRouteImport.update({
+    id: '/api/automation/payment-proof',
+    path: '/api/automation/payment-proof',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiAutomationOrderDetailsRoute =
   ApiAutomationOrderDetailsRouteImport.update({
     id: '/api/automation/order-details',
@@ -122,6 +142,7 @@ export interface FileRoutesByFullPath {
   '/staff': typeof StaffRoute
   '/api/automation/bot-session': typeof ApiAutomationBotSessionRoute
   '/api/automation/order-details': typeof ApiAutomationOrderDetailsRoute
+  '/api/automation/payment-proof': typeof ApiAutomationPaymentProofRoute
   '/api/menu-session/resolve': typeof ApiMenuSessionResolveRoute
   '/api/order/submit': typeof ApiOrderSubmitRoute
   '/api/order/submit-session': typeof ApiOrderSubmitSessionRoute
@@ -131,6 +152,8 @@ export interface FileRoutesByFullPath {
   '/api/staff/expenses': typeof ApiStaffExpensesRoute
   '/api/staff/mark-paid': typeof ApiStaffMarkPaidRoute
   '/api/staff/orders': typeof ApiStaffOrdersRoute
+  '/api/staff/proof-history': typeof ApiStaffProofHistoryRoute
+  '/api/staff/review-payment-proof': typeof ApiStaffReviewPaymentProofRoute
   '/api/staff/update-menu-availability': typeof ApiStaffUpdateMenuAvailabilityRoute
   '/api/staff/update-status': typeof ApiStaffUpdateStatusRoute
 }
@@ -141,6 +164,7 @@ export interface FileRoutesByTo {
   '/staff': typeof StaffRoute
   '/api/automation/bot-session': typeof ApiAutomationBotSessionRoute
   '/api/automation/order-details': typeof ApiAutomationOrderDetailsRoute
+  '/api/automation/payment-proof': typeof ApiAutomationPaymentProofRoute
   '/api/menu-session/resolve': typeof ApiMenuSessionResolveRoute
   '/api/order/submit': typeof ApiOrderSubmitRoute
   '/api/order/submit-session': typeof ApiOrderSubmitSessionRoute
@@ -150,6 +174,8 @@ export interface FileRoutesByTo {
   '/api/staff/expenses': typeof ApiStaffExpensesRoute
   '/api/staff/mark-paid': typeof ApiStaffMarkPaidRoute
   '/api/staff/orders': typeof ApiStaffOrdersRoute
+  '/api/staff/proof-history': typeof ApiStaffProofHistoryRoute
+  '/api/staff/review-payment-proof': typeof ApiStaffReviewPaymentProofRoute
   '/api/staff/update-menu-availability': typeof ApiStaffUpdateMenuAvailabilityRoute
   '/api/staff/update-status': typeof ApiStaffUpdateStatusRoute
 }
@@ -161,6 +187,7 @@ export interface FileRoutesById {
   '/staff': typeof StaffRoute
   '/api/automation/bot-session': typeof ApiAutomationBotSessionRoute
   '/api/automation/order-details': typeof ApiAutomationOrderDetailsRoute
+  '/api/automation/payment-proof': typeof ApiAutomationPaymentProofRoute
   '/api/menu-session/resolve': typeof ApiMenuSessionResolveRoute
   '/api/order/submit': typeof ApiOrderSubmitRoute
   '/api/order/submit-session': typeof ApiOrderSubmitSessionRoute
@@ -170,6 +197,8 @@ export interface FileRoutesById {
   '/api/staff/expenses': typeof ApiStaffExpensesRoute
   '/api/staff/mark-paid': typeof ApiStaffMarkPaidRoute
   '/api/staff/orders': typeof ApiStaffOrdersRoute
+  '/api/staff/proof-history': typeof ApiStaffProofHistoryRoute
+  '/api/staff/review-payment-proof': typeof ApiStaffReviewPaymentProofRoute
   '/api/staff/update-menu-availability': typeof ApiStaffUpdateMenuAvailabilityRoute
   '/api/staff/update-status': typeof ApiStaffUpdateStatusRoute
 }
@@ -182,6 +211,7 @@ export interface FileRouteTypes {
     | '/staff'
     | '/api/automation/bot-session'
     | '/api/automation/order-details'
+    | '/api/automation/payment-proof'
     | '/api/menu-session/resolve'
     | '/api/order/submit'
     | '/api/order/submit-session'
@@ -191,6 +221,8 @@ export interface FileRouteTypes {
     | '/api/staff/expenses'
     | '/api/staff/mark-paid'
     | '/api/staff/orders'
+    | '/api/staff/proof-history'
+    | '/api/staff/review-payment-proof'
     | '/api/staff/update-menu-availability'
     | '/api/staff/update-status'
   fileRoutesByTo: FileRoutesByTo
@@ -201,6 +233,7 @@ export interface FileRouteTypes {
     | '/staff'
     | '/api/automation/bot-session'
     | '/api/automation/order-details'
+    | '/api/automation/payment-proof'
     | '/api/menu-session/resolve'
     | '/api/order/submit'
     | '/api/order/submit-session'
@@ -210,6 +243,8 @@ export interface FileRouteTypes {
     | '/api/staff/expenses'
     | '/api/staff/mark-paid'
     | '/api/staff/orders'
+    | '/api/staff/proof-history'
+    | '/api/staff/review-payment-proof'
     | '/api/staff/update-menu-availability'
     | '/api/staff/update-status'
   id:
@@ -220,6 +255,7 @@ export interface FileRouteTypes {
     | '/staff'
     | '/api/automation/bot-session'
     | '/api/automation/order-details'
+    | '/api/automation/payment-proof'
     | '/api/menu-session/resolve'
     | '/api/order/submit'
     | '/api/order/submit-session'
@@ -229,6 +265,8 @@ export interface FileRouteTypes {
     | '/api/staff/expenses'
     | '/api/staff/mark-paid'
     | '/api/staff/orders'
+    | '/api/staff/proof-history'
+    | '/api/staff/review-payment-proof'
     | '/api/staff/update-menu-availability'
     | '/api/staff/update-status'
   fileRoutesById: FileRoutesById
@@ -240,6 +278,7 @@ export interface RootRouteChildren {
   StaffRoute: typeof StaffRoute
   ApiAutomationBotSessionRoute: typeof ApiAutomationBotSessionRoute
   ApiAutomationOrderDetailsRoute: typeof ApiAutomationOrderDetailsRoute
+  ApiAutomationPaymentProofRoute: typeof ApiAutomationPaymentProofRoute
   ApiMenuSessionResolveRoute: typeof ApiMenuSessionResolveRoute
   ApiOrderSubmitRoute: typeof ApiOrderSubmitRoute
   ApiOrderSubmitSessionRoute: typeof ApiOrderSubmitSessionRoute
@@ -249,6 +288,8 @@ export interface RootRouteChildren {
   ApiStaffExpensesRoute: typeof ApiStaffExpensesRoute
   ApiStaffMarkPaidRoute: typeof ApiStaffMarkPaidRoute
   ApiStaffOrdersRoute: typeof ApiStaffOrdersRoute
+  ApiStaffProofHistoryRoute: typeof ApiStaffProofHistoryRoute
+  ApiStaffReviewPaymentProofRoute: typeof ApiStaffReviewPaymentProofRoute
   ApiStaffUpdateMenuAvailabilityRoute: typeof ApiStaffUpdateMenuAvailabilityRoute
   ApiStaffUpdateStatusRoute: typeof ApiStaffUpdateStatusRoute
 }
@@ -295,6 +336,20 @@ declare module '@tanstack/react-router' {
       path: '/api/staff/update-menu-availability'
       fullPath: '/api/staff/update-menu-availability'
       preLoaderRoute: typeof ApiStaffUpdateMenuAvailabilityRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/staff/review-payment-proof': {
+      id: '/api/staff/review-payment-proof'
+      path: '/api/staff/review-payment-proof'
+      fullPath: '/api/staff/review-payment-proof'
+      preLoaderRoute: typeof ApiStaffReviewPaymentProofRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/api/staff/proof-history': {
+      id: '/api/staff/proof-history'
+      path: '/api/staff/proof-history'
+      fullPath: '/api/staff/proof-history'
+      preLoaderRoute: typeof ApiStaffProofHistoryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/api/staff/orders': {
@@ -360,6 +415,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiMenuSessionResolveRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/automation/payment-proof': {
+      id: '/api/automation/payment-proof'
+      path: '/api/automation/payment-proof'
+      fullPath: '/api/automation/payment-proof'
+      preLoaderRoute: typeof ApiAutomationPaymentProofRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/automation/order-details': {
       id: '/api/automation/order-details'
       path: '/api/automation/order-details'
@@ -384,6 +446,7 @@ const rootRouteChildren: RootRouteChildren = {
   StaffRoute: StaffRoute,
   ApiAutomationBotSessionRoute: ApiAutomationBotSessionRoute,
   ApiAutomationOrderDetailsRoute: ApiAutomationOrderDetailsRoute,
+  ApiAutomationPaymentProofRoute: ApiAutomationPaymentProofRoute,
   ApiMenuSessionResolveRoute: ApiMenuSessionResolveRoute,
   ApiOrderSubmitRoute: ApiOrderSubmitRoute,
   ApiOrderSubmitSessionRoute: ApiOrderSubmitSessionRoute,
@@ -393,6 +456,8 @@ const rootRouteChildren: RootRouteChildren = {
   ApiStaffExpensesRoute: ApiStaffExpensesRoute,
   ApiStaffMarkPaidRoute: ApiStaffMarkPaidRoute,
   ApiStaffOrdersRoute: ApiStaffOrdersRoute,
+  ApiStaffProofHistoryRoute: ApiStaffProofHistoryRoute,
+  ApiStaffReviewPaymentProofRoute: ApiStaffReviewPaymentProofRoute,
   ApiStaffUpdateMenuAvailabilityRoute: ApiStaffUpdateMenuAvailabilityRoute,
   ApiStaffUpdateStatusRoute: ApiStaffUpdateStatusRoute,
 }

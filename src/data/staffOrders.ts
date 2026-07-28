@@ -88,7 +88,7 @@ export const MOCK_ORDERS: StaffOrder[] = [
     ],
     notes: null,
     totalPrice: 310,
-    status: "ready",
+    status: "ready_for_pickup",
     paymentStatus: "unpaid",
   },
   {
@@ -102,7 +102,7 @@ export const MOCK_ORDERS: StaffOrder[] = [
     ],
     notes: null,
     totalPrice: 280,
-    status: "done",
+    status: "completed",
     paymentStatus: "paid",
     paymentMethod: "Cash",
   },

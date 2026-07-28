@@ -14,7 +14,22 @@ const STAFF_ORDERS_API_URL = n8nWebhook("third-place-staff-orders");
 const UPDATE_STATUS_API_URL = n8nWebhook("third-place-update-order-status");
 const UPDATE_PAYMENT_API_URL = n8nWebhook("third-place-update-payment");
 
-export type StaffOrderStatus = "new" | "preparing" | "ready" | "out_for_delivery" | "delivered" | "done" | "cancelled";
+// FROZEN order-status vocabulary (Tuesday). Legal flows by order_type:
+//   dine_in:  new → accepted → preparing → completed
+//   pickup:   new → accepted → preparing → ready_for_pickup → completed
+//   delivery: new → accepted → preparing → out_for_delivery → delivered → completed
+// cancelled is reachable from any non-terminal state (via the cancel route);
+// completed and cancelled are terminal. The server-side guard in
+// api/_lib/staffOrderWrites.server.ts is authoritative; this mirrors it.
+export type StaffOrderStatus =
+  | "new"
+  | "accepted"
+  | "preparing"
+  | "ready_for_pickup"
+  | "out_for_delivery"
+  | "delivered"
+  | "completed"
+  | "cancelled";
 
 export type StaffOrderType = "dine_in" | "pickup" | "delivery";
 
@@ -56,23 +71,40 @@ export interface StaffOrder {
   /** ISO timestamp written by n8n when payment is recorded. */
   paidAt?: string;
   hasPaymentProof?: boolean;
+  /** Latest proof's row id — REQUIRED to approve/reject it (review route). */
+  paymentProofId?: string;
+  /** Short-lived signed URL for the latest proof image (server-generated). */
   paymentProofUrl?: string;
+  /** "pending" | "approved" | "rejected" (frozen). */
   paymentProofStatus?: string;
   paymentProofReceivedAt?: string;
+  /** Reason the latest proof was rejected — shown to staff and the customer. */
+  paymentProofRejectionReason?: string;
   cancellationReason?: string;
   cancelledAt?: string;
 }
 
-/** Returns the next status for an order, accounting for delivery's extended flow. */
+/**
+ * The single legal next status for an order, given its type — the FROZEN flow.
+ * Mirrors the authoritative server guard (staffOrderWrites.server.ts). Terminal
+ * states and any state with no successor return null.
+ */
 export function nextStaffOrderStatus(
   order: Pick<StaffOrder, "status" | "orderType">,
 ): StaffOrderStatus | null {
   switch (order.status) {
-    case "new": return "preparing";
-    case "preparing": return "ready";
-    case "ready": return order.orderType === "delivery" ? "out_for_delivery" : "done";
+    case "new": return "accepted";
+    case "accepted": return "preparing";
+    case "preparing":
+      return order.orderType === "delivery"
+        ? "out_for_delivery"
+        : order.orderType === "pickup"
+          ? "ready_for_pickup"
+          : "completed"; // dine_in goes straight to completed
+    case "ready_for_pickup": return "completed";
     case "out_for_delivery": return "delivered";
-    default: return null;
+    case "delivered": return "completed";
+    default: return null; // completed, cancelled
   }
 }
 
@@ -110,17 +142,21 @@ interface ApiOrder {
   }[];
 }
 
-const STATUSES: StaffOrderStatus[] = ["new", "preparing", "ready", "out_for_delivery", "delivered", "done", "cancelled"];
+const STATUSES: StaffOrderStatus[] = ["new", "accepted", "preparing", "ready_for_pickup", "out_for_delivery", "delivered", "completed", "cancelled"];
 const ORDER_TYPES: StaffOrderType[] = ["dine_in", "pickup", "delivery"];
 
-// Airtable's Status field calls it "completed"; the staff UI calls it "done".
-// Translate in both directions at this API boundary only — everything else
-// (components, transition map, tabs) keeps using "done".
+// n8n ROLLBACK PATH ONLY (both this file's reads and writes are dormant while
+// ACTIVE_READ_SOURCE / STAFF_ACTION_WRITE_SOURCE are "supabase"). Legacy
+// Airtable used "ready"/"completed" and had no "accepted"; translate at this
+// boundary so a rollback still round-trips the frozen vocabulary sanely.
 const API_STATUS_BY_UI: Partial<Record<StaffOrderStatus, string>> = {
-  done: "completed",
+  ready_for_pickup: "ready",
+  completed: "completed",
 };
 const UI_STATUS_BY_API: Record<string, StaffOrderStatus> = {
-  completed: "done",
+  completed: "completed",
+  done: "completed",
+  ready: "ready_for_pickup",
 };
 
 const asString = (v: unknown): string => (typeof v === "string" ? v : "");

@@ -28,6 +28,28 @@ the recommendation flips to B for that workflow.
 | 5 | Update Menu Availability API | `third-place-update-menu-availability` | POST | `menu_items` | is_available ← (availabilityStatus === "Available"). Match: item_code | ✅ per 2B discovery | none observed | No — schema gap resolved 2G-H (availability_status column; app route dual-writes both) | **A** — MOVED 2026-07-14 (runbook 2G-H); webhook stays alive as rollback | [x] |
 | 6 | Add Payment Proof API | `third-place-add-payment-proof` | POST | `payment_proofs` | order_id (orders.id UUID), proof_url, proof_file_path(def ""), source(def "manual-test"), status(def "received"), note(def "") | ✅ per 2B discovery | none today — but this IS the Phase 3 bot flow's write | n/a — not moving | **C — stays n8n permanently** (no app caller exists; verified) | [ ] |
 
+> **UPDATE 2026-07-28 (Tuesday payment-proof work).** The table above records
+> the 2B discovery as it stood and is left intact. Two rows are superseded
+> operationally:
+>
+> - **Row 6 — Add Payment Proof API: MUST BE DISABLED.** It inserts
+>   `status = "received"`, which the new `payment_proofs_status_check` rejects,
+>   writes a permanent public `proof_url`, and bypasses the trusted-intake
+>   contract. Proofs now arrive only via `POST /api/automation/payment-proof`
+>   (`x-proof-secret`), which resolves the order from the chat identity and
+>   writes a private `proof_file_path` with `status = "pending"`. Its "stays
+>   n8n permanently" classification no longer holds.
+> - **Row 3 — Update Payment API: superseded for Transfer.** Manual mark-paid is
+>   **Cash only** (`mark_order_paid_cash`); a Transfer becomes paid solely
+>   through `review_payment_proof` on an approved slip, and `paid_at` is
+>   immutable once stamped. A completed or cancelled order can have no proof
+>   approved *or* rejected.
+>
+> Legacy rows still holding a permanent public `proof_url` are never exposed by
+> the active staff APIs; the staff drawer shows "Legacy proof preview
+> unavailable" for them. Migrating those objects into the private bucket is
+> optional and manual.
+
 No other Third Place write workflows were found in the 2B discovery (the
 remaining three — Staff Orders, Get Expenses, Menu Availability — are READ
 workflows; the first two are already replaced by Supabase reads and retire in

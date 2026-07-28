@@ -15,6 +15,9 @@
     "test:order-details": "node scripts/test-order-details.mjs",
     "test:dashboard": "node scripts/test-staff-dashboard.mjs",
     "test:dashboard-parity": "node scripts/test-dashboard-parity.mjs",
+    "test:status-transitions": "node scripts/test-status-transitions.mjs",
+    "test:payment-proof": "node scripts/test-payment-proof.mjs",
+    "test:payment-intake": "node scripts/test-payment-intake.mjs",
     "test:supabase-auth": "node scripts/test-supabase-auth.mjs",
     "lint": "eslint .",
     "format": "prettier --write ."
