@@ -146,6 +146,69 @@ created-at. The only addition is:
 Customer name/phone/address stay in that payload because the delivery flow
 needs them; the bot must only echo the fields it actually needs for the receipt.
 
+## `payment.reviewed` — outbound review notification (Wednesday Phase 0)
+
+After staff approve or reject a slip, the customer is waiting in the chat, not
+on any Atlas page. Atlas sends **one** event to n8n so the bot can answer that
+thread. Implemented in `api/_lib/paymentReviewNotify.server.ts`, fired from the
+review route.
+
+**Contract** — `POST $N8N_PAYMENT_REVIEW_WEBHOOK_URL`
+
+```json
+{
+  "eventId": "<uuid v4>",
+  "eventType": "payment.reviewed",
+  "occurredAt": "<ISO-8601>",
+  "orderNumber": "TP-IG-…",
+  "channel": "instagram | messenger",
+  "externalChatId": "<PSID/IGSID>",
+  "decision": "approved | rejected",
+  "rejectionReason": "<exact staff reason> | null",
+  "paymentStatus": "paid | unpaid"
+}
+```
+
+Headers: `Authorization: Bearer <JWT>`, `Content-Type: application/json`,
+`x-atlas-event-id: <eventId>`.
+
+**Authentication.** The same short-lived HS256 JWT as the `order.created`
+bridge — issuer `atlas-order-bridge`, audience `n8n-order-automation`, 120 s
+lifetime, 5 s `nbf` backdate, `jti` = `eventId` — with `sub` and `eventType`
+both `payment.reviewed`. For the pilot it is signed with the **existing**
+`N8N_AUTOMATION_SECRET`, so the receiving webhook uses the same n8n JWT
+credential as the order bridge. n8n must check the JWT **and** that
+`sub` is `payment.reviewed` before acting.
+
+**Retry / idempotency.** Atlas delivery is **best-effort and not guaranteed**.
+There is no retry and no durable outbox: Atlas generates one event and makes
+one POST attempt (5 s timeout), so from the dispatcher the semantics are
+effectively **at-most-once per review attempt** — a lost event is lost, not
+redelivered. `eventId` is nonetheless the deduplication key and is bound three
+ways — the body field, the JWT `jti`, and the `x-atlas-event-id` header. **n8n
+must still deduplicate on `eventId`**, because a duplicate can still arrive
+from an external retry, a manual replay, or any retry behavior added later; a
+duplicate must never message the customer twice.
+
+**Best-effort, by design.** The event is built *after* `review_payment_proof`
+committed and is delivered on `waitUntil`, outside the staff response. A
+missing webhook URL, a missing secret, an unresolvable chat, a non-2xx, a
+timeout, or a network failure are all logged and otherwise ignored — none of
+them changes, delays, or reverses what staff saw. A lost notification means a
+customer waits for a human, never a wrong order state. Only a real state change
+notifies (`changed = true`); idempotent replays and failed reviews send nothing.
+
+**The chat is resolved server-side.** `order_number` → internal `order_id` →
+the single completed `bot_sessions` row for that order supplies `channel` and
+`externalChatId`. Neither is ever taken from the staff request. Counter/QR
+orders have no bot session, so nothing is sent.
+
+**No PII, no proof URL.** The payload carries identifiers and the decision
+only. It never contains `proof_file_path`, a storage bucket or object path, a
+signed or permanent proof URL, any Supabase id, customer name/phone/address, or
+money. Logs additionally never carry the chat id, the JWT, the secret, or the
+webhook URL; a non-2xx body is reduced to a redacted ≤120-char reason.
+
 ## Environment variables
 
 | Name | Scope | Purpose |
@@ -153,6 +216,8 @@ needs them; the bot must only echo the fields it actually needs for the receipt.
 | `PAYMENT_PROOF_SECRET` | server only | `x-proof-secret` for trusted intake. Fails closed when unset. |
 | `PAYMENT_PROOFS_BUCKET` | server only | Private storage bucket. Defaults to `payment-proofs`. |
 | `PAYMENT_QR_URL` | server only | Static QR image URL returned to n8n for the chat receipt. Public image link, optional. |
+| `N8N_PAYMENT_REVIEW_WEBHOOK_URL` | server only | Webhook receiving `payment.reviewed`. Unset → notification skipped, review unaffected. |
+| `N8N_AUTOMATION_SECRET` | server only | Existing order-bridge secret, **reused** to sign `payment.reviewed` for the pilot. |
 
 Never prefix any of these with `VITE_` — no browser code reads them.
 

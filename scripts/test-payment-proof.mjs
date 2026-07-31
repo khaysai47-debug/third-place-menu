@@ -36,9 +36,16 @@ const PROOF_ID = "cccccccc-dddd-eeee-ffff-000000000000";
 
 let bh;
 function reset() {
-  bh = { rpc: { ok: { proof_status: "approved", order_number: "TP-IG-1", payment_status: "Paid", changed: true } }, log: [] };
+  bh = {
+    rpc: { ok: { proof_status: "approved", order_number: "TP-IG-1", payment_status: "Paid", changed: true } },
+    log: [],
+    notified: [],
+  };
 }
 reset();
+
+const NOTIFY_HOOK = "https://n8n.invalid/webhook/atlas-payment-review-test";
+const ORDER_ID = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
 
 globalThis.fetch = async (url, init = {}) => {
   const u = String(url);
@@ -46,6 +53,16 @@ globalThis.fetch = async (url, init = {}) => {
   if (u.includes("/rest/v1/rpc/review_payment_proof")) {
     if (bh.rpc.error) return Response.json({ message: bh.rpc.error }, { status: 400 });
     return Response.json(bh.rpc.ok);
+  }
+  // Section E only — the notification path stays entirely unreachable while
+  // N8N_PAYMENT_REVIEW_WEBHOOK_URL is unset (sections A–D).
+  if (u.includes("/rest/v1/orders?")) return Response.json([{ id: ORDER_ID }]);
+  if (u.includes("/rest/v1/bot_sessions?")) {
+    return Response.json([{ platform: "instagram", external_chat_id: "17841400000000001" }]);
+  }
+  if (u === NOTIFY_HOOK) {
+    bh.notified.push(init);
+    return new Response("ok");
   }
   throw new Error(`unexpected fetch target: ${(init.method ?? "GET")} ${u}`);
 };
@@ -140,5 +157,129 @@ for (const decision of ["approve", "reject"]) {
   assert.equal(bh.log.length, 1, `completed order: ${decision} makes exactly one RPC call`);
   assert.ok(bh.log[0].includes("rpc/review_payment_proof"), "only the guarded RPC is called");
 }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   E. payment.reviewed NOTIFICATION — fired from the review route only after a
+      real state change, and never able to alter what staff got back.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+process.env.N8N_PAYMENT_REVIEW_WEBHOOK_URL = NOTIFY_HOOK;
+process.env.N8N_AUTOMATION_SECRET = "review-integration-secret";
+
+/** Runs one review and returns { status, json, notified }. */
+async function review(body, rpc) {
+  reset();
+  if (rpc) bh.rpc = rpc;
+  const response = await postReviewPaymentProof(reviewReq(body));
+  const parsed = await response.json();
+  // Delivery floats past the response on waitUntil — settle before asserting.
+  await new Promise((r) => setTimeout(r, 40));
+  return { status: response.status, json: parsed, notified: bh.notified };
+}
+
+// E1. A successful APPROVAL with changed=true notifies exactly once, and the
+//     response shape staff already parse is untouched.
+let out = await review(
+  { proofId: PROOF_ID, decision: "approve" },
+  { ok: { proof_status: "approved", order_number: "TP-IG-1", payment_status: "Paid", changed: true } },
+);
+assert.equal(out.status, 200, "approve still answers 200");
+assert.deepEqual(
+  Object.keys(out.json).sort(),
+  ["changed", "decision", "ok", "orderNumber", "paymentStatus", "proofStatus"],
+  "the review response shape is unchanged",
+);
+assert.equal(out.json.ok, true);
+assert.equal(out.json.decision, "approve");
+assert.equal(out.json.proofStatus, "approved");
+assert.equal(out.json.paymentStatus, "Paid", "approval still reports Paid");
+assert.equal(out.json.changed, true);
+assert.equal(out.notified.length, 1, "a changed approval notifies exactly once");
+let event = JSON.parse(out.notified[0].body);
+assert.equal(event.eventType, "payment.reviewed");
+assert.equal(event.decision, "approved");
+assert.equal(event.rejectionReason, null);
+assert.equal(event.paymentStatus, "paid");
+assert.equal(event.orderNumber, "TP-IG-1");
+// The review RPC is still called exactly once — the notification adds reads
+// and one POST, never a second write.
+assert.equal(
+  bh.log.filter((u) => u.includes("rpc/review_payment_proof")).length,
+  1,
+  "approval still marks Paid/Transfer through exactly ONE RPC call",
+);
+
+// E2. A successful REJECTION notifies once, with the exact validated reason,
+//     and leaves the order unpaid.
+out = await review(
+  { proofId: PROOF_ID, decision: "reject", reason: "  Wrong amount  " },
+  { ok: { proof_status: "rejected", order_number: "TP-IG-1", payment_status: "unpaid", changed: true } },
+);
+assert.equal(out.status, 200, "reject still answers 200");
+assert.equal(out.json.proofStatus, "rejected");
+assert.equal(out.json.paymentStatus, "unpaid", "rejection leaves the order unpaid");
+assert.equal(out.notified.length, 1, "a changed rejection notifies exactly once");
+event = JSON.parse(out.notified[0].body);
+assert.equal(event.decision, "rejected");
+assert.equal(event.rejectionReason, "Wrong amount", "the TRIMMED validated reason is notified");
+assert.equal(event.paymentStatus, "unpaid");
+
+// E3. changed=false (idempotent replay) notifies NOTHING — the customer must
+//     not be messaged twice for one decision.
+for (const decision of ["approve", "reject"]) {
+  out = await review(
+    { proofId: PROOF_ID, decision, ...(decision === "reject" ? { reason: "Wrong amount" } : {}) },
+    {
+      ok: {
+        proof_status: decision === "approve" ? "approved" : "rejected",
+        order_number: "TP-IG-1",
+        payment_status: decision === "approve" ? "Paid" : "unpaid",
+        changed: false,
+      },
+    },
+  );
+  assert.equal(out.status, 200, `${decision} replay still answers 200`);
+  assert.equal(out.json.changed, false);
+  assert.equal(out.notified.length, 0, `${decision} replay (changed=false) notifies nothing`);
+}
+
+// E4. A FAILED review never notifies — the RPC refused, so nothing happened.
+for (const code of ["PROOF_ORDER_CANCELLED", "PROOF_ORDER_COMPLETED", "ORDER_ALREADY_PAID", "PROOF_NOT_FOUND"]) {
+  out = await review({ proofId: PROOF_ID, decision: "reject", reason: "x" }, { error: code });
+  assert.notEqual(out.status, 200, `${code} is still an error`);
+  assert.equal(out.notified.length, 0, `${code}: a failed review never notifies`);
+}
+
+// E5. Refused BEFORE the RPC (bad auth/validation) → no RPC, no notification.
+reset();
+let res2 = await postReviewPaymentProof(reviewReq({ proofId: PROOF_ID, decision: "approve" }, ""));
+await new Promise((r) => setTimeout(r, 20));
+assert.equal(res2.status, 401);
+assert.equal(bh.notified.length, 0, "an unauthenticated review notifies nothing");
+
+reset();
+res2 = await postReviewPaymentProof(reviewReq({ proofId: PROOF_ID, decision: "reject" }));
+await new Promise((r) => setTimeout(r, 20));
+assert.equal(res2.status, 400);
+assert.equal(bh.notified.length, 0, "a reject with no reason notifies nothing");
+
+// E6. A failing webhook cannot change the staff response.
+const savedFetch = globalThis.fetch;
+globalThis.fetch = async (url, init) => {
+  if (String(url) === NOTIFY_HOOK) {
+    bh.notified.push(init);
+    throw new TypeError("fetch failed");
+  }
+  return savedFetch(url, init);
+};
+out = await review(
+  { proofId: PROOF_ID, decision: "approve" },
+  { ok: { proof_status: "approved", order_number: "TP-IG-1", payment_status: "Paid", changed: true } },
+);
+globalThis.fetch = savedFetch;
+assert.equal(out.status, 200, "a dead webhook leaves the review a 200");
+assert.equal(out.json.proofStatus, "approved", "the approval still stands");
+assert.equal(out.json.changed, true, "the state change is still reported");
+assert.equal(out.notified.length, 1, "the attempt was made and swallowed");
 
 console.log("test-payment-proof: all assertions passed");
