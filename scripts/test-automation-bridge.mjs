@@ -27,6 +27,11 @@ writeFileSync(path.join(outDir, "package.json"), '{"type":"module"}\n');
 const { buildOrderEventJwt, fireOrderAutomation, postCustomerOrder, postStaffAddOrder } =
   await import(pathToFileURL(path.resolve(outDir, "orderIntake.server.js")).href);
 
+// orderEventJwt.server.ts is emitted alongside as a dependency of the above.
+const { verifyOrderEventJwt, JWT_SUBJECTS, JWT_SUBJECT } = await import(
+  pathToFileURL(path.resolve(outDir, "orderEventJwt.server.js")).href
+);
+
 /* ── 1. JWT shape + independent verification ─────────────────────────────── */
 
 const b64uJson = (segment) => JSON.parse(Buffer.from(segment, "base64url").toString("utf8"));
@@ -55,6 +60,166 @@ const resign = (secret) =>
   createHmac("sha256", secret).update(`${parts[0]}.${parts[1]}`).digest("base64url");
 assert.equal(parts[2], resign("test-secret"), "signature must verify independently");
 assert.notEqual(parts[2], resign("wrong-secret"), "wrong secret must not verify");
+
+/* ── 1b. Typed event subjects: order.created AND payment.reviewed ─────────── */
+
+// The signer no longer hard-pins `sub` — it is the event's own eventType, and
+// the verifier accepts exactly ONE named subject (default order.created, so
+// every existing Phase 3B caller is unchanged).
+
+assert.deepEqual(
+  [...JWT_SUBJECTS],
+  ["order.created", "payment.reviewed"],
+  "the subject vocabulary is exactly these two",
+);
+assert.equal(JWT_SUBJECT, "order.created", "the default subject is unchanged");
+
+const SECRET = "test-secret";
+
+// order.created still signs AND verifies, with no expectedSubject argument.
+const created = verifyOrderEventJwt(buildOrderEventJwt(sampleEvent, SECRET), SECRET);
+assert.ok(created, "order.created must verify under the default subject");
+assert.equal(created.sub, "order.created");
+assert.equal(created.eventType, "order.created");
+assert.equal(created.jti, sampleEvent.eventId);
+assert.equal(
+  verifyOrderEventJwt(buildOrderEventJwt(sampleEvent, SECRET), SECRET, "order.created").sub,
+  "order.created",
+  "naming the default subject explicitly behaves identically",
+);
+
+// payment.reviewed signs and verifies under its own subject.
+const reviewedEvent = {
+  eventId: "99999999-8888-7777-6666-555555555555",
+  eventType: "payment.reviewed",
+  occurredAt: "2026-07-29T09:00:00.000Z",
+  orderNumber: "TP-IG-000009",
+  channel: "instagram",
+  externalChatId: "1234567890",
+  decision: "approved",
+  rejectionReason: null,
+  paymentStatus: "paid",
+};
+const reviewedJwt = buildOrderEventJwt(reviewedEvent, SECRET);
+const reviewedClaims = verifyOrderEventJwt(reviewedJwt, SECRET, "payment.reviewed");
+assert.ok(reviewedClaims, "payment.reviewed must verify under its own subject");
+assert.equal(reviewedClaims.sub, "payment.reviewed", "sub follows the event type");
+assert.equal(reviewedClaims.eventType, "payment.reviewed");
+assert.equal(reviewedClaims.jti, reviewedEvent.eventId, "jti is still the event id");
+// Shared registered-claim contract is untouched by the new subject.
+const rc = b64uJson(reviewedJwt.split(".")[1]);
+assert.equal(rc.iss, "atlas-order-bridge", "issuer unchanged for the new subject");
+assert.equal(rc.aud, "n8n-order-automation", "audience unchanged for the new subject");
+assert.equal(rc.exp - rc.iat, 120, "expiry window unchanged for the new subject");
+assert.equal(rc.iat - rc.nbf, 5, "nbf backdate unchanged for the new subject");
+
+/* ── 1c. A subject is never accepted just because it is well-formed ───────── */
+
+// Cross-subject confusion in BOTH directions.
+assert.equal(
+  verifyOrderEventJwt(reviewedJwt, SECRET),
+  null,
+  "a payment.reviewed token must NOT pass the default order.created check",
+);
+assert.equal(
+  verifyOrderEventJwt(reviewedJwt, SECRET, "order.created"),
+  null,
+  "wrong expected subject is rejected",
+);
+assert.equal(
+  verifyOrderEventJwt(buildOrderEventJwt(sampleEvent, SECRET), SECRET, "payment.reviewed"),
+  null,
+  "an order.created token must not satisfy a payment.reviewed expectation",
+);
+
+// An UNKNOWN expected subject can never widen verification — even a token
+// genuinely signed with that subject is refused.
+const forge = (claims, secret = SECRET) => {
+  const h = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
+  const p = Buffer.from(JSON.stringify(claims)).toString("base64url");
+  return `${h}.${p}.${createHmac("sha256", secret).update(`${h}.${p}`).digest("base64url")}`;
+};
+const now = Math.floor(Date.now() / 1000);
+const baseClaims = (over = {}) => ({
+  iss: "atlas-order-bridge",
+  aud: "n8n-order-automation",
+  sub: "order.created",
+  jti: sampleEvent.eventId,
+  iat: now,
+  nbf: now - 5,
+  exp: now + 120,
+  eventId: sampleEvent.eventId,
+  eventType: "order.created",
+  occurredAt: sampleEvent.occurredAt,
+  orderNumber: sampleEvent.orderNumber,
+  channel: "instagram",
+  ...over,
+});
+
+assert.ok(verifyOrderEventJwt(forge(baseClaims()), SECRET), "the forge helper builds a valid token");
+for (const unknown of ["order.updated", "", "*", "payment.reviewed ", null, undefined]) {
+  const token = forge(baseClaims({ sub: unknown, eventType: unknown }));
+  assert.equal(
+    verifyOrderEventJwt(token, SECRET, unknown),
+    null,
+    `unknown subject ${JSON.stringify(unknown)} is rejected even when expected`,
+  );
+}
+// undefined must still fall back to the DEFAULT rather than accept anything.
+assert.ok(
+  verifyOrderEventJwt(forge(baseClaims()), SECRET, undefined),
+  "an omitted expectedSubject falls back to order.created",
+);
+
+/* ── 1d. Existing claim protections are not weakened ──────────────────────── */
+
+for (const [label, claims, subject] of [
+  ["jti must equal eventId", baseClaims({ jti: "44444444-4444-4444-4444-444444444444" }), undefined],
+  ["eventType must match sub", baseClaims({ eventType: "payment.reviewed" }), undefined],
+  ["sub must match eventType", baseClaims({ sub: "payment.reviewed" }), "payment.reviewed"],
+  ["issuer is checked", baseClaims({ iss: "someone-else" }), undefined],
+  ["audience is checked", baseClaims({ aud: "someone-elses-n8n" }), undefined],
+  ["expired tokens are refused", baseClaims({ exp: now - 3600 }), undefined],
+  ["future nbf is refused", baseClaims({ nbf: now + 3600 }), undefined],
+  ["future iat is refused", baseClaims({ iat: now + 3600 }), undefined],
+  ["an unknown channel is refused", baseClaims({ channel: "sms" }), undefined],
+  ["an empty orderNumber is refused", baseClaims({ orderNumber: "" }), undefined],
+]) {
+  assert.equal(verifyOrderEventJwt(forge(claims), SECRET, subject), null, label);
+}
+// The same protections apply to the new subject — not just the old one.
+assert.equal(
+  verifyOrderEventJwt(
+    forge(baseClaims({ sub: "payment.reviewed", eventType: "payment.reviewed", exp: now - 3600 })),
+    SECRET,
+    "payment.reviewed",
+  ),
+  null,
+  "an expired payment.reviewed token is refused too",
+);
+assert.equal(
+  verifyOrderEventJwt(
+    forge(baseClaims({ sub: "payment.reviewed", eventType: "payment.reviewed", jti: "x" })),
+    SECRET,
+    "payment.reviewed",
+  ),
+  null,
+  "jti/eventId binding is enforced for payment.reviewed too",
+);
+assert.equal(
+  verifyOrderEventJwt(reviewedJwt, "wrong-secret", "payment.reviewed"),
+  null,
+  "the signature is still checked for the new subject",
+);
+assert.equal(
+  verifyOrderEventJwt(
+    forge(baseClaims({ sub: "payment.reviewed", eventType: "payment.reviewed" }), "wrong-secret"),
+    SECRET,
+    "payment.reviewed",
+  ),
+  null,
+  "a token signed with another secret never verifies",
+);
 
 /* ── 2. Intake behavior with stubbed fetch (Phase 3C: intake never dispatches) ── */
 

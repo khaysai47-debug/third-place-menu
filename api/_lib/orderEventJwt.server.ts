@@ -11,7 +11,18 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 export const JWT_ISSUER = "atlas-order-bridge";
 export const JWT_AUDIENCE = "n8n-order-automation";
-export const JWT_SUBJECT = "order.created";
+
+/**
+ * The signed event vocabulary. `sub` and `eventType` are always the SAME
+ * value — one of these two, never an arbitrary string. order.created is the
+ * Phase 3A/3C order bridge; payment.reviewed is the Wednesday payment-review
+ * notification. Issuer, audience, expiry, nbf, jti and algorithm are shared.
+ */
+export const JWT_SUBJECTS = ["order.created", "payment.reviewed"] as const;
+export type OrderEventSubject = (typeof JWT_SUBJECTS)[number];
+
+/** The original single-subject constant — still the verification default. */
+export const JWT_SUBJECT: OrderEventSubject = "order.created";
 
 /**
  * Verification clock tolerance in seconds — absorbs skew between Vercel and
@@ -49,27 +60,31 @@ export const AUTOMATION_DISPATCH_CHANNELS: readonly OrderEventChannel[] = [
 export const isAutomationChannel = (channel: OrderEventChannel): boolean =>
   AUTOMATION_DISPATCH_CHANNELS.includes(channel);
 
-export type OrderCreatedEvent = {
+/** Claims every signed event carries. Subject-specific events extend it. */
+export type OrderEventBase = {
   eventId: string;
-  eventType: "order.created";
+  eventType: OrderEventSubject;
   occurredAt: string;
   orderNumber: string;
   channel: OrderEventChannel;
 };
 
+export type OrderCreatedEvent = OrderEventBase & { eventType: "order.created" };
+
 /**
- * HS256 JWT over the order event, node:crypto only (no jwt dependency).
- * 120 s lifetime, 5 s nbf backdate for clock skew. Exported for the
- * standalone check (scripts/test-automation-bridge.mjs).
+ * HS256 JWT over the event, node:crypto only (no jwt dependency). 120 s
+ * lifetime, 5 s nbf backdate for clock skew. `sub` is the event's own
+ * eventType, so the two can never disagree. Exported for the standalone check
+ * (scripts/test-automation-bridge.mjs).
  */
-export function buildOrderEventJwt(event: OrderCreatedEvent, secret: string): string {
+export function buildOrderEventJwt(event: OrderEventBase, secret: string): string {
   const now = Math.floor(Date.now() / 1000);
   const header = Buffer.from(JSON.stringify({ alg: "HS256", typ: "JWT" })).toString("base64url");
   const payload = Buffer.from(
     JSON.stringify({
       iss: JWT_ISSUER,
       aud: JWT_AUDIENCE,
-      sub: JWT_SUBJECT,
+      sub: event.eventType,
       jti: event.eventId,
       iat: now,
       nbf: now - 5,
@@ -105,8 +120,18 @@ const isSeconds = (value: unknown): value is number =>
  * registered claims (iss/aud/sub, jti === eventId, exp/nbf/iat within
  * JWT_CLOCK_TOLERANCE_S), and event claim types. The caller still must bind
  * eventId + orderNumber to its request body.
+ *
+ * `expectedSubject` names the ONE event the caller accepts (default
+ * order.created — the existing Phase 3B contract). It is itself checked
+ * against JWT_SUBJECTS, so no caller can widen verification to an arbitrary
+ * string, and both `sub` and `eventType` must equal it.
  */
-export function verifyOrderEventJwt(token: string, secret: string): Record<string, unknown> | null {
+export function verifyOrderEventJwt(
+  token: string,
+  secret: string,
+  expectedSubject: OrderEventSubject = JWT_SUBJECT,
+): Record<string, unknown> | null {
+  if (!(JWT_SUBJECTS as readonly string[]).includes(expectedSubject)) return null;
   if (token.length === 0 || token.length > MAX_JWT_LENGTH) return null;
   const parts = token.split(".");
   if (parts.length !== 3) return null;
@@ -122,13 +147,13 @@ export function verifyOrderEventJwt(token: string, secret: string): Record<strin
 
   const claims = asJsonObject(payloadB64);
   if (!claims) return null;
-  if (claims.iss !== JWT_ISSUER || claims.aud !== JWT_AUDIENCE || claims.sub !== JWT_SUBJECT) {
+  if (claims.iss !== JWT_ISSUER || claims.aud !== JWT_AUDIENCE || claims.sub !== expectedSubject) {
     return null;
   }
   if (typeof claims.jti !== "string" || claims.jti.length === 0) return null;
   if (claims.jti !== claims.eventId) return null;
   if (typeof claims.orderNumber !== "string" || claims.orderNumber.length === 0) return null;
-  if (claims.eventType !== JWT_SUBJECT) return null;
+  if (claims.eventType !== expectedSubject) return null;
   if (typeof claims.occurredAt !== "string") return null;
   if (
     typeof claims.channel !== "string" ||

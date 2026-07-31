@@ -268,7 +268,9 @@ function redactSecrets(text: string): string {
     .replace(/[A-Za-z0-9+/=_-]{24,}/g, "[REDACTED]"); // long opaque / base64 / base64url blob
 }
 
-function sanitizeAutomationReason(raw: string | null): string {
+// Exported so paymentReviewNotify.server.ts reuses this exact redaction rather
+// than copying security logic that would then have to be kept in sync.
+export function sanitizeAutomationReason(raw: string | null): string {
   if (!raw) return "unknown";
   let text = raw;
   try {

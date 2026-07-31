@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { supabaseAdmin } from "./orderIntake.server.js";
+import { firePaymentReviewNotification } from "./paymentReviewNotify.server.js";
 import { checkStaffSecret, jsonError } from "./staffOrderWrites.server.js";
 import { supabaseAuthHeaders } from "./supabaseAuth.js";
 
@@ -55,10 +56,12 @@ export async function postReviewPaymentProof(request: Request): Promise<Response
 
   const body = reviewBody.safeParse(await request.json().catch(() => null));
   if (!body.success) return jsonError(400, "Invalid request body.");
-  const { proofId, decision, reviewer, reason } = body.data;
-  if (decision === "reject" && !reason?.trim()) {
+  const { proofId, decision, reviewer } = body.data;
+  if (decision === "reject" && !body.data.reason?.trim()) {
     return jsonError(400, "A rejection reason is required.");
   }
+  // The one validated reason string — sent to the RPC AND notified verbatim.
+  const reason = body.data.reason?.trim() || null;
 
   const admin = supabaseAdmin("Server is not configured for payment proofs.");
   if (!admin.ok) return admin.response;
@@ -73,7 +76,7 @@ export async function postReviewPaymentProof(request: Request): Promise<Response
         p_proof_id: proofId,
         p_decision: decision,
         p_reviewer: reviewer?.trim() || "Staff",
-        p_reason: reason?.trim() || null,
+        p_reason: reason,
       }),
     });
   } catch {
@@ -105,6 +108,19 @@ export async function postReviewPaymentProof(request: Request): Promise<Response
   console.log(
     `PAYMENT_PROOF review ${result.order_number ?? "?"} decision=${decision} proof=${result.proof_status} changed=${result.changed === true}`,
   );
+
+  // Tell the chat — best-effort, AFTER the RPC committed, never awaited. Only
+  // a real state change notifies: an idempotent replay (changed=false) must
+  // not message the customer twice, and a failed review never reaches here.
+  if (result.changed === true && typeof result.order_number === "string") {
+    firePaymentReviewNotification({
+      orderNumber: result.order_number,
+      decision,
+      rejectionReason: reason,
+      paymentStatus: result.payment_status ?? null,
+    });
+  }
+
   return Response.json(
     {
       ok: true,
