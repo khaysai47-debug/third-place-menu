@@ -3,6 +3,7 @@ import {
   postResolveSession,
   postSessionOrder,
 } from "./_lib/botSession.server.js";
+import { postSendChatMessage } from "./_lib/chatMessaging.server.js";
 import { postOrderDetails } from "./_lib/orderDetails.server.js";
 import { postCustomerOrder, postStaffAddOrder } from "./_lib/orderIntake.server.js";
 import { postAutomationPaymentProof } from "./_lib/paymentIntake.server.js";
@@ -72,6 +73,9 @@ const ROUTES: Record<string, Route> = {
   // Payment slips arrive from the CHAT, forwarded by n8n (x-proof-secret).
   // There is no public proof-upload endpoint, by design.
   "automation/payment-proof": { POST: postAutomationPaymentProof },
+  // App-owned customer messaging (x-chat-messaging-secret). NOT wired to n8n
+  // yet, and its Meta adapter is disabled — see chatMessaging.server.ts.
+  "automation/send-chat-message": { POST: postSendChatMessage },
 
   // ── Customer-facing ──────────────────────────────────────────────────────
   "menu-session/resolve": { POST: postResolveSession },

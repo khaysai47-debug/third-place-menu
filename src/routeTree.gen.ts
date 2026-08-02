@@ -26,6 +26,7 @@ import { Route as ApiStaffAddExpenseRouteImport } from './routes/api.staff.add-e
 import { Route as ApiOrderSubmitSessionRouteImport } from './routes/api.order.submit-session'
 import { Route as ApiOrderSubmitRouteImport } from './routes/api.order.submit'
 import { Route as ApiMenuSessionResolveRouteImport } from './routes/api.menu-session.resolve'
+import { Route as ApiAutomationSendChatMessageRouteImport } from './routes/api.automation.send-chat-message'
 import { Route as ApiAutomationPaymentProofRouteImport } from './routes/api.automation.payment-proof'
 import { Route as ApiAutomationOrderDetailsRouteImport } from './routes/api.automation.order-details'
 import { Route as ApiAutomationBotSessionRouteImport } from './routes/api.automation.bot-session'
@@ -117,6 +118,12 @@ const ApiMenuSessionResolveRoute = ApiMenuSessionResolveRouteImport.update({
   path: '/api/menu-session/resolve',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiAutomationSendChatMessageRoute =
+  ApiAutomationSendChatMessageRouteImport.update({
+    id: '/api/automation/send-chat-message',
+    path: '/api/automation/send-chat-message',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiAutomationPaymentProofRoute =
   ApiAutomationPaymentProofRouteImport.update({
     id: '/api/automation/payment-proof',
@@ -143,6 +150,7 @@ export interface FileRoutesByFullPath {
   '/api/automation/bot-session': typeof ApiAutomationBotSessionRoute
   '/api/automation/order-details': typeof ApiAutomationOrderDetailsRoute
   '/api/automation/payment-proof': typeof ApiAutomationPaymentProofRoute
+  '/api/automation/send-chat-message': typeof ApiAutomationSendChatMessageRoute
   '/api/menu-session/resolve': typeof ApiMenuSessionResolveRoute
   '/api/order/submit': typeof ApiOrderSubmitRoute
   '/api/order/submit-session': typeof ApiOrderSubmitSessionRoute
@@ -165,6 +173,7 @@ export interface FileRoutesByTo {
   '/api/automation/bot-session': typeof ApiAutomationBotSessionRoute
   '/api/automation/order-details': typeof ApiAutomationOrderDetailsRoute
   '/api/automation/payment-proof': typeof ApiAutomationPaymentProofRoute
+  '/api/automation/send-chat-message': typeof ApiAutomationSendChatMessageRoute
   '/api/menu-session/resolve': typeof ApiMenuSessionResolveRoute
   '/api/order/submit': typeof ApiOrderSubmitRoute
   '/api/order/submit-session': typeof ApiOrderSubmitSessionRoute
@@ -188,6 +197,7 @@ export interface FileRoutesById {
   '/api/automation/bot-session': typeof ApiAutomationBotSessionRoute
   '/api/automation/order-details': typeof ApiAutomationOrderDetailsRoute
   '/api/automation/payment-proof': typeof ApiAutomationPaymentProofRoute
+  '/api/automation/send-chat-message': typeof ApiAutomationSendChatMessageRoute
   '/api/menu-session/resolve': typeof ApiMenuSessionResolveRoute
   '/api/order/submit': typeof ApiOrderSubmitRoute
   '/api/order/submit-session': typeof ApiOrderSubmitSessionRoute
@@ -212,6 +222,7 @@ export interface FileRouteTypes {
     | '/api/automation/bot-session'
     | '/api/automation/order-details'
     | '/api/automation/payment-proof'
+    | '/api/automation/send-chat-message'
     | '/api/menu-session/resolve'
     | '/api/order/submit'
     | '/api/order/submit-session'
@@ -234,6 +245,7 @@ export interface FileRouteTypes {
     | '/api/automation/bot-session'
     | '/api/automation/order-details'
     | '/api/automation/payment-proof'
+    | '/api/automation/send-chat-message'
     | '/api/menu-session/resolve'
     | '/api/order/submit'
     | '/api/order/submit-session'
@@ -256,6 +268,7 @@ export interface FileRouteTypes {
     | '/api/automation/bot-session'
     | '/api/automation/order-details'
     | '/api/automation/payment-proof'
+    | '/api/automation/send-chat-message'
     | '/api/menu-session/resolve'
     | '/api/order/submit'
     | '/api/order/submit-session'
@@ -279,6 +292,7 @@ export interface RootRouteChildren {
   ApiAutomationBotSessionRoute: typeof ApiAutomationBotSessionRoute
   ApiAutomationOrderDetailsRoute: typeof ApiAutomationOrderDetailsRoute
   ApiAutomationPaymentProofRoute: typeof ApiAutomationPaymentProofRoute
+  ApiAutomationSendChatMessageRoute: typeof ApiAutomationSendChatMessageRoute
   ApiMenuSessionResolveRoute: typeof ApiMenuSessionResolveRoute
   ApiOrderSubmitRoute: typeof ApiOrderSubmitRoute
   ApiOrderSubmitSessionRoute: typeof ApiOrderSubmitSessionRoute
@@ -415,6 +429,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiMenuSessionResolveRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/automation/send-chat-message': {
+      id: '/api/automation/send-chat-message'
+      path: '/api/automation/send-chat-message'
+      fullPath: '/api/automation/send-chat-message'
+      preLoaderRoute: typeof ApiAutomationSendChatMessageRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/automation/payment-proof': {
       id: '/api/automation/payment-proof'
       path: '/api/automation/payment-proof'
@@ -447,6 +468,7 @@ const rootRouteChildren: RootRouteChildren = {
   ApiAutomationBotSessionRoute: ApiAutomationBotSessionRoute,
   ApiAutomationOrderDetailsRoute: ApiAutomationOrderDetailsRoute,
   ApiAutomationPaymentProofRoute: ApiAutomationPaymentProofRoute,
+  ApiAutomationSendChatMessageRoute: ApiAutomationSendChatMessageRoute,
   ApiMenuSessionResolveRoute: ApiMenuSessionResolveRoute,
   ApiOrderSubmitRoute: ApiOrderSubmitRoute,
   ApiOrderSubmitSessionRoute: ApiOrderSubmitSessionRoute,

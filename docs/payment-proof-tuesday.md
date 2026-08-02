@@ -209,11 +209,86 @@ signed or permanent proof URL, any Supabase id, customer name/phone/address, or
 money. Logs additionally never carry the chat id, the JWT, the secret, or the
 webhook URL; a non-2xx body is reduced to a redacted ≤120-char reason.
 
+## `POST /api/automation/send-chat-message` — the app-owned sender (2026-08-02)
+
+**Atlas now owns the shared customer-messaging endpoint.** It is the future
+single place any automation goes to speak to a customer, and it exists so the
+*idempotency decision* lives in PostgreSQL instead of in n8n.
+
+**Why it moved into Atlas.** n8n Cloud on this account cannot cap a workflow at
+concurrency 1, and an n8n Data Table offers no confirmed unique constraint and
+no atomic claim. "Look up, then insert" there can elect **two** owners for one
+`eventId` — which is how a customer gets told twice that their payment was
+rejected. A single `INSERT` against a `UNIQUE event_id` settles it: one row
+wins, everyone else gets SQLSTATE 23505 and sends nothing.
+
+**Status — nothing about this is live:**
+
+- The **Meta adapter is disabled** (`metaProvider.isConfigured()` returns
+  `false`). There is no Graph API call anywhere in `api/`, and enabling one is a
+  separate reviewed code change — not a variable that can flip in Production.
+- **n8n has not been connected.** No workflow calls this route.
+- **No Production environment variable was changed.**
+  `N8N_PAYMENT_REVIEW_WEBHOOK_URL` remains unset.
+- **No real message has been sent.**
+- **The migration exists but has NOT been applied** —
+  `docs/sql/2026-08-02-chat-message-dispatches.sql`. Atomic idempotency depends
+  entirely on that file's `UNIQUE event_id`; until it is applied the claim
+  insert fails and the endpoint fails closed.
+
+**Request** (server-to-server, `x-chat-messaging-secret`):
+
+```json
+{
+  "eventId": "<uuid v4>",
+  "orderNumber": "TP-IG-…",
+  "channel": "instagram | messenger",
+  "externalChatId": "<PSID/IGSID>",
+  "message": "<already-composed customer-safe text>"
+}
+```
+
+Exact keys only; unknown keys are refused, not stripped. The caller composes the
+text — this endpoint never writes, translates, or decorates a message.
+
+**Normalized response** — one shape for every dispatch outcome:
+
+```json
+{ "ok": true,  "provider": "meta", "messageRef": "<ref>", "errorClass": null, "status": "sent" }
+{ "ok": true,  "provider": "meta", "messageRef": "<ref|null>", "errorClass": null, "status": "duplicate" }
+{ "ok": true,  "provider": "meta", "messageRef": null, "errorClass": null, "status": "in_progress" }
+{ "ok": false, "provider": "meta", "messageRef": null, "errorClass": "rate_limited|outside_window|invalid_recipient|auth|other", "status": "needs_review" }
+```
+
+`401`/`400`/`500` are transport-level refusals with the usual generic error body
+(the request never became a dispatch). `503` carries the normalized shape when
+nothing was attempted because a dependency was down.
+
+**Idempotency.** `eventId` is the key. The insert *is* the claim; only the
+caller whose insert wins may invoke the provider. A duplicate reads the stored
+row and answers `duplicate` (already sent), `in_progress` (claim held), or
+`needs_review` (already parked for a human) — and sends nothing.
+
+**Outside-window and provider failures route to `needs_review`, and there is NO
+automatic retry.** A failed, throwing, or unknown-outcome send is recorded and
+handed to a human. If the send succeeded but the completion write did not, the
+row stays `processing`, so every later duplicate reads `in_progress` and the
+message can never go out twice — a lost completion write can only suppress a
+future send, never cause one. Manual staff messaging remains the fallback.
+
+**Privacy.** The dispatch row never holds the raw `externalChatId`, the message
+text, an Authorization header, a JWT, a secret, or a provider response body. It
+stores a **keyed** one-way `chat_ref` (HMAC over channel + chat id, keyed with
+`CHAT_MESSAGING_SECRET`, 16 hex chars) whose format CHECK makes writing a raw
+PSID impossible. Logs carry order number / event id / channel / `chat_ref` /
+state only.
+
 ## Environment variables
 
 | Name | Scope | Purpose |
 | --- | --- | --- |
 | `PAYMENT_PROOF_SECRET` | server only | `x-proof-secret` for trusted intake. Fails closed when unset. |
+| `CHAT_MESSAGING_SECRET` | server only | `x-chat-messaging-secret` for the app-owned sender; also keys `chat_ref`. Fails closed when unset. Not set anywhere yet. |
 | `PAYMENT_PROOFS_BUCKET` | server only | Private storage bucket. Defaults to `payment-proofs`. |
 | `PAYMENT_QR_URL` | server only | Static QR image URL returned to n8n for the chat receipt. Public image link, optional. |
 | `N8N_PAYMENT_REVIEW_WEBHOOK_URL` | server only | Webhook receiving `payment.reviewed`. Unset → notification skipped, review unaffected. |

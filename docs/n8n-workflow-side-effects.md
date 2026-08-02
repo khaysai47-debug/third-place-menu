@@ -50,6 +50,33 @@ the recommendation flips to B for that workflow.
 > unavailable" for them. Migrating those objects into the private bucket is
 > optional and manual.
 
+> **UPDATE 2026-08-02 (app-owned sender).** The audit above asks whether an n8n
+> workflow does anything besides the database write — customer messaging being
+> the side effect that matters most. That capability now has a home in the app:
+> **`POST /api/automation/send-chat-message`** (`api/_lib/chatMessaging.server.ts`).
+>
+> - **Atlas owns the shared sender endpoint.** Any future automation that needs
+>   to message a customer goes through it, so the idempotency decision is made
+>   by a PostgreSQL `UNIQUE event_id` rather than by an n8n Data Table, which
+>   offers no confirmed unique constraint and no atomic claim. Per-workflow
+>   concurrency 1 is unavailable on this n8n Cloud account, so a real send must
+>   never be driven directly from an n8n claim.
+> - **The Meta adapter is disabled** and no Graph API call exists in this
+>   repository. Enabling one is a separate reviewed change.
+> - **n8n is NOT connected to it.** No workflow calls the route, and
+>   `N8N_PAYMENT_REVIEW_WEBHOOK_URL` remains unset in Production.
+> - **No Production environment variable was changed and no real message has
+>   been sent.**
+> - **The migration `docs/sql/2026-08-02-chat-message-dispatches.sql` exists but
+>   has NOT been applied.** Until it is, the endpoint fails closed.
+> - Provider failures — including Meta's 24-hour messaging window — route to
+>   `needs_review`. **There is no automatic retry**; manual staff messaging
+>   remains the fallback.
+>
+> When a messaging workflow is eventually built in n8n, it must be added to the
+> table above with its side effect recorded, and it must call this endpoint
+> rather than Meta directly.
+
 No other Third Place write workflows were found in the 2B discovery (the
 remaining three — Staff Orders, Get Expenses, Menu Availability — are READ
 workflows; the first two are already replaced by Supabase reads and retire in
