@@ -98,9 +98,9 @@ if the 200 is slow.
 ## Sanitization
 
 A Messenger payload is customer data: message text, attachments, the sender
-PSID, the recipient Page ID. **None of it is logged, persisted, or forwarded.**
-The raw body lives only long enough to verify its signature and count its
-structure.
+PSID, the recipient Page ID. **None of it is logged or persisted**, and the
+only part ever forwarded is the sender PSID — see `externalChatId` below. The
+raw body lives only long enough to verify its signature and read its structure.
 
 The only shape that leaves the module:
 
@@ -111,9 +111,9 @@ The only shape that leaves the module:
   "entryCount": 2,
   "messagingEventCount": 3,
   "events": [                       // one record per messaging event, in order
-    { "category": "message",  "timestamp": 1754300000001 },
-    { "category": "postback", "timestamp": 1754300000002 },
-    { "category": "delivery", "timestamp": null }
+    { "category": "message",  "timestamp": 1754300000001, "externalChatId": "<psid>" },
+    { "category": "postback", "timestamp": 1754300000002, "externalChatId": "<psid>" },
+    { "category": "delivery", "timestamp": null,          "externalChatId": null }
   ],
   "receivedAt": "2026-08-04T09:00:00.000Z"
 }
@@ -124,22 +124,40 @@ The only shape that leaves the module:
   `other`, never a guess.
 - **timestamp** — `event.timestamp` only when it is a finite number, else
   `null`. Never `entry.time`, never derived.
+- **externalChatId** — `event.sender.id`, but only when it is a string matching
+  the repository's `EXTERNAL_CHAT_ID_PATTERN` (the same rule the bot-session
+  route applies); otherwise `null`. The key is always present, so the event
+  shape is fixed. Never coerced from a number, never falls back to
+  `recipient.id`.
 - **eventId** — `HMAC-SHA256(META_APP_SECRET, "atlas.metaevent.v1" ‖ 0x1F ‖
   body-digest)`, first 32 hex chars. **Deterministic**: Meta retries the
   identical body, so the identical id comes back and n8n can deduplicate on it.
   Keyed, so it discloses nothing about the payload; domain-separated, so it is
-  never equal to the signature Meta sent.
+  never equal to the signature Meta sent. The PSID plays no part in deriving it.
 
-The sanitizer reads only array lengths, the four discriminating keys, and one
-numeric field. It never touches `sender`, `recipient`, `message`, or
-`attachments`, so no identifier or content can reach the output even by
-accident. Below the object check it is deliberately tolerant — a missing or
-malformed `entry` / `messaging` array counts as zero rather than throwing,
-because the signature already proved the sender.
+### Why `externalChatId` is the one identifier that travels
+
+It names the conversation to answer. Strip it and n8n receives an event it
+cannot act on — there is no other way to address a reply. It is opaque and
+Page-scoped (meaningless to anyone but this Page), and it is bounded to exactly
+one destination: **the body of the forward to
+`N8N_MESSENGER_EVENTS_WEBHOOK_URL`, and nowhere else.**
+
+This receiver never logs it, never persists it, and never derives anything from
+it. Message text, the recipient Page ID, attachments and postback payloads stay
+stripped unconditionally — none of them is needed to reply.
+
+The sanitizer reads array lengths, the four discriminating keys, one numeric
+field, and `sender.id`. It never touches `recipient`, `message`,
+`postback.payload`, or `attachments`, so no Page id and no content can reach
+the output even by accident. Below the object check it is deliberately tolerant
+— a missing or malformed `entry` / `messaging` array counts as zero rather than
+throwing, because the signature already proved the sender.
 
 Log lines carry `event=<eventId> entries=<n> events=<n>` and a forward status.
-Never the body, a header, an identifier, a secret, or a `fetch` error message
-(those can carry the webhook hostname — only `error.name` is logged).
+Never the body, a header, an identifier — **including the PSID** — a secret, or
+a `fetch` error message (those can carry the webhook hostname; only
+`error.name` is logged).
 
 ## Forwarding
 

@@ -3,6 +3,7 @@ import process from "node:process";
 
 import { waitUntil } from "@vercel/functions";
 
+import { EXTERNAL_CHAT_ID_PATTERN } from "./botSession.server.js";
 import { secretMatches } from "./staffOrderWrites.server.js";
 
 // Server-only META MESSENGER CALLBACK — the app-owned webhook foundation.
@@ -33,10 +34,20 @@ import { secretMatches } from "./staffOrderWrites.server.js";
 //
 // PRIVACY RULE — THE POINT OF THIS MODULE. A Messenger payload is customer
 // data: message text, attachments, the sender PSID and the recipient Page ID.
-// NONE of it is logged, persisted, or forwarded. The raw body exists only long
-// enough to verify its signature and count its structure, and what leaves this
-// file is the SanitizedMessengerPayload below: counts, categories, timestamps.
-// If a field is not on that type, it does not exist downstream.
+// NONE of it is logged or persisted, and the only part ever forwarded is the
+// sender PSID, as `externalChatId` on each event. The raw body exists only long
+// enough to verify its signature and read its structure, and what leaves this
+// file is the SanitizedMessengerPayload below: counts, categories, timestamps,
+// and that one id. If a field is not on that type, it does not exist
+// downstream.
+//
+// WHY THE PSID IS THE ONE EXCEPTION: it names the conversation to answer, so
+// without it n8n receives an event it cannot act on. It is opaque and
+// Page-scoped (meaningless to anyone but this Page), it travels ONLY in the
+// body of the forward to N8N_MESSENGER_EVENTS_WEBHOOK_URL, and it appears in
+// NO log line, NO stored row, and NOT in the eventId derivation. Message text,
+// the recipient Page id, attachments and postback payloads remain stripped
+// unconditionally — they are not needed to reply.
 
 /** Meta's verification query fields. */
 const HUB_MODE = "hub.mode";
@@ -63,17 +74,32 @@ const EVENT_ID_DOMAIN = "atlas.metaevent.v1";
 export const EVENT_CATEGORIES = ["message", "postback", "delivery", "read", "other"] as const;
 export type MessengerEventCategory = (typeof EVENT_CATEGORIES)[number];
 
-/** One messaging event, reduced to shape. No sender, no recipient, no content. */
+/**
+ * One messaging event, reduced to shape plus the ONE identifier a reply needs.
+ * No recipient Page id, no message content, no attachments, no postback
+ * payload.
+ */
 export type SanitizedMessengerEvent = {
   category: MessengerEventCategory;
   /** event.timestamp when it is a finite number, else null. */
   timestamp: number | null;
+  /**
+   * The sender PSID — `event.sender.id` — when it is a string matching the
+   * repository's EXTERNAL_CHAT_ID_PATTERN, else null.
+   *
+   * WHY THIS ONE FIELD IS NOT STRIPPED: it names the conversation to answer.
+   * Without it n8n receives an event it cannot act on. It is opaque (a
+   * Page-scoped id, meaningless to anyone but this Page), it travels ONLY to
+   * N8N_MESSENGER_EVENTS_WEBHOOK_URL, and this module never logs, persists, or
+   * derives anything from it.
+   */
+  externalChatId: string | null;
 };
 
 /**
- * THE ONLY shape that leaves this module. Every key is structural: nothing
- * here can identify a person, a Page, or a conversation, and nothing here
- * carries message content.
+ * THE ONLY shape that leaves this module. Everything is structural except
+ * externalChatId above, which is the single opaque identifier a reply
+ * requires. Nothing here carries message content, a Page id, or attachments.
  */
 export type SanitizedMessengerPayload = {
   eventId: string;
@@ -154,15 +180,33 @@ function categorize(event: Record<string, unknown>): MessengerEventCategory {
 }
 
 /**
- * Reduces the parsed payload to structure. Returns null for anything that is
- * not a `page` object — the only object type this endpoint accepts.
+ * `event.sender.id` when it is a string matching the repository's
+ * EXTERNAL_CHAT_ID_PATTERN — the SAME validation the bot-session route applies
+ * to a chat id — else null. Never guesses, never falls back to
+ * `recipient.id`, never coerces a number.
+ *
+ * The pattern is reused rather than restated so that a chat id which would be
+ * refused everywhere else in the app cannot enter through the webhook.
+ */
+function senderChatId(event: Record<string, unknown>): string | null {
+  const sender = event.sender;
+  if (!isRecord(sender)) return null;
+  const id = sender.id;
+  return typeof id === "string" && EXTERNAL_CHAT_ID_PATTERN.test(id) ? id : null;
+}
+
+/**
+ * Reduces the parsed payload to structure plus the one identifier a reply
+ * needs. Returns null for anything that is not a `page` object — the only
+ * object type this endpoint accepts.
  *
  * Deliberately tolerant BELOW the object check: a missing or malformed entry /
  * messaging array counts as zero rather than throwing, because the signature
  * already proved the sender. Deliberately strict ABOUT what it emits: it reads
- * only array lengths, the four discriminating keys, and a numeric timestamp —
- * it never touches sender/recipient/message/attachments, so no identifier or
- * content can reach the returned object even by accident.
+ * array lengths, the four discriminating keys, a numeric timestamp, and
+ * `sender.id` — and nothing else. It never touches `recipient`, `message`,
+ * `postback.payload`, or `attachments`, so no Page id and no content can reach
+ * the returned object even by accident.
  */
 function sanitize(payload: unknown, eventId: string): SanitizedMessengerPayload | null {
   if (!isRecord(payload) || payload.object !== "page") return null;
@@ -173,13 +217,14 @@ function sanitize(payload: unknown, eventId: string): SanitizedMessengerPayload 
     const messaging = isRecord(entry) && Array.isArray(entry.messaging) ? entry.messaging : [];
     for (const event of messaging) {
       if (!isRecord(event)) {
-        events.push({ category: "other", timestamp: null });
+        events.push({ category: "other", timestamp: null, externalChatId: null });
         continue;
       }
       const at = event.timestamp;
       events.push({
         category: categorize(event),
         timestamp: typeof at === "number" && Number.isFinite(at) ? at : null,
+        externalChatId: senderChatId(event),
       });
     }
   }
@@ -322,6 +367,7 @@ export async function postMetaMessengerWebhook(request: Request): Promise<Respon
 export const __test = {
   categorize,
   sanitize,
+  senderChatId,
   SIGNATURE_HEADER,
   MAX_BODY_BYTES,
   FORWARD_TIMEOUT_MS,

@@ -8,8 +8,11 @@
 //     malformed, invalid, and an unset META_APP_SECRET all fail closed;
 //   - invalid JSON and any object other than "page" are refused;
 //   - the four event categories are counted across multiple entries;
-//   - the forward carries ONLY the approved sanitized keys — never message
-//     text, a PSID, a Page ID, an attachment URL, or a mid;
+//   - the forward carries ONLY the approved sanitized keys: structure, plus
+//     the sender PSID as externalChatId (the one identifier a reply needs,
+//     validated against EXTERNAL_CHAT_ID_PATTERN and null when it fails) —
+//     never message text, a Page ID, an attachment URL, a postback payload,
+//     a mid, or any raw array;
 //   - forwarding is skipped with no external request when the URL is unset, and
 //     a forward that fails, 500s, or times out still leaves Meta its 200;
 //   - no request ever reaches the Graph API and no customer message is sent;
@@ -327,8 +330,8 @@ for (const [event, category] of [
   assert.equal(sent.messagingEventCount, 1, `14. one ${category} event counted`);
   assert.deepEqual(
     sent.events,
-    [{ category, timestamp: event.timestamp }],
-    `14. a ${category} event is categorized with its timestamp`,
+    [{ category, timestamp: event.timestamp, externalChatId: PSID }],
+    `14. a ${category} event is categorized with its timestamp and sender`,
   );
 }
 
@@ -339,10 +342,16 @@ out = await deliver(
     timestamp: Number.NaN, // serializes to null
   }),
 );
+let sent = forwarded(out);
 assert.deepEqual(
-  forwarded(out).events.map((e) => e.timestamp),
+  sent.events.map((e) => e.timestamp),
   [null, null, null],
   "15. a non-numeric, absent, or non-finite timestamp becomes null",
+);
+assert.deepEqual(
+  sent.events.map((e) => e.externalChatId),
+  [null, null, null],
+  "15. an event with no sender carries a null externalChatId, never a guess",
 );
 
 // 16. Multiple entries and multiple events per entry are counted correctly.
@@ -356,7 +365,7 @@ out = await deliver({
     { id: PAGE_ID, time: 5 },
   ],
 });
-let sent = forwarded(out);
+sent = forwarded(out);
 assert.equal(sent.entryCount, 5, "16. every entry is counted");
 assert.equal(sent.messagingEventCount, 6, "16. every messaging event is counted");
 assert.equal(sent.events.length, 6, "16. one categorized record per messaging event");
@@ -366,15 +375,17 @@ assert.deepEqual(
   "16. categories keep entry and event order",
 );
 
-// 17. THE forwarding contract: only the approved keys, and nothing that could
-// identify a person, a Page, a conversation, or carry message content.
+// 17. THE forwarding contract: only the approved keys. The sender PSID is the
+// ONE identifier that travels — it names the conversation to answer, so
+// without it n8n has an event it cannot act on. Everything else that could
+// identify a Page or carry content stays stripped.
 out = await deliver(wrap(messageEvent, postbackEvent));
 sent = forwarded(out);
 assert.deepEqual(Object.keys(sent).sort(), APPROVED_KEYS, "17. only approved top-level keys");
 for (const event of sent.events) {
   assert.deepEqual(
     Object.keys(event).sort(),
-    ["category", "timestamp"],
+    ["category", "externalChatId", "timestamp"],
     "17. only approved per-event keys",
   );
 }
@@ -384,12 +395,27 @@ assert.match(sent.eventId, /^[0-9a-f]{32}$/, "17. eventId is an opaque hex refer
 assert.ok(!Number.isNaN(Date.parse(sent.receivedAt)), "17. receivedAt is a timestamp");
 
 const wire = out.calls[0].body;
-for (const secretish of SENSITIVE.filter((s) => s !== HOOK)) {
+assert.ok(wire.includes(PSID), "17. the sender PSID IS forwarded — a reply needs it");
+// Everything else sensitive is still absent. The PSID is excluded from this
+// list ON PURPOSE and is the only such exception in the whole file.
+for (const secretish of SENSITIVE.filter((s) => s !== HOOK && s !== PSID)) {
   assert.ok(!wire.includes(secretish), `17. the forwarded body must not contain "${secretish}"`);
 }
+assert.ok(!wire.includes(PAGE_ID), "17. the recipient Page ID is never forwarded");
+assert.ok(!wire.includes(TEXT), "17. message text is never forwarded");
+assert.ok(!wire.includes(ATTACHMENT_URL), "17. attachments are never forwarded");
+assert.ok(!wire.includes("ORDER_START"), "17. a postback payload is never forwarded");
 for (const key of ["sender", "recipient", "mid", "attachments", "text", "psid", "payload"]) {
   assert.ok(!wire.includes(key), `17. the forwarded body must not contain the key "${key}"`);
 }
+// Nothing raw survives: the forward is the sanitized object, not a passthrough.
+assert.ok(!wire.includes('"entry"'), "17. no raw entry array is forwarded");
+assert.ok(!wire.includes('"messaging"'), "17. no raw messaging array is forwarded");
+assert.equal(
+  wire.length < JSON.stringify(wrap(messageEvent, postbackEvent)).length,
+  true,
+  "17. the forward is a reduction of the payload, never a copy of it",
+);
 assert.equal(out.calls[0].method, "POST", "17. the forward is a POST");
 assert.equal(
   out.calls[0].headers["x-atlas-event-id"],
@@ -410,12 +436,81 @@ assert.ok(
   "18. eventId is not the request signature",
 );
 
+// 18b. The PSID is NOT part of the eventId derivation — that stays an HMAC
+// over the raw body digest, so the id remains opaque hex and can carry no
+// identifier of its own.
+assert.ok(!first.includes(PSID), "18b. eventId cannot contain the sender PSID");
+assert.match(first, /^[0-9a-f]{32}$/, "18b. eventId is still opaque hex");
+
 // 19. The sanitizer itself refuses anything that is not a page object.
 assert.equal(__test.sanitize({ object: "instagram" }, "id"), null);
 assert.equal(__test.sanitize("page", "id"), null);
 assert.equal(__test.categorize({ message: {} }), "message");
 assert.equal(__test.categorize({ delivery: {} }), "delivery");
 assert.equal(__test.categorize({}), "other");
+
+// 19b. The sender id is validated with the repository's EXTERNAL_CHAT_ID_PATTERN
+//      — the SAME rule the bot-session route applies — so a chat id refused
+//      everywhere else in the app cannot enter through the webhook. Anything
+//      that fails becomes null; nothing is ever guessed or coerced.
+for (const good of [PSID, "1", "a".repeat(128), "a.b_c-d", "17841400000000001"]) {
+  assert.equal(
+    __test.senderChatId({ sender: { id: good } }),
+    good,
+    `19b. a valid sender id is kept: ${good.slice(0, 12)}`,
+  );
+}
+
+for (const [event, why] of [
+  [{}, "no sender at all"],
+  [{ sender: null }, "a null sender"],
+  [{ sender: "24681357911131517" }, "a string sender"],
+  [{ sender: [{ id: PSID }] }, "an array sender"],
+  [{ sender: {} }, "a sender with no id"],
+  [{ sender: { id: 24_681_357_911_131_517 } }, "a numeric id — never coerced"],
+  [{ sender: { id: null } }, "a null id"],
+  [{ sender: { id: "" } }, "an empty id"],
+  [{ sender: { id: "has space" } }, "an id with a space"],
+  [{ sender: { id: "bad/slash" } }, "an id with a slash"],
+  [{ sender: { id: "a".repeat(129) } }, "an id one character over the maximum"],
+  [{ sender: { id: { toString: () => PSID } } }, "an object pretending to be an id"],
+]) {
+  assert.equal(__test.senderChatId(event), null, `19b. ${why} yields null`);
+}
+
+// It reads sender.id ONLY — never the recipient Page id as a fallback.
+assert.equal(
+  __test.senderChatId({ recipient: { id: PAGE_ID } }),
+  null,
+  "19b. the recipient Page ID is never used as a sender fallback",
+);
+assert.equal(
+  __test.senderChatId({ sender: { id: "bad/slash" }, recipient: { id: PAGE_ID } }),
+  null,
+  "19b. an invalid sender does not fall back to the Page ID either",
+);
+
+// End to end: an invalid sender forwards null rather than dropping the event
+// or omitting the key, so the event shape stays fixed for n8n.
+out = await deliver(
+  wrap(
+    envelope({ message: { text: TEXT } }),
+    { sender: { id: "bad/slash" }, recipient: { id: PAGE_ID }, message: {}, timestamp: 5 },
+    { recipient: { id: PAGE_ID }, read: {}, timestamp: 6 },
+  ),
+);
+sent = forwarded(out);
+assert.deepEqual(
+  sent.events.map((e) => e.externalChatId),
+  [PSID, null, null],
+  "19b. an invalid or missing sender forwards null, beside a valid one",
+);
+assert.equal(sent.messagingEventCount, 3, "19b. no event is dropped for a bad sender");
+for (const event of sent.events) {
+  assert.ok("externalChatId" in event, "19b. the key is always present, even when null");
+}
+assert.ok(!out.calls[0].body.includes(PAGE_ID), "19b. still no Page ID on the wire");
+assert.ok(!out.calls[0].body.includes("bad/slash"), "19b. a rejected id is not forwarded either");
 
 /* ══════════════════════════════════════════════════════════════════════════
    E. Forwarding behaviour (tests 20–22)
@@ -484,6 +579,9 @@ env({ verify: null });
 everyLog.push(...(await verify({ "hub.mode": "subscribe", "hub.challenge": CHALLENGE })).logs);
 
 assert.ok(everyLog.length > 0, "23. the paths under test do log something");
+// SENSITIVE still includes the PSID here, deliberately. The forward may carry
+// it (test 17); a LOG LINE never may. This is the assertion that keeps the one
+// forwarded identifier out of every log sink.
 for (const line of everyLog) {
   for (const secretish of SENSITIVE) {
     assert.ok(!line.includes(secretish), `23. a log line must not contain "${secretish}": ${line}`);
