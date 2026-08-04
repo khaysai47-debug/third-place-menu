@@ -29,6 +29,7 @@ import { Route as ApiMenuSessionResolveRouteImport } from './routes/api.menu-ses
 import { Route as ApiAutomationSendChatMessageRouteImport } from './routes/api.automation.send-chat-message'
 import { Route as ApiAutomationPaymentProofRouteImport } from './routes/api.automation.payment-proof'
 import { Route as ApiAutomationOrderDetailsRouteImport } from './routes/api.automation.order-details'
+import { Route as ApiAutomationMetaMessengerWebhookRouteImport } from './routes/api.automation.meta-messenger-webhook'
 import { Route as ApiAutomationBotSessionRouteImport } from './routes/api.automation.bot-session'
 
 const StaffRoute = StaffRouteImport.update({
@@ -136,6 +137,12 @@ const ApiAutomationOrderDetailsRoute =
     path: '/api/automation/order-details',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiAutomationMetaMessengerWebhookRoute =
+  ApiAutomationMetaMessengerWebhookRouteImport.update({
+    id: '/api/automation/meta-messenger-webhook',
+    path: '/api/automation/meta-messenger-webhook',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiAutomationBotSessionRoute = ApiAutomationBotSessionRouteImport.update({
   id: '/api/automation/bot-session',
   path: '/api/automation/bot-session',
@@ -148,6 +155,7 @@ export interface FileRoutesByFullPath {
   '/owner': typeof OwnerRoute
   '/staff': typeof StaffRoute
   '/api/automation/bot-session': typeof ApiAutomationBotSessionRoute
+  '/api/automation/meta-messenger-webhook': typeof ApiAutomationMetaMessengerWebhookRoute
   '/api/automation/order-details': typeof ApiAutomationOrderDetailsRoute
   '/api/automation/payment-proof': typeof ApiAutomationPaymentProofRoute
   '/api/automation/send-chat-message': typeof ApiAutomationSendChatMessageRoute
@@ -171,6 +179,7 @@ export interface FileRoutesByTo {
   '/owner': typeof OwnerRoute
   '/staff': typeof StaffRoute
   '/api/automation/bot-session': typeof ApiAutomationBotSessionRoute
+  '/api/automation/meta-messenger-webhook': typeof ApiAutomationMetaMessengerWebhookRoute
   '/api/automation/order-details': typeof ApiAutomationOrderDetailsRoute
   '/api/automation/payment-proof': typeof ApiAutomationPaymentProofRoute
   '/api/automation/send-chat-message': typeof ApiAutomationSendChatMessageRoute
@@ -195,6 +204,7 @@ export interface FileRoutesById {
   '/owner': typeof OwnerRoute
   '/staff': typeof StaffRoute
   '/api/automation/bot-session': typeof ApiAutomationBotSessionRoute
+  '/api/automation/meta-messenger-webhook': typeof ApiAutomationMetaMessengerWebhookRoute
   '/api/automation/order-details': typeof ApiAutomationOrderDetailsRoute
   '/api/automation/payment-proof': typeof ApiAutomationPaymentProofRoute
   '/api/automation/send-chat-message': typeof ApiAutomationSendChatMessageRoute
@@ -220,6 +230,7 @@ export interface FileRouteTypes {
     | '/owner'
     | '/staff'
     | '/api/automation/bot-session'
+    | '/api/automation/meta-messenger-webhook'
     | '/api/automation/order-details'
     | '/api/automation/payment-proof'
     | '/api/automation/send-chat-message'
@@ -243,6 +254,7 @@ export interface FileRouteTypes {
     | '/owner'
     | '/staff'
     | '/api/automation/bot-session'
+    | '/api/automation/meta-messenger-webhook'
     | '/api/automation/order-details'
     | '/api/automation/payment-proof'
     | '/api/automation/send-chat-message'
@@ -266,6 +278,7 @@ export interface FileRouteTypes {
     | '/owner'
     | '/staff'
     | '/api/automation/bot-session'
+    | '/api/automation/meta-messenger-webhook'
     | '/api/automation/order-details'
     | '/api/automation/payment-proof'
     | '/api/automation/send-chat-message'
@@ -290,6 +303,7 @@ export interface RootRouteChildren {
   OwnerRoute: typeof OwnerRoute
   StaffRoute: typeof StaffRoute
   ApiAutomationBotSessionRoute: typeof ApiAutomationBotSessionRoute
+  ApiAutomationMetaMessengerWebhookRoute: typeof ApiAutomationMetaMessengerWebhookRoute
   ApiAutomationOrderDetailsRoute: typeof ApiAutomationOrderDetailsRoute
   ApiAutomationPaymentProofRoute: typeof ApiAutomationPaymentProofRoute
   ApiAutomationSendChatMessageRoute: typeof ApiAutomationSendChatMessageRoute
@@ -450,6 +464,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAutomationOrderDetailsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/automation/meta-messenger-webhook': {
+      id: '/api/automation/meta-messenger-webhook'
+      path: '/api/automation/meta-messenger-webhook'
+      fullPath: '/api/automation/meta-messenger-webhook'
+      preLoaderRoute: typeof ApiAutomationMetaMessengerWebhookRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/automation/bot-session': {
       id: '/api/automation/bot-session'
       path: '/api/automation/bot-session'
@@ -466,6 +487,8 @@ const rootRouteChildren: RootRouteChildren = {
   OwnerRoute: OwnerRoute,
   StaffRoute: StaffRoute,
   ApiAutomationBotSessionRoute: ApiAutomationBotSessionRoute,
+  ApiAutomationMetaMessengerWebhookRoute:
+    ApiAutomationMetaMessengerWebhookRoute,
   ApiAutomationOrderDetailsRoute: ApiAutomationOrderDetailsRoute,
   ApiAutomationPaymentProofRoute: ApiAutomationPaymentProofRoute,
   ApiAutomationSendChatMessageRoute: ApiAutomationSendChatMessageRoute,

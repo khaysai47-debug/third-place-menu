@@ -4,6 +4,10 @@ import {
   postSessionOrder,
 } from "./_lib/botSession.server.js";
 import { postSendChatMessage } from "./_lib/chatMessaging.server.js";
+import {
+  getMetaMessengerWebhook,
+  postMetaMessengerWebhook,
+} from "./_lib/metaMessengerWebhook.server.js";
 import { postOrderDetails } from "./_lib/orderDetails.server.js";
 import { postCustomerOrder, postStaffAddOrder } from "./_lib/orderIntake.server.js";
 import { postAutomationPaymentProof } from "./_lib/paymentIntake.server.js";
@@ -69,6 +73,13 @@ const ROUTE_PARAM = "path";
 const ROUTES: Record<string, Route> = {
   // ── Automation (trusted server-to-server) ────────────────────────────────
   "automation/bot-session": { POST: postCreateBotSession },
+  // The Meta Messenger callback — the ONE URL Meta subscribes, answering both
+  // the GET verification handshake and the POST event deliveries. Its own
+  // authentication (verify token / x-hub-signature-256), not a repo secret.
+  "automation/meta-messenger-webhook": {
+    GET: getMetaMessengerWebhook,
+    POST: postMetaMessengerWebhook,
+  },
   "automation/order-details": { POST: postOrderDetails },
   // Payment slips arrive from the CHAT, forwarded by n8n (x-proof-secret).
   // There is no public proof-upload endpoint, by design.

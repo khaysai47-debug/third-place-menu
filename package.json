@@ -13,6 +13,7 @@
     "test:bridge": "node scripts/test-automation-bridge.mjs",
     "test:bot-session": "node scripts/test-bot-session.mjs",
     "test:chat-messaging": "node scripts/test-chat-messaging.mjs",
+    "test:meta-messenger-webhook": "node scripts/test-meta-messenger-webhook.mjs",
     "test:order-details": "node scripts/test-order-details.mjs",
     "test:dashboard": "node scripts/test-staff-dashboard.mjs",
     "test:dashboard-parity": "node scripts/test-dashboard-parity.mjs",
