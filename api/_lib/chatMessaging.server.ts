@@ -37,9 +37,12 @@ import { supabaseAuthHeaders } from "./supabaseAuth.js";
 // endpoint refuses every request (fails closed). No CORS headers: a browser has
 // no business here.
 //
-// THE CALLER COMPOSES THE TEXT. This module never builds, translates, or
-// decorates a message — it validates, claims, dispatches, and records. That
-// keeps reply wording in one place (the caller) instead of two.
+// THE CALLER COMPOSES THE MESSAGE. This module never builds, translates, or
+// decorates one — it validates, claims, dispatches, and records. That keeps
+// reply wording in one place (the caller) instead of two. Buttons are no
+// exception: their titles, payloads and URLs all come from the caller, and
+// this module transports them without knowing what any of them mean. Nothing
+// here interprets a postback payload — handling one is a separate change.
 //
 // NO AUTOMATIC RESEND, EVER. A failed or ambiguous send ends as needs_review
 // and waits for a human. Retrying a send whose outcome is unknown is the one
@@ -59,6 +62,26 @@ const SECRET_HEADER = "x-chat-messaging-secret";
  * built, and this endpoint is not a general messaging surface.
  */
 const MAX_MESSAGE_CHARS = 1_000;
+
+/**
+ * Button-template limits — Meta's own, not invented here. Exceeding any of
+ * them is a guaranteed Graph rejection, so they are enforced at the trust
+ * boundary where the answer is a clean 400, rather than after the claim where
+ * it would burn an eventId into needs_review.
+ */
+const MAX_BUTTON_TEXT_CHARS = 640;
+const MAX_BUTTON_TITLE_CHARS = 20;
+const MAX_BUTTONS = 3;
+
+/** URLs are foreign data even when the caller is trusted — bound the length. */
+const MAX_BUTTON_URL_CHARS = 2_000;
+
+/**
+ * Postback payloads are ATLAS vocabulary, not free text: a closed uppercase
+ * charset so a payload can never smuggle punctuation, whitespace, or a URL
+ * into a value that comes back to us on the webhook.
+ */
+const POSTBACK_PAYLOAD_PATTERN = /^[A-Z0-9_]{1,100}$/;
 
 /** Provider references are foreign data — bound what gets persisted. */
 const MAX_MESSAGE_REF_CHARS = 200;
@@ -93,13 +116,31 @@ const DISPATCH_STATES = ["processing", "sent", "needs_review"] as const;
 
 /* ── The provider adapter boundary ───────────────────────────────────────── */
 
+/**
+ * One button on a button template. Both shapes are EXACTLY Meta's, so the
+ * adapter forwards them without a second mapping step — one place to be wrong
+ * instead of two.
+ */
+export type ChatButton =
+  | { type: "postback"; title: string; payload: string }
+  | { type: "web_url"; title: string; url: string };
+
+/**
+ * What to say, as a discriminated union. "text" is a plain message; "buttons"
+ * is a Messenger button template. The tag is required on BOTH — there is no
+ * untagged form, so a caller can never be ambiguous about which it meant.
+ */
+export type ChatMessage =
+  | { type: "text"; text: string }
+  | { type: "buttons"; text: string; buttons: ChatButton[] };
+
 /** Exactly what a provider needs, and nothing else. No Supabase ids, no money. */
 export type ChatSendInput = {
   eventId: string;
   orderNumber: string;
   channel: ChatChannel;
   externalChatId: string;
-  message: string;
+  message: ChatMessage;
 };
 
 /**
@@ -218,6 +259,30 @@ function classifyGraphError(
 }
 
 /**
+ * The Meta `message` object for one ChatMessage — the ONLY place the two
+ * variants diverge. A text message is a plain `{ text }`; buttons become the
+ * button template attachment.
+ *
+ * The buttons are passed through because ChatButton is already byte-identical
+ * to Meta's button shape and both members were parsed with .strict(), so no
+ * unknown key can exist on one. Re-mapping them here would be a second place
+ * to get the same thing wrong.
+ */
+function graphMessage(message: ChatMessage): Record<string, unknown> {
+  if (message.type === "text") return { text: message.text };
+  return {
+    attachment: {
+      type: "template",
+      payload: {
+        template_type: "button",
+        text: message.text,
+        buttons: message.buttons,
+      },
+    },
+  };
+}
+
+/**
  * The real Messenger send. ONE request, no retry, ever.
  *
  * The token is read HERE, per call — never at module scope, never cached, and
@@ -247,7 +312,7 @@ async function sendMessenger(input: ChatSendInput): Promise<ChatSendResult> {
       body: JSON.stringify({
         recipient: { id: input.externalChatId },
         messaging_type: "RESPONSE",
-        message: { text: input.message },
+        message: graphMessage(input.message),
       }),
       signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
     });
@@ -321,19 +386,84 @@ export const metaProvider: ChatProvider = {
 // server-to-server contract, and a caller sending a field we do not understand
 // is a caller we do not understand. Every value is a primitive with a closed
 // shape, so a nested object or array fails its own type check first.
+/** Non-blank after trimming — whitespace is not a message and not a title. */
+const filled = (max: number) =>
+  z
+    .string()
+    .min(1)
+    .max(max)
+    .refine((value) => value.trim().length > 0);
+
+// Every button member is .strict() too: a caller sending `payload` on a
+// web_url button, or `url` on a postback, is refused rather than silently
+// stripped. That matters more here than elsewhere — a stripped `url` would
+// ship a button that goes nowhere.
+const postbackButton = z
+  .object({
+    type: z.literal("postback"),
+    title: filled(MAX_BUTTON_TITLE_CHARS),
+    payload: z.string().regex(POSTBACK_PAYLOAD_PATTERN),
+  })
+  .strict();
+
+const urlButton = z
+  .object({
+    type: z.literal("web_url"),
+    title: filled(MAX_BUTTON_TITLE_CHARS),
+    // HTTPS ONLY. A plain-http button in a customer thread is a downgrade we
+    // will not ship, and it also blocks javascript:/data: outright.
+    url: z.string().max(MAX_BUTTON_URL_CHARS).url().startsWith("https://"),
+  })
+  .strict();
+
+const chatMessage = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("text"), text: filled(MAX_MESSAGE_CHARS) }).strict(),
+  z
+    .object({
+      type: z.literal("buttons"),
+      text: filled(MAX_BUTTON_TEXT_CHARS),
+      buttons: z
+        .array(z.discriminatedUnion("type", [postbackButton, urlButton]))
+        .min(1)
+        .max(MAX_BUTTONS),
+    })
+    .strict(),
+]);
+
 const sendBody = z
   .object({
     eventId: z.string().regex(UUID_V4_PATTERN),
     orderNumber: z.string().regex(ORDER_NUMBER_PATTERN),
     channel: z.enum(CHAT_CHANNELS),
     externalChatId: z.string().regex(EXTERNAL_CHAT_ID_PATTERN),
-    message: z
-      .string()
-      .min(1)
-      .max(MAX_MESSAGE_CHARS)
-      .refine((value) => value.trim().length > 0),
+    message: chatMessage,
   })
-  .strict();
+  .strict()
+  // Button templates are a MESSENGER feature. Instagram has a different
+  // mechanism entirely, so a buttons message on any other channel is a
+  // contract error (400) — caught here rather than becoming a provider outcome
+  // that would consume an eventId.
+  .refine((body) => body.message.type !== "buttons" || body.channel === "messenger");
+
+/**
+ * Rebuilds the validated message field by field, for the same reason the rest
+ * of `input` is rebuilt (see handleSendChatMessage): the standalone check in
+ * scripts/test-chat-messaging.mjs compiles this module WITHOUT --strict, where
+ * zod's inferred members read as optional and will not satisfy ChatMessage.
+ * Do not "tidy" this back to a spread.
+ */
+function toChatMessage(parsed: z.infer<typeof chatMessage>): ChatMessage {
+  if (parsed.type === "text") return { type: "text", text: parsed.text };
+  return {
+    type: "buttons",
+    text: parsed.text,
+    buttons: parsed.buttons.map((button) =>
+      button.type === "postback"
+        ? { type: "postback", title: button.title, payload: button.payload }
+        : { type: "web_url", title: button.title, url: button.url },
+    ),
+  };
+}
 
 /* ── chat_ref — correlation without the chat id ──────────────────────────── */
 
@@ -600,7 +730,7 @@ export async function handleSendChatMessage(
     orderNumber: body.data.orderNumber,
     channel: body.data.channel,
     externalChatId: body.data.externalChatId,
-    message: body.data.message,
+    message: toChatMessage(body.data.message),
   };
 
   // BEFORE the claim, deliberately: a channel the provider cannot serve must
@@ -668,6 +798,11 @@ export const __test = {
   chatRef,
   fromExistingRow,
   classifyGraphError,
+  graphMessage,
+  MAX_BUTTONS,
+  MAX_BUTTON_TEXT_CHARS,
+  MAX_BUTTON_TITLE_CHARS,
+  POSTBACK_PAYLOAD_PATTERN,
   DISPATCH_STATES,
   SECRET_HEADER,
   ORDER_NUMBER_PATTERN,

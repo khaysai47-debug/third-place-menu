@@ -286,12 +286,59 @@ code/subcode and the mapped class — nothing else.
   "orderNumber": "TP-IG-…",
   "channel": "instagram | messenger",
   "externalChatId": "<PSID/IGSID>",
-  "message": "<already-composed customer-safe text>"
+  "message": { "type": "text", "text": "<already-composed customer-safe text>" }
 }
 ```
 
 Exact keys only; unknown keys are refused, not stripped. The caller composes the
-text — this endpoint never writes, translates, or decorates a message.
+message — this endpoint never writes, translates, or decorates one.
+
+⚠️ **`message` is an object, not a string** (2026-08-04). It is a strict
+discriminated union on `type`; the untagged string form is gone. Nothing calls
+this route yet, so no caller had to change.
+
+### `message.type: "buttons"` — the Messenger button template
+
+The second variant. **Messenger only** — a buttons message on any other channel
+is a `400`, refused before the claim.
+
+```json
+{
+  "type": "buttons",
+  "text": "Hi! Welcome to The Third Place 👋\nHow can we help you today?",
+  "buttons": [
+    { "type": "postback", "title": "Location",       "payload": "SHOW_LOCATION" },
+    { "type": "postback", "title": "Opening Hours",  "payload": "SHOW_OPENING_HOURS" },
+    { "type": "web_url",  "title": "Place an Order", "url": "<secure Atlas order link>" }
+  ]
+}
+```
+
+| Field | Rule |
+| --- | --- |
+| `text` | 1–640 chars, non-blank (Meta's button-template limit, tighter than the 1 000 for plain text) |
+| `buttons` | **1–3** entries (Meta's limit), in caller order |
+| `title` | 1–20 chars, non-blank |
+| `payload` | `^[A-Z0-9_]{1,100}$` — Atlas vocabulary, not free text |
+| `url` | **HTTPS only**, ≤ 2 000 chars, a valid URL |
+
+Both button shapes are `.strict()`: a `payload` on a `web_url` button, or a
+`url` on a `postback`, is refused rather than stripped — a stripped `url` would
+ship a button that goes nowhere.
+
+Sent to Meta as:
+
+```json
+{ "recipient": { "id": "<psid>" }, "messaging_type": "RESPONSE",
+  "message": { "attachment": { "type": "template", "payload": {
+    "template_type": "button", "text": "…", "buttons": [ … ] } } } }
+```
+
+**Transport only.** This endpoint does not interpret a postback payload and no
+button does anything yet — handling the returned postbacks is a separate
+change. The caller supplies every title, payload and URL; nothing is composed
+here. Titles, payloads and URLs are never logged and never persisted, exactly
+like message text.
 
 **Normalized response** — one shape for every dispatch outcome:
 

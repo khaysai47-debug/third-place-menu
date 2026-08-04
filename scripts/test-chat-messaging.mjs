@@ -9,7 +9,12 @@
 //     is NEVER automatically resent;
 //   - the raw chat id, the message text, the secret, and provider response
 //     bodies reach neither the dispatch row nor the logs;
-//   - the shipped Meta adapter is disabled and cannot send.
+//   - the real Messenger adapter sends exactly one correctly shaped Graph
+//     request and maps every documented Graph error to the closed vocabulary;
+//   - message is a strict discriminated union — "text" and "buttons" — and the
+//     button template is Meta's exact shape, capped at 3 buttons, with titles,
+//     postback payloads and HTTPS URLs all validated at the trust boundary;
+//   - no button title, payload, URL, recipient or token reaches a log or a row.
 // No network, no real secrets, no Supabase, no Meta.
 import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
@@ -145,12 +150,29 @@ const spy = () => {
   };
 };
 
+/** The plain-text message variant — the default for every existing test. */
+const textMessage = (text = MESSAGE) => ({ type: "text", text });
+
+/** The one greeting this commit supports, exactly as specified. */
+const GREETING = "Hi! Welcome to The Third Place 👋\nHow can we help you today?";
+const ORDER_LINK = "https://atlas.invalid/m#tok_notarealtoken";
+const buttonsMessage = (over = {}) => ({
+  type: "buttons",
+  text: GREETING,
+  buttons: [
+    { type: "postback", title: "Location", payload: "SHOW_LOCATION" },
+    { type: "postback", title: "Opening Hours", payload: "SHOW_OPENING_HOURS" },
+    { type: "web_url", title: "Place an Order", url: ORDER_LINK },
+  ],
+  ...over,
+});
+
 const body = (over = {}) => ({
   eventId: EVENT_ID,
   orderNumber: ORDER,
   channel: "instagram",
   externalChatId: CHAT_ID,
-  message: MESSAGE,
+  message: textMessage(),
   ...over,
 });
 
@@ -244,11 +266,29 @@ for (const bad of ["has space", "bad/slash", "", "a".repeat(129), null, ["178414
   assert.equal(p.calls.length, 0, "7. no provider call on a bad chat id");
 }
 
-for (const bad of ["", "   ", "x".repeat(1001), null, 7, { text: "hi" }]) {
+for (const bad of [
+  // The tag is REQUIRED — an untagged bare string is no longer a message.
+  MESSAGE,
+  "",
+  "   ",
+  null,
+  7,
+  { text: "hi" }, // no type
+  { type: "text" }, // no text
+  { type: "text", text: "" },
+  { type: "text", text: "   " },
+  { type: "text", text: "x".repeat(1001) },
+  { type: "text", text: 7 },
+  { type: "text", text: MESSAGE, extra: "nope" }, // strict
+  { type: "html", text: MESSAGE }, // unknown variant
+  { type: "text", text: MESSAGE, buttons: [] }, // buttons on a text message
+  [{ type: "text", text: MESSAGE }],
+]) {
   p = spy();
   out = await send(body({ message: bad }), p.ok);
-  assert.equal(out.status, 400, `8. message ${JSON.stringify(bad)?.slice(0, 20)} is rejected`);
+  assert.equal(out.status, 400, `8. message ${JSON.stringify(bad)?.slice(0, 30)} is rejected`);
   assert.equal(p.calls.length, 0, "8. no provider call on a bad message");
+  assert.equal(out.inserts.length, 0, "8. a bad message never claims an eventId");
 }
 
 // 8b. The order number must be a real Atlas order number — the TP- prefix is
@@ -548,7 +588,7 @@ const input = (over = {}) => ({
   orderNumber: ORDER,
   channel: "messenger",
   externalChatId: CHAT_ID,
-  message: MESSAGE,
+  message: textMessage(),
   ...over,
 });
 
@@ -899,5 +939,294 @@ await assert.rejects(
   "32. no Graph version can slip past the stub",
 );
 token(null);
+
+/* ══════════════════════════════════════════════════════════════════════════
+   G. THE BUTTON TEMPLATE — the one greeting, transported and nothing more
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* ── G1. The exact Graph body (test 33) ─────────────────────────────────── */
+
+token(TOKEN);
+f = await graphSend(graphJson(200, { message_id: MID }), { message: buttonsMessage() });
+assert.equal(bh.graphCalls.length, 1, "33. exactly one Graph request for a button template");
+assert.deepEqual(
+  JSON.parse(bh.graphCalls[0].body),
+  {
+    recipient: { id: CHAT_ID },
+    messaging_type: "RESPONSE",
+    message: {
+      attachment: {
+        type: "template",
+        payload: {
+          template_type: "button",
+          text: GREETING,
+          buttons: [
+            { type: "postback", title: "Location", payload: "SHOW_LOCATION" },
+            { type: "postback", title: "Opening Hours", payload: "SHOW_OPENING_HOURS" },
+            { type: "web_url", title: "Place an Order", url: ORDER_LINK },
+          ],
+        },
+      },
+    },
+  },
+  "33. the button template is Meta's exact shape, buttons in caller order",
+);
+assert.deepEqual(
+  f.value,
+  { ok: true, provider: "meta", messageRef: MID, errorClass: null, status: "sent" },
+  "33. a button send resolves through the same normalized contract",
+);
+
+// The text variant is untouched by any of this — same builder, same envelope.
+assert.deepEqual(
+  __test.graphMessage({ type: "text", text: MESSAGE }),
+  { text: MESSAGE },
+  "33. a text message is still a plain { text } message",
+);
+
+/* ── G2. The endpoint accepts the greeting end to end (test 34) ──────────── */
+
+reset({ graph: graphJson(200, { message_id: MID }) });
+r = await capture(() =>
+  handleSendChatMessage(
+    req(body({ channel: "messenger", message: buttonsMessage() })),
+    metaProvider,
+  ),
+);
+assert.equal(r.value.status, 200, "34. the greeting is accepted end to end");
+assert.deepEqual(await r.value.json(), {
+  ok: true,
+  provider: "meta",
+  messageRef: MID,
+  errorClass: null,
+  status: "sent",
+});
+assert.equal(bh.inserts.length, 1, "34. one atomic claim, exactly as for text");
+assert.equal(bh.patches.length, 1, "34. one terminal write");
+assert.equal(bh.graphCalls.length, 1, "34. one Graph call — no retry");
+
+/* ── G3. The button-array bounds (test 35) ──────────────────────────────── */
+
+const oneButton = { type: "postback", title: "Location", payload: "SHOW_LOCATION" };
+
+for (const count of [1, 2, 3]) {
+  reset({ graph: graphJson(200, { message_id: MID }) });
+  out = await send(
+    body({ channel: "messenger", message: buttonsMessage({ buttons: Array(count).fill(oneButton) }) }),
+    { isConfigured: () => true, send: async () => ({ ok: true, provider: "meta", messageRef: MID, errorClass: null, status: "sent" }) },
+  );
+  assert.equal(out.status, 200, `35. ${count} button(s) is accepted`);
+}
+
+for (const buttons of [[], Array(4).fill(oneButton), Array(10).fill(oneButton)]) {
+  p = spy();
+  out = await send(body({ channel: "messenger", message: buttonsMessage({ buttons }) }), p.ok);
+  assert.equal(out.status, 400, `35. ${buttons.length} buttons is rejected`);
+  assert.equal(p.calls.length, 0, `35. ${buttons.length} buttons never reaches the provider`);
+  assert.equal(out.inserts.length, 0, `35. ${buttons.length} buttons never claims an eventId`);
+}
+assert.equal(__test.MAX_BUTTONS, 3, "35. the cap is Meta's own limit of 3");
+
+/* ── G4. Title, payload and URL validation (test 36) ─────────────────────── */
+
+const rejects = async (buttons, why) => {
+  p = spy();
+  out = await send(
+    body({ channel: "messenger", message: buttonsMessage({ buttons: [buttons] }) }),
+    p.ok,
+  );
+  assert.equal(out.status, 400, `36. ${why} is rejected`);
+  assert.equal(p.calls.length, 0, `36. ${why} never reaches the provider`);
+  assert.equal(out.inserts.length, 0, `36. ${why} never claims an eventId`);
+};
+
+// Titles — 1..20, non-blank, string.
+await rejects({ type: "postback", title: "", payload: "OK" }, "an empty title");
+await rejects({ type: "postback", title: "   ", payload: "OK" }, "a blank title");
+await rejects({ type: "postback", title: "x".repeat(21), payload: "OK" }, "a 21-character title");
+await rejects({ type: "postback", title: 7, payload: "OK" }, "a numeric title");
+await rejects({ type: "postback", payload: "OK" }, "a missing title");
+
+// Postback payloads — the closed uppercase vocabulary.
+for (const payload of [
+  "",
+  "lowercase",
+  "Mixed_Case",
+  "HAS SPACE",
+  "HAS-DASH",
+  "HAS.DOT",
+  "HTTPS://EVIL.INVALID",
+  "A".repeat(101),
+  7,
+  null,
+]) {
+  await rejects(
+    { type: "postback", title: "Location", payload },
+    `payload ${JSON.stringify(payload)}`,
+  );
+}
+
+// URLs — HTTPS only, bounded, and a real URL.
+for (const url of [
+  "http://insecure.invalid/order",
+  "HTTPS://Upper.invalid/order",
+  "javascript:alert(1)",
+  "data:text/html,<script>",
+  "ftp://files.invalid/x",
+  "//protocol-relative.invalid",
+  "not a url",
+  "",
+  `https://atlas.invalid/${"x".repeat(2001)}`,
+  7,
+  null,
+]) {
+  await rejects({ type: "web_url", title: "Place an Order", url }, `url ${JSON.stringify(url)}`);
+}
+
+// The two button shapes do not bleed into each other, and neither takes extras.
+await rejects({ type: "postback", title: "Location", url: ORDER_LINK }, "a postback with a url");
+await rejects({ type: "web_url", title: "Order", payload: "SHOW_MENU" }, "a web_url with a payload");
+await rejects(
+  { type: "postback", title: "Location", payload: "SHOW_LOCATION", extra: "nope" },
+  "a postback with an extra key",
+);
+await rejects(
+  { type: "web_url", title: "Order", url: ORDER_LINK, extra: "nope" },
+  "a web_url with an extra key",
+);
+await rejects({ type: "phone_number", title: "Call", payload: "+1" }, "an unsupported button type");
+await rejects({ title: "Location", payload: "SHOW_LOCATION" }, "a button with no type");
+await rejects("SHOW_LOCATION", "a bare string button");
+
+// The buttons message itself is strict too.
+for (const message of [
+  { type: "buttons", buttons: [oneButton] }, // no text
+  { type: "buttons", text: "", buttons: [oneButton] },
+  { type: "buttons", text: "   ", buttons: [oneButton] },
+  { type: "buttons", text: "x".repeat(641), buttons: [oneButton] },
+  { type: "buttons", text: GREETING }, // no buttons
+  { type: "buttons", text: GREETING, buttons: oneButton }, // not an array
+  { type: "buttons", text: GREETING, buttons: [oneButton], extra: "nope" },
+]) {
+  p = spy();
+  out = await send(body({ channel: "messenger", message }), p.ok);
+  assert.equal(out.status, 400, `36. ${JSON.stringify(message).slice(0, 40)} is rejected`);
+  assert.equal(p.calls.length, 0, "36. a malformed buttons message never reaches the provider");
+}
+assert.equal(__test.MAX_BUTTON_TEXT_CHARS, 640, "36. the text cap is Meta's template limit");
+assert.equal(__test.MAX_BUTTON_TITLE_CHARS, 20, "36. the title cap is Meta's limit");
+assert.equal(__test.POSTBACK_PAYLOAD_PATTERN.test("SHOW_LOCATION"), true);
+assert.equal(__test.POSTBACK_PAYLOAD_PATTERN.test("SHOW_OPENING_HOURS"), true);
+
+/* ── G5. Buttons are Messenger-only, and Instagram never sends (test 37) ─── */
+
+p = spy();
+out = await send(body({ channel: "instagram", message: buttonsMessage() }), p.ok);
+assert.equal(out.status, 400, "37. a buttons message on Instagram is a contract error");
+assert.equal(p.calls.length, 0, "37. it never reaches the provider");
+assert.equal(out.inserts.length, 0, "37. and never claims an eventId");
+
+// …and with the REAL provider it cannot reach Meta either, by two independent
+// gates: the schema above, and isConfigured refusing Instagram before the claim.
+token(TOKEN);
+reset({ graph: graphJson(200, { message_id: MID }) });
+r = await capture(() =>
+  handleSendChatMessage(req(body({ channel: "instagram", message: buttonsMessage() })), metaProvider),
+);
+assert.equal(bh.graphCalls.length, 0, "37. Instagram makes no Graph call with buttons either");
+assert.equal(bh.inserts.length, 0, "37. and consumes no eventId");
+assert.equal(metaProvider.isConfigured("instagram"), "other", "37. Instagram is still unconfigured");
+
+/* ── G6. A claimed-elsewhere button send never reaches Meta (test 38) ────── */
+
+for (const existing of [{ state: "sent", message_ref: MID }, { state: "processing" }]) {
+  reset({ claim: "conflict", existing, graph: graphJson(200, { message_id: MID }) });
+  r = await capture(() =>
+    handleSendChatMessage(
+      req(body({ channel: "messenger", message: buttonsMessage() })),
+      metaProvider,
+    ),
+  );
+  assert.equal(r.value.status, 200, `38. a ${existing.state} duplicate answers from the row`);
+  assert.equal(bh.graphCalls.length, 0, `38. a ${existing.state} duplicate makes NO Graph call`);
+  assert.equal(bh.patches.length, 0, `38. a ${existing.state} duplicate writes nothing`);
+}
+
+/* ── G7. Nothing from a button leaks to a log or a row (test 39) ─────────── */
+
+const BUTTON_SECRETS = [
+  GREETING,
+  "Hi! Welcome to The Third Place",
+  ORDER_LINK,
+  "tok_notarealtoken",
+  "SHOW_LOCATION",
+  "SHOW_OPENING_HOURS",
+  "Place an Order",
+  "Opening Hours",
+  CHAT_ID,
+  TOKEN,
+];
+
+const buttonLogs = [];
+let buttonRows = [];
+for (const respond of [
+  graphJson(200, { message_id: MID }),
+  graphJson(200, {}),
+  graphJson(400, {
+    error: {
+      code: 10,
+      error_subcode: 2018278,
+      message: `Outside window sending "${GREETING}" with ${ORDER_LINK} to ${CHAT_ID}`,
+    },
+  }),
+  graphJson(429, { error: { code: 4, message: `SHOW_LOCATION ${ORDER_LINK}` } }),
+  () => {
+    throw new TypeError(`connect ECONNREFUSED ${ORDER_LINK} ${TOKEN}`);
+  },
+  () => new Response(`<html>${GREETING}</html>`, { status: 500 }),
+]) {
+  buttonLogs.push(...(await graphSend(respond, { message: buttonsMessage() })).logs);
+  reset({ graph: respond });
+  buttonLogs.push(
+    ...(
+      await capture(() =>
+        handleSendChatMessage(
+          req(body({ channel: "messenger", message: buttonsMessage() })),
+          metaProvider,
+        ),
+      )
+    ).logs,
+  );
+  buttonRows = buttonRows.concat(bh.inserts, bh.patches);
+}
+
+assert.ok(buttonLogs.length > 0, "39. the button paths do log something");
+for (const line of buttonLogs) {
+  for (const secretish of BUTTON_SECRETS) {
+    assert.ok(!line.includes(secretish), `39. a log line must not contain "${secretish}": ${line}`);
+  }
+  assert.ok(!line.includes("template"), "39. no template body fragment is logged");
+  assert.ok(!line.includes("<html>"), "39. no raw response body is logged");
+  assert.ok(!line.includes("ECONNREFUSED"), "39. no transport error message is logged");
+}
+
+const buttonWritten = JSON.stringify(buttonRows);
+assert.ok(buttonRows.length > 0, "39. rows were written on these paths");
+for (const secretish of BUTTON_SECRETS) {
+  assert.ok(!buttonWritten.includes(secretish), `39. "${secretish}" is never persisted`);
+}
+assert.ok(
+  buttonWritten.includes(__test.chatRef("messenger", CHAT_ID, SECRET)),
+  "39. the keyed chat_ref is still what correlates the row",
+);
+
+// Nothing in this module interprets a payload — it only transports it.
+assert.ok(
+  !readFileSync("api/_lib/chatMessaging.server.ts", "utf8").includes("SHOW_LOCATION"),
+  "39. no button payload is hard-coded in the module — the caller composes them",
+);
+
+token(null);
+reset();
 
 console.log("test-chat-messaging: all assertions passed");
