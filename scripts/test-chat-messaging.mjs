@@ -52,6 +52,8 @@ function reset(over = {}) {
     inserts: [],
     reads: [],
     patches: [],
+    graph: null, // armed only by section F — see the fetch stub
+    graphCalls: [],
     ...over,
   };
 }
@@ -70,6 +72,14 @@ const conflict = () =>
 globalThis.fetch = async (url, init = {}) => {
   const u = String(url);
   const method = (init.method ?? "GET").toUpperCase();
+  // The Graph API is reachable ONLY when a test explicitly arms bh.graph
+  // (section F). Everywhere else a Meta call is a hard failure, which is what
+  // proves the mock-provider tests never touch the network.
+  if (u.startsWith("https://graph.facebook.com/")) {
+    if (!bh.graph) throw new Error(`unexpected Graph API call: ${method} ${u}`);
+    bh.graphCalls.push({ url: u, method, headers: init.headers, body: init.body, init });
+    return bh.graph();
+  }
   if (!u.includes("/rest/v1/chat_message_dispatches")) {
     throw new Error(`unexpected fetch target: ${method} ${u}`);
   }
@@ -507,36 +517,387 @@ for (const line of everyLog) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
-   F. The shipped adapter is disabled — it cannot send from this commit
+   F. THE REAL META ADAPTER — Messenger only, one call, never retried
    ══════════════════════════════════════════════════════════════════════════ */
 
-assert.equal(metaProvider.isConfigured(), false, "the Meta adapter ships disabled");
-assert.deepEqual(
-  await metaProvider.send({
-    eventId: EVENT_ID,
-    orderNumber: ORDER,
-    channel: "instagram",
-    externalChatId: CHAT_ID,
-    message: MESSAGE,
-  }),
-  { ok: false, provider: "meta", messageRef: null, errorClass: "auth", status: "needs_review" },
-  "the disabled adapter answers needs_review and reaches no network",
+const TOKEN = "EAAtest-page-access-token-not-a-real-one";
+const MID = "mid.$cAAJsjkOoSExhbCdefGhIjKlMnOp";
+
+/** Runs fn with console captured; returns its value and every logged line. */
+async function capture(fn) {
+  const logs = [];
+  const origLog = console.log;
+  const origErr = console.error;
+  console.log = (...a) => logs.push(a.join(" "));
+  console.error = (...a) => logs.push(a.join(" "));
+  try {
+    return { value: await fn(), logs };
+  } finally {
+    console.log = origLog;
+    console.error = origErr;
+  }
+}
+
+const token = (value) => {
+  if (value === null) delete process.env.META_PAGE_ACCESS_TOKEN;
+  else process.env.META_PAGE_ACCESS_TOKEN = value;
+};
+
+const input = (over = {}) => ({
+  eventId: EVENT_ID,
+  orderNumber: ORDER,
+  channel: "messenger",
+  externalChatId: CHAT_ID,
+  message: MESSAGE,
+  ...over,
+});
+
+/** One direct adapter call against an armed Graph response. */
+async function graphSend(respond, over = {}) {
+  reset({ graph: respond });
+  return capture(() => metaProvider.send(input(over)));
+}
+
+const graphJson = (status, payload) => () => Response.json(payload, { status });
+
+/* ── F1. Configuration gating (tests 20–21) ──────────────────────────────── */
+
+token(null);
+assert.equal(
+  metaProvider.isConfigured("messenger"),
+  "auth",
+  "20. Messenger is unconfigured without a Page token, and says why",
+);
+token(TOKEN);
+assert.equal(
+  metaProvider.isConfigured("messenger"),
+  true,
+  "20. Messenger is configured once the Page token exists",
 );
 
-reset();
-const origErr = console.error;
-console.error = () => {};
-const bound = await postSendChatMessage(req(body()));
-console.error = origErr;
-assert.equal(bound.status, 503, "the bound route answers 503 while the provider is disabled");
-assert.deepEqual(await bound.json(), {
+// 21. Instagram is NEVER configured — token or no token. It must not look
+//     serviceable, and its class is "other" (unimplemented), not "auth".
+for (const value of [TOKEN, null]) {
+  token(value);
+  assert.equal(
+    metaProvider.isConfigured("instagram"),
+    "other",
+    "21. Instagram never appears configured",
+  );
+}
+
+/* ── F2. Instagram never reaches the network (test 22) ───────────────────── */
+
+token(TOKEN);
+// Armed Graph stub + a direct send: if the adapter called out, bh.graphCalls
+// would record it. It must not, even on this bypass path.
+let f = await graphSend(graphJson(200, { message_id: MID }), { channel: "instagram" });
+assert.deepEqual(
+  f.value,
+  { ok: false, provider: "meta", messageRef: null, errorClass: "other", status: "needs_review" },
+  "22. a direct Instagram send answers needs_review/other",
+);
+assert.equal(bh.graphCalls.length, 0, "22. Instagram makes no Graph API call");
+
+// Through the endpoint with the REAL provider: refused before the claim, so no
+// eventId is consumed and it stays replayable when Instagram lands.
+reset({ graph: graphJson(200, { message_id: MID }) });
+let r = await capture(() => handleSendChatMessage(req(body({ channel: "instagram" })), metaProvider));
+assert.equal(r.value.status, 503, "22. the endpoint refuses Instagram");
+assert.deepEqual(await r.value.json(), {
   ok: false,
   provider: "meta",
   messageRef: null,
-  errorClass: "auth",
+  errorClass: "other",
   status: "needs_review",
 });
-assert.equal(bh.inserts.length, 0, "a disabled provider never consumes the eventId");
-assert.equal(bh.patches.length, 0, "a disabled provider writes nothing");
+assert.equal(bh.graphCalls.length, 0, "22. no Graph call for Instagram");
+assert.equal(bh.inserts.length, 0, "22. Instagram consumes no eventId");
+assert.equal(bh.patches.length, 0, "22. Instagram writes nothing");
+
+// Same for Messenger with no token: refused before the claim, class "auth".
+token(null);
+reset({ graph: graphJson(200, { message_id: MID }) });
+r = await capture(() => handleSendChatMessage(req(body({ channel: "messenger" })), metaProvider));
+assert.equal(r.value.status, 503, "22. an unset Page token refuses the send");
+assert.equal((await r.value.json()).errorClass, "auth", "22. and reports it as auth");
+assert.equal(bh.graphCalls.length, 0, "22. no Graph call without a token");
+assert.equal(bh.inserts.length, 0, "22. no token consumes no eventId");
+
+/* ── F3. The exact Graph request (test 23) ───────────────────────────────── */
+
+token(TOKEN);
+f = await graphSend(graphJson(200, { recipient_id: CHAT_ID, message_id: MID }));
+assert.equal(bh.graphCalls.length, 1, "23. exactly one Graph request");
+const call = bh.graphCalls[0];
+
+assert.equal(call.method, "POST", "23. the Send API is a POST");
+assert.match(__test.GRAPH_API_VERSION, /^v\d+\.\d+$/, "23. the API version is pinned and dated");
+assert.equal(
+  call.url,
+  `https://graph.facebook.com/${__test.GRAPH_API_VERSION}/me/messages`,
+  "23. the URL is the pinned-version /me/messages endpoint",
+);
+assert.equal(call.url, __test.GRAPH_SEND_URL, "23. and it is the module's one constant");
+assert.deepEqual(
+  Object.keys(call.headers).sort(),
+  ["Authorization", "Content-Type"],
+  "23. exactly two headers — no token in a query parameter, no extras",
+);
+assert.equal(call.headers.Authorization, `Bearer ${TOKEN}`, "23. bearer auth");
+assert.equal(call.headers["Content-Type"], "application/json", "23. JSON content type");
+assert.ok(!call.url.includes(TOKEN), "23. the token is never in the URL");
+assert.deepEqual(
+  JSON.parse(call.body),
+  {
+    recipient: { id: CHAT_ID },
+    messaging_type: "RESPONSE",
+    message: { text: MESSAGE },
+  },
+  "23. the body is exactly the agreed Send API shape",
+);
+assert.ok(call.init.signal, "23. the request carries an abort signal");
+assert.equal(__test.SEND_TIMEOUT_MS, 10_000, "23. the send timeout is 10000 ms");
+
+/* ── F4. Success requires a real message id (tests 24–25) ────────────────── */
+
+assert.deepEqual(
+  f.value,
+  { ok: true, provider: "meta", messageRef: MID, errorClass: null, status: "sent" },
+  "24. a 2xx with a message id is a send, and carries the mid as messageRef",
+);
+
+// 25. AMBIGUOUS 2xx — no id, empty id, wrong type, or a body that is not JSON.
+//     Meta may or may not have delivered it, so it is needs_review, never a
+//     success and never a resend.
+for (const [respond, why] of [
+  [graphJson(200, {}), "no message_id"],
+  [graphJson(200, { message_id: "" }), "an empty message_id"],
+  [graphJson(200, { message_id: 12345 }), "a non-string message_id"],
+  [graphJson(200, { message_id: null }), "a null message_id"],
+  [graphJson(200, { recipient_id: CHAT_ID }), "only a recipient_id"],
+  [() => new Response("<html>not json</html>", { status: 200 }), "a non-JSON 2xx body"],
+  [() => new Response(null, { status: 204 }), "an empty 2xx body"],
+]) {
+  f = await graphSend(respond);
+  assert.deepEqual(
+    f.value,
+    { ok: false, provider: "meta", messageRef: null, errorClass: "other", status: "needs_review" },
+    `25. ${why} is ambiguous → needs_review/other`,
+  );
+  assert.equal(bh.graphCalls.length, 1, `25. ${why} is not retried`);
+}
+
+/* ── F5. Every normalized error mapping (test 26) ────────────────────────── */
+
+const MAPPINGS = [
+  [429, {}, "rate_limited", "HTTP 429"],
+  [403, { error: { code: 4 } }, "rate_limited", "code 4 — app request limit"],
+  [403, { error: { code: 32 } }, "rate_limited", "code 32 — page request limit"],
+  [400, { error: { code: 613 } }, "rate_limited", "code 613 — API rate limit"],
+  [400, { error: { code: 10, error_subcode: 2018278 } }, "outside_window", "24-hour window closed"],
+  [400, { error: { code: 100, error_subcode: 2018001 } }, "invalid_recipient", "no matching user"],
+  [400, { error: { code: 551 } }, "invalid_recipient", "code 551 — person unavailable"],
+  [400, { error: { code: 230 } }, "invalid_recipient", "code 230 — cannot message user"],
+  [401, {}, "auth", "HTTP 401"],
+  [400, { error: { code: 190 } }, "auth", "code 190 — invalid/expired token"],
+  [400, { error: { code: 102 } }, "auth", "code 102 — session expired"],
+  [403, { error: { code: 200 } }, "auth", "code 200 — permission error"],
+  [403, { error: { code: 10 } }, "auth", "code 10 — no permission for this action"],
+  [400, { error: { code: 10, error_subcode: 2018065 } }, "auth", "dev mode — testers only"],
+  [500, {}, "other", "HTTP 500 with no code"],
+  [503, {}, "other", "HTTP 503 with no code"],
+  [400, { error: { code: 999_999 } }, "other", "an unknown code is never guessed"],
+  [400, { error: { code: 100 } }, "other", "a bare code 100 is not assumed to be a recipient error"],
+  [400, {}, "other", "a 4xx with no error object at all"],
+];
+
+for (const [status, payload, expected, why] of MAPPINGS) {
+  f = await graphSend(graphJson(status, payload));
+  assert.deepEqual(
+    f.value,
+    {
+      ok: false,
+      provider: "meta",
+      messageRef: null,
+      errorClass: expected,
+      status: "needs_review",
+    },
+    `26. ${why} → ${expected}`,
+  );
+  assert.equal(bh.graphCalls.length, 1, `26. ${why} is attempted exactly once — no retry`);
+}
+
+// The classifier is also exercised directly, so the ordering rules that only
+// matter for overlapping codes are pinned independently of any HTTP status.
+assert.equal(
+  __test.classifyGraphError(400, 10, 2018278),
+  "outside_window",
+  "26. the window subcode wins over the generic code-10 permission mapping",
+);
+assert.equal(__test.classifyGraphError(403, 4, null), "rate_limited", "26. throttling wins over 403");
+assert.equal(__test.classifyGraphError(200, null, null), "other", "26. nothing recognised → other");
+
+// A non-JSON ERROR body still maps by HTTP status alone, never by guessing.
+f = await graphSend(() => new Response("Bad Gateway", { status: 502 }));
+assert.equal(f.value.errorClass, "other", "26. a malformed error body maps to other");
+f = await graphSend(() => new Response("Unauthorized", { status: 401 }));
+assert.equal(f.value.errorClass, "auth", "26. an unparseable 401 is still auth");
+
+/* ── F6. Timeout and transport failure (test 27) ─────────────────────────── */
+
+for (const [thrown, why] of [
+  [Object.assign(new Error("timed out"), { name: "TimeoutError" }), "a 10 s timeout"],
+  [Object.assign(new Error("aborted"), { name: "AbortError" }), "an abort"],
+  [new TypeError(`fetch failed to ${CHAT_ID}`), "a transport failure"],
+]) {
+  f = await graphSend(() => {
+    throw thrown;
+  });
+  assert.deepEqual(
+    f.value,
+    { ok: false, provider: "meta", messageRef: null, errorClass: "other", status: "needs_review" },
+    `27. ${why} → needs_review/other`,
+  );
+  assert.equal(bh.graphCalls.length, 1, `27. ${why} is NEVER retried`);
+  for (const line of f.logs) {
+    assert.ok(!line.includes("timed out"), "27. a thrown error message is not logged");
+    assert.ok(!line.includes(CHAT_ID), "27. a thrown error's chat id is not logged");
+  }
+}
+
+/* ── F7. A claimed-elsewhere event never reaches Meta (test 28) ──────────── */
+
+token(TOKEN);
+for (const existing of [
+  { state: "sent", message_ref: MID },
+  { state: "processing" },
+  { state: "needs_review", error_class: "rate_limited" },
+]) {
+  reset({ claim: "conflict", existing, graph: graphJson(200, { message_id: MID }) });
+  r = await capture(() => handleSendChatMessage(req(body({ channel: "messenger" })), metaProvider));
+  assert.equal(r.value.status, 200, `28. a ${existing.state} duplicate answers from the row`);
+  assert.equal(
+    bh.graphCalls.length,
+    0,
+    `28. a ${existing.state} duplicate makes NO Graph API call — the claim is gone`,
+  );
+  assert.equal(bh.patches.length, 0, `28. a ${existing.state} duplicate writes nothing`);
+}
+
+// An unavailable claim store also never sends: nothing was claimed, so nothing
+// may go out, and the eventId stays free.
+reset({ claim: "error", graph: graphJson(200, { message_id: MID }) });
+r = await capture(() => handleSendChatMessage(req(body({ channel: "messenger" })), metaProvider));
+assert.equal(r.value.status, 503, "28. an unavailable claim store answers 503");
+assert.equal(bh.graphCalls.length, 0, "28. and never calls Meta");
+
+/* ── F8. Ambiguous completion stays safe (test 29) ───────────────────────── */
+
+// The send SUCCEEDED but the completion write failed. The customer has the
+// message, so the row must stay `processing` (every later duplicate reads
+// in_progress and nothing is ever resent) and the caller must be told
+// needs_review rather than "sent".
+reset({ complete: "error", graph: graphJson(200, { message_id: MID }) });
+r = await capture(() => handleSendChatMessage(req(body({ channel: "messenger" })), metaProvider));
+assert.equal(bh.graphCalls.length, 1, "29. the send happened exactly once");
+assert.deepEqual(await r.value.json(), {
+  ok: false,
+  provider: "meta",
+  messageRef: null,
+  errorClass: "other",
+  status: "needs_review",
+});
+assert.equal(bh.patches.length, 1, "29. one completion attempt, not retried");
+
+/* ── F9. Nothing sensitive is logged or persisted (test 30) ──────────────── */
+
+token(TOKEN);
+const adapterLogs = [];
+let persisted = [];
+for (const [respond, state] of [
+  [graphJson(200, { message_id: MID }), {}],
+  [graphJson(200, {}), {}],
+  [graphJson(401, { error: { code: 190, message: `Invalid OAuth token ${TOKEN}` } }), {}],
+  [
+    graphJson(400, {
+      error: {
+        code: 10,
+        error_subcode: 2018278,
+        message: `This message is sent outside of allowed window to ${CHAT_ID}: "${MESSAGE}"`,
+        fbtrace_id: "AbCdEfGhIjK",
+      },
+    }),
+    {},
+  ],
+  [graphJson(429, { error: { code: 4, message: MESSAGE } }), {}],
+  [
+    () => {
+      throw new TypeError(`connect ECONNREFUSED graph.facebook.com ${TOKEN}`);
+    },
+    {},
+  ],
+  [() => new Response(`<html>${MESSAGE}</html>`, { status: 500 }), {}],
+]) {
+  const direct = await graphSend(respond);
+  adapterLogs.push(...direct.logs);
+  // …and again through the whole endpoint, so handler logs and the persisted
+  // row are covered by the same assertions.
+  reset({ ...state, graph: respond });
+  const viaEndpoint = await capture(() =>
+    handleSendChatMessage(req(body({ channel: "messenger" })), metaProvider),
+  );
+  adapterLogs.push(...viaEndpoint.logs);
+  persisted = persisted.concat(bh.inserts, bh.patches);
+}
+
+assert.ok(adapterLogs.length > 0, "30. the adapter does log something");
+for (const line of adapterLogs) {
+  assert.ok(!line.includes(TOKEN), "30. NO log line may contain the Page access token");
+  assert.ok(!line.includes("Bearer"), "30. NO log line may contain the Authorization header");
+  assert.ok(!line.includes(CHAT_ID), "30. NO log line may contain the raw recipient id");
+  assert.ok(!line.includes(MESSAGE), "30. NO log line may contain the message text");
+  assert.ok(!line.includes("fbtrace"), "30. NO log line may contain the Graph error body");
+  assert.ok(!line.includes("Invalid OAuth"), "30. NO log line may contain a Graph error message");
+  assert.ok(!line.includes("ECONNREFUSED"), "30. NO log line may contain a transport error message");
+  assert.ok(!line.includes("<html>"), "30. NO log line may contain a raw response body");
+}
+
+const adapterRows = JSON.stringify(persisted);
+assert.ok(persisted.length > 0, "30. rows were written on these paths");
+assert.ok(!adapterRows.includes(TOKEN), "30. the Page token is never persisted");
+assert.ok(!adapterRows.includes(CHAT_ID), "30. the raw chat id is never persisted — only chat_ref");
+assert.ok(!adapterRows.includes(MESSAGE), "30. the message text is never persisted");
+assert.ok(
+  adapterRows.includes(__test.chatRef("messenger", CHAT_ID, SECRET)),
+  "30. the keyed chat_ref is what correlates the row instead",
+);
+
+/* ── F10. The bound route uses the real adapter, and no real network ─────── */
+
+token(null);
+reset();
+r = await capture(() => postSendChatMessage(req(body({ channel: "messenger" }))));
+assert.equal(r.value.status, 503, "31. the bound route refuses without a Page token");
+assert.equal((await r.value.json()).errorClass, "auth", "31. and reports auth");
+assert.equal(bh.inserts.length, 0, "31. consuming no eventId");
+
+// Every Graph call in this file went through the stub above: it is the only
+// implementation of globalThis.fetch, it records each call, and it throws on
+// any target that is not an ARMED Graph URL or the Supabase table. Proven, not
+// asserted by comment — with nothing armed, a Graph call is impossible, so no
+// socket was ever opened and no message was ever sent.
+reset();
+await assert.rejects(
+  () => globalThis.fetch(`${__test.GRAPH_SEND_URL}`, { method: "POST" }),
+  /unexpected Graph API call/,
+  "32. an unarmed Graph API call cannot reach the network",
+);
+await assert.rejects(
+  () => globalThis.fetch("https://graph.facebook.com/v1.0/me/messages", { method: "POST" }),
+  /unexpected Graph API call/,
+  "32. no Graph version can slip past the stub",
+);
+token(null);
 
 console.log("test-chat-messaging: all assertions passed");

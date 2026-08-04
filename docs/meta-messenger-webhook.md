@@ -2,11 +2,16 @@
 
 App-owned receive-only endpoint for Meta Messenger webhooks.
 
-**Status: foundation only.** Meta is **not** configured, no message has been
-sent, the n8n workflow *Atlas Messenger Webhook Receiver (STAGING)*
-(`5BKEgw3dcsEJoA3X`) is still inactive and untouched, and the outbound Meta
-adapter in `chatMessaging.server.ts` remains hard-disabled. Deploying this
-changes nothing until the environment variables below are set.
+**Status: receiving is configured.** The callback is verified and the Test Page
+*Northfield Table Lab* is subscribed to `messages`, `messaging_postbacks`,
+`message_deliveries` and `message_reads`. The n8n workflow *Atlas Messenger
+Webhook Receiver (STAGING)* (`5BKEgw3dcsEJoA3X`) is still inactive and
+untouched.
+
+This endpoint is still **receive-only**. Sending now lives in
+`chatMessaging.server.ts`, whose Messenger adapter is live — see
+`docs/payment-proof-tuesday.md` § the app-owned sender. Nothing connects the
+two: an inbound event does not trigger a reply.
 
 ## Why it exists
 
@@ -162,9 +167,9 @@ could act on.
 ## What this endpoint cannot do
 
 No Graph API call, no Page access token, no Supabase write, no customer message.
-It receives. The outbound sender is a separate, reviewed change that must first
-answer the Meta send-permission and 24-hour-messaging-window questions recorded
-in `chatMessaging.server.ts`.
+It receives. Sending is a separate module (`chatMessaging.server.ts`) behind a
+separate endpoint, a separate secret, and a separate token — this file cannot
+reach it and nothing routes an inbound event into a reply.
 
 ## Remaining work (not done here, deliberately)
 

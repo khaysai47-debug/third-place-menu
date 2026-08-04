@@ -18,15 +18,16 @@ import { supabaseAuthHeaders } from "./supabaseAuth.js";
 // so the claim moves here: ONE unique event_id, ONE winner, decided by the
 // database, not by a read that raced.
 //
-// WHAT THIS IS NOT (yet): there is NO Meta network call in this module. The
-// provider adapter below is deliberately hard-disabled (metaProvider
-// .isConfigured() returns false) and NOTHING here reaches graph.facebook.com.
-// Enabling a real send is a separate, reviewed change that must first answer
-// the Meta send-permission and 24-hour-messaging-window questions.
+// MESSENGER IS LIVE, INSTAGRAM IS NOT. metaProvider below makes ONE real
+// Graph API call for channel "messenger" when META_PAGE_ACCESS_TOKEN is set.
+// Instagram is refused before the claim and reaches no network. Unsetting the
+// token is the emergency send-off switch: every send then answers a safe
+// needs_review and no eventId is consumed.
 //
-// NOT WIRED TO n8n: no automation calls this route yet, and
-// N8N_PAYMENT_REVIEW_WEBHOOK_URL stays unset in Production. Adding the route
-// changes no existing behaviour — an endpoint nobody calls costs nothing.
+// NOT WIRED TO n8n: no automation calls this route yet — the n8n Atlas Chat
+// Sender nodes are disabled and disconnected, and N8N_PAYMENT_REVIEW_WEBHOOK_URL
+// stays unset in Production. Nothing reaches a customer until that is changed
+// deliberately.
 //
 // TRUST MODEL: server-to-server only, x-chat-messaging-secret
 // (CHAT_MESSAGING_SECRET), constant-time compared — its OWN secret, not
@@ -123,13 +124,21 @@ export type ChatSendResult =
     };
 
 /**
- * A message provider. `isConfigured` is checked BEFORE the claim so that an
- * unconfigured provider never consumes an eventId — see handleSendChatMessage.
- * It is a function, not a constant, because environment reads must happen
- * inside handlers (never at module scope, where a bundler can capture them).
+ * A message provider.
+ *
+ * `isConfigured` is checked BEFORE the claim so that a channel this provider
+ * cannot serve never consumes an eventId — burning one would leave a
+ * needs_review row blocking the very replay a human would use once the channel
+ * IS serviceable. It answers `true`, or the needs_review class to report
+ * instead, so the reason ("auth" for a missing credential, "other" for a
+ * channel that is not implemented) comes from the provider that knows it
+ * rather than from the generic handler.
+ *
+ * Both members are functions, not constants, because environment reads must
+ * happen per call (never at module scope, where a bundler can capture them).
  */
 export type ChatProvider = {
-  isConfigured: () => boolean;
+  isConfigured: (channel: ChatChannel) => true | ChatErrorClass;
   send: (input: ChatSendInput) => Promise<ChatSendResult>;
 };
 
@@ -141,28 +150,169 @@ const failure = (errorClass: ChatErrorClass): ChatSendResult => ({
   status: "needs_review",
 });
 
+/* ── THE META ADAPTER — Messenger only ───────────────────────────────────── */
+
 /**
- * THE META ADAPTER — DELIBERATELY DISABLED.
+ * PINNED Graph API version. Meta dates every version and drops it about two
+ * years later, so an unpinned call silently changes behaviour under the app.
+ * ⚠️ Confirm this against the App Dashboard's configured version before the
+ * first real send — this repository cannot read it.
+ */
+const GRAPH_API_VERSION = "v23.0";
+const GRAPH_SEND_URL = `https://graph.facebook.com/${GRAPH_API_VERSION}/me/messages`;
+
+/**
+ * One send budget. Longer than the n8n forward (5 s) because this is the call
+ * a customer is actually waiting on, and short enough to stay inside the
+ * function timeout. NO RETRY on expiry — see the catch in sendMessenger.
+ */
+const SEND_TIMEOUT_MS = 10_000;
+
+/** The only Graph fields this adapter reads. Everything else is discarded. */
+type GraphSendResponse = {
+  message_id?: unknown;
+  error?: { code?: unknown; error_subcode?: unknown };
+};
+
+const asNumber = (value: unknown): number | null =>
+  typeof value === "number" && Number.isFinite(value) ? value : null;
+
+/**
+ * Graph error → the closed normalized vocabulary. Best-effort BY DESIGN: an
+ * unrecognised error is "other", which is the safe direction (a human reads
+ * it) rather than a guess that could hide an expired token behind a
+ * "rate limited" label and delay a real fix.
  *
- * This is where the real Graph API call will live. It is hard-disabled rather
- * than gated on an environment variable on purpose: a missing token is a
- * configuration accident, whereas `return false` is a decision, and enabling it
- * must be a reviewed code change rather than something a variable can switch on
- * by surprise in Production.
+ * Order matters where codes overlap:
+ *   - the throttle codes are checked first, because Meta returns them under
+ *     several HTTP statuses (429 and 403 both occur);
+ *   - subcode 2018278 (outside the 24-hour standard messaging window) is
+ *     checked BEFORE the generic permission mapping, because it arrives as
+ *     code 10, which otherwise means "no permission for this action".
+ * Codes are from the Messenger Platform Send API error reference; anything not
+ * listed there falls through to "other" rather than being invented here.
+ */
+function classifyGraphError(
+  status: number,
+  code: number | null,
+  subcode: number | null,
+): ChatErrorClass {
+  // App / Page / API throttling.
+  if (status === 429 || code === 4 || code === 32 || code === 613) return "rate_limited";
+
+  // The 24-hour standard messaging window closed. A payment review routinely
+  // lands after it does; the pilot answer is a human reply, NEVER a message tag.
+  if (subcode === 2018278) return "outside_window";
+
+  // The PSID does not resolve for this Page, or the person cannot be messaged.
+  if (subcode === 2018001 || code === 551 || code === 230) return "invalid_recipient";
+
+  // Token expired/invalid, or the credential lacks pages_messaging. Subcode
+  // 2018065 (development mode: testers only) arrives as code 10 and belongs
+  // here too — it is a permission state, not a recipient problem.
+  if (status === 401 || code === 190 || code === 102 || code === 10 || code === 200 || code === 3) {
+    return "auth";
+  }
+
+  return "other";
+}
+
+/**
+ * The real Messenger send. ONE request, no retry, ever.
  *
- * Before this may be implemented, two questions must be answered outside this
- * repository (neither is knowable from here):
- *   1. Does the Meta credential hold send permission (pages_messaging /
- *      instagram_manage_messages)? Today it is only evidenced for RECEIVING
- *      webhooks and downloading attachments (paymentIntake.server.ts).
- *   2. The 24-hour standard messaging window. A payment review routinely lands
- *      after it closes; outside it a plain send FAILS. The pilot answer is to
- *      map that failure to errorClass "outside_window" and let a human reply —
- *      never to reach for a message tag without review.
+ * The token is read HERE, per call — never at module scope, never cached, and
+ * never passed to anything but the Authorization header of this one fetch.
+ *
+ * LOGGING RULE, absolute: the line below carries the HTTP status, the numeric
+ * Graph code/subcode and the mapped class, and NOTHING else. Not the token,
+ * not the Authorization header, not the recipient id, not the message text,
+ * not the response body, not the Graph error message — Meta error bodies quote
+ * the offending request back, which is exactly the payload that must not reach
+ * a log sink.
+ */
+async function sendMessenger(input: ChatSendInput): Promise<ChatSendResult> {
+  const token = process.env.META_PAGE_ACCESS_TOKEN;
+  // Defensive: the handler already refused an unconfigured channel. Reaching
+  // this without a token means a direct caller bypassed isConfigured.
+  if (!token) return failure("auth");
+
+  let response: globalThis.Response;
+  try {
+    response = await fetch(GRAPH_SEND_URL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        recipient: { id: input.externalChatId },
+        messaging_type: "RESPONSE",
+        message: { text: input.message },
+      }),
+      signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
+    });
+  } catch (error) {
+    // Timeout or transport failure — the outcome is UNKNOWN: the message may
+    // already have been delivered. error.name only; fetch error messages and
+    // causes can carry the URL and the request. Never resent.
+    console.error(
+      `CHAT_MESSAGING meta event=${input.eventId} send failed: ${error instanceof Error ? error.name : "error"}`,
+    );
+    return failure("other");
+  }
+
+  // Read once, keep three fields, discard the rest. A non-JSON body yields
+  // null and is handled the same as a missing one.
+  const body = (await response.json().catch(() => null)) as GraphSendResponse | null;
+  const code = asNumber(body?.error?.code);
+  const subcode = asNumber(body?.error?.error_subcode);
+
+  let result: ChatSendResult;
+  if (!response.ok) {
+    result = failure(classifyGraphError(response.status, code, subcode));
+  } else if (typeof body?.message_id === "string" && body.message_id.length > 0) {
+    result = {
+      ok: true,
+      provider: "meta",
+      messageRef: body.message_id,
+      errorClass: null,
+      status: "sent",
+    };
+  } else {
+    // 2xx with no usable message id is an AMBIGUOUS outcome — Meta may or may
+    // not have delivered it. needs_review, and never a resend.
+    result = failure("other");
+  }
+
+  console.log(
+    `CHAT_MESSAGING meta event=${input.eventId} http=${response.status}` +
+      ` code=${code ?? "-"} subcode=${subcode ?? "-"} status=${result.status}` +
+      `${result.ok ? "" : ` class=${result.errorClass}`}`,
+  );
+  return result;
+}
+
+/**
+ * THE SHIPPED ADAPTER. Messenger is live; Instagram is NOT implemented.
+ *
+ * Instagram is refused by isConfigured rather than inside send(), so it fails
+ * BEFORE the claim: no eventId is consumed, no row is written, no network call
+ * is made, and the same eventId can be replayed unchanged the day Instagram
+ * sending lands. Its class is "other" (an unimplemented channel), deliberately
+ * not "auth" (a credential problem), so a needs_review row points at the right
+ * fix.
  */
 export const metaProvider: ChatProvider = {
-  isConfigured: () => false,
-  send: async () => failure("auth"),
+  isConfigured: (channel) => {
+    if (channel !== "messenger") return "other";
+    return process.env.META_PAGE_ACCESS_TOKEN ? true : "auth";
+  },
+  send: async (input) => {
+    // Belt and braces for a direct caller that skipped isConfigured: Instagram
+    // must never reach the network from here.
+    if (input.channel !== "messenger") return failure("other");
+    return sendMessenger(input);
+  },
 };
 
 /* ── Request validation (trust boundary — do not relax casually) ─────────── */
@@ -418,7 +568,7 @@ const normalized = (status: number, result: ChatSendResult): Response =>
  * The provider is injected so tests drive a mock without any request-controlled
  * switch: NOTHING in the request body can influence which provider runs or
  * whether it succeeds. The exported route binding below always passes the real
- * (currently disabled) metaProvider.
+ * metaProvider — the only channel it can serve is "messenger".
  *
  * HTTP status vs body: 401/400/500 are transport-level refusals with the
  * repository's generic error body — the request never became a dispatch. Every
@@ -453,14 +603,17 @@ export async function handleSendChatMessage(
     message: body.data.message,
   };
 
-  // BEFORE the claim, deliberately: an unconfigured provider must not consume
-  // the eventId. Burning it would leave a needs_review row that blocks the very
-  // replay a human would use once the provider is enabled.
-  if (!provider.isConfigured()) {
+  // BEFORE the claim, deliberately: a channel the provider cannot serve must
+  // not consume the eventId. Burning it would leave a needs_review row that
+  // blocks the very replay a human would use once the channel is serviceable.
+  // The class comes from the provider — "auth" for a missing credential,
+  // "other" for a channel that is not implemented (Instagram today).
+  const ready = provider.isConfigured(input.channel);
+  if (ready !== true) {
     console.error(
-      `CHAT_MESSAGING ${input.orderNumber} event=${input.eventId} skipped=provider_unconfigured`,
+      `CHAT_MESSAGING ${input.orderNumber} event=${input.eventId} channel=${input.channel} skipped=provider_unavailable class=${ready}`,
     );
-    return normalized(503, failure("auth"));
+    return normalized(503, failure(ready));
   }
 
   const admin = supabaseAdmin("Server is not configured for chat messaging.");
@@ -505,7 +658,7 @@ export async function handleSendChatMessage(
   return normalized(200, answer);
 }
 
-/** The bound route handler — always the real, currently disabled, adapter. */
+/** The bound route handler — always the real adapter, never a test double. */
 export function postSendChatMessage(request: Request): Promise<Response> {
   return handleSendChatMessage(request, metaProvider);
 }
@@ -514,7 +667,11 @@ export function postSendChatMessage(request: Request): Promise<Response> {
 export const __test = {
   chatRef,
   fromExistingRow,
+  classifyGraphError,
   DISPATCH_STATES,
   SECRET_HEADER,
   ORDER_NUMBER_PATTERN,
+  GRAPH_API_VERSION,
+  GRAPH_SEND_URL,
+  SEND_TIMEOUT_MS,
 };

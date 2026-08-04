@@ -222,19 +222,61 @@ no atomic claim. "Look up, then insert" there can elect **two** owners for one
 rejected. A single `INSERT` against a `UNIQUE event_id` settles it: one row
 wins, everyone else gets SQLSTATE 23505 and sends nothing.
 
-**Status — nothing about this is live:**
+**Status — the Messenger send is LIVE in code (2026-08-04):**
 
-- The **Meta adapter is disabled** (`metaProvider.isConfigured()` returns
-  `false`). There is no Graph API call anywhere in `api/`, and enabling one is a
-  separate reviewed code change — not a variable that can flip in Production.
-- **n8n has not been connected.** No workflow calls this route.
-- **No Production environment variable was changed.**
-  `N8N_PAYMENT_REVIEW_WEBHOOK_URL` remains unset.
+- The **Messenger adapter is real.** `metaProvider.send` makes one Graph API
+  call to `POST https://graph.facebook.com/<pinned version>/me/messages`
+  whenever `META_PAGE_ACCESS_TOKEN` is set. Unsetting that variable is the
+  emergency send-off switch: every send then answers a safe `needs_review`
+  (`auth`) and consumes **no** `eventId`.
+- **Instagram is NOT implemented.** `channel: "instagram"` is refused *before*
+  the claim with `needs_review` / `other`, reaches no network, and stays
+  replayable under the same `eventId` once it is implemented.
+- **n8n has not been connected.** The Atlas Chat Sender nodes are disabled and
+  disconnected; no workflow calls this route.
 - **No real message has been sent.**
-- **The migration exists but has NOT been applied** —
-  `docs/sql/2026-08-02-chat-message-dispatches.sql`. Atomic idempotency depends
-  entirely on that file's `UNIQUE event_id`; until it is applied the claim
-  insert fails and the endpoint fails closed.
+- The migration **has been applied**, so the `UNIQUE event_id` claim is real.
+
+⚠️ Anyone holding `CHAT_MESSAGING_SECRET` can now make the app message a real
+customer. Treat this endpoint as a live send path.
+
+### The Messenger provider contract
+
+| | |
+| --- | --- |
+| Request | `POST https://graph.facebook.com/<GRAPH_API_VERSION>/me/messages` |
+| Headers | `Authorization: Bearer <META_PAGE_ACCESS_TOKEN>`, `Content-Type: application/json` — nothing else |
+| Body | `{ "recipient": { "id": externalChatId }, "messaging_type": "RESPONSE", "message": { "text": message } }` |
+| Timeout | 10 000 ms |
+| Retry | **none, ever** |
+| Success | HTTP 2xx **and** a non-empty string `message_id` → `messageRef` |
+
+The API version is pinned in one constant (`GRAPH_API_VERSION`) because Meta
+dates every version and drops it about two years later. Confirm it against the
+App Dashboard before the first real send.
+
+Graph error → the closed `errorClass` vocabulary. Unrecognised errors map to
+`other` on purpose — a human reads it, rather than a guess hiding an expired
+token behind a "rate limited" label:
+
+| Graph signal | class |
+| --- | --- |
+| HTTP 429, code 4 / 32 / 613 | `rate_limited` |
+| subcode 2018278 (24-hour window closed) | `outside_window` |
+| subcode 2018001, code 551 / 230 | `invalid_recipient` |
+| HTTP 401, code 190 / 102 / 10 / 200 / 3 | `auth` |
+| timeout, transport failure, 2xx with no usable `message_id`, malformed body, anything else | `other` |
+
+Subcode 2018278 is checked **before** the code-10 permission mapping: they share
+a code and differ only by subcode. A 2xx without a usable `message_id` is
+*ambiguous* — Meta may or may not have delivered it — so it is `needs_review`
+and never a resend.
+
+**Never logged, never persisted:** the Page token, the `Authorization` header,
+the raw `externalChatId`, the message text, the Graph response body, and the
+full Graph error body (Meta quotes the offending request back in it). The one
+adapter log line carries the event id, the HTTP status, the numeric Graph
+code/subcode and the mapped class — nothing else.
 
 **Request** (server-to-server, `x-chat-messaging-secret`):
 
