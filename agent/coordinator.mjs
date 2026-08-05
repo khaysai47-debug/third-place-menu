@@ -18,17 +18,32 @@ import { readFileSync } from "node:fs";
 import { resolveChecks } from "./checks.mjs";
 import { makeRunId, RUNS_DIR, writeReport } from "./report.mjs";
 import { protectedActions, validateTask } from "./schemas.mjs";
-import { headCommit, planWorkspace, statusShort, worktreeState } from "./workspace.mjs";
+import {
+  branchExists,
+  headCommit,
+  planWorkspace,
+  statusShort,
+  worktreeState,
+} from "./workspace.mjs";
 
 /** Statuses the CLI treats as a successful, controlled stop. */
 export const OK_STATUSES = ["READY_TO_RUN", "READY_FOR_APPROVAL"];
 
 /**
  * Live repository readers. The default is always the real repository; the seam
- * exists so agent/agent.test.mjs can drive every gate deterministically without
+ * exists so the test suites can drive every gate deterministically without
  * creating branches, worktrees or commits. Production callers never pass it.
  */
-export const liveGit = { headCommit, statusShort, worktreeState };
+export const liveGit = { headCommit, statusShort, worktreeState, branchExists };
+
+/** The same readers, bound to a specific repository root. */
+export const liveGitAt = (cwd) => ({
+  headCommit: () => headCommit(cwd),
+  statusShort: () => statusShort(cwd),
+  worktreeState: (p) => worktreeState(p, cwd),
+  branchExists: (name) => branchExists(name, cwd),
+  planWorkspace: (task) => planWorkspace(task, cwd),
+});
 
 /**
  * Read and parse a task file.
@@ -60,10 +75,15 @@ const gate = (name, ok, detail) => ({ name, ok, detail });
  * Every approved execution MUST call this immediately before doing work, and
  * again after any pause and resume. See project/PAUSE_RESUME.md.
  *
+ * `expectWorktree` selects which workspace state is correct:
+ *   false — a NEW run. The branch must not exist and the path must be absent.
+ *   true  — a RESUME. The branch and its registered worktree must still be
+ *           there, exactly as this run left them.
+ *
  * @returns {{ status, gates, task, validation, currentCommit, repositoryStatus,
  *             repositoryClean, workspace, worktreeState, protectedActions }}
  */
-export function executionPreflight(taskFile, { git = liveGit } = {}) {
+export function executionPreflight(taskFile, { git = liveGit, expectWorktree = null } = {}) {
   const gates = [];
   const out = {
     status: "FAILED",
@@ -116,11 +136,47 @@ export function executionPreflight(taskFile, { git = liveGit } = {}) {
   if (!out.repositoryClean) return { ...out, status: "DIRTY_REPOSITORY" };
 
   // 6. Workspace / worktree state.
-  out.workspace = planWorkspace(task);
+  out.workspace = git.planWorkspace ? git.planWorkspace(task) : planWorkspace(task);
   out.worktreeState = git.worktreeState(out.workspace.worktree);
-  const worktreeOk = out.worktreeState !== "foreign";
-  gates.push(gate("worktree", worktreeOk, `${out.workspace.worktree} is ${out.worktreeState}`));
-  if (!worktreeOk) return { ...out, status: "WORKTREE_CONFLICT" };
+
+  // A path that exists but is not a Git worktree is never touched, in any mode.
+  if (out.worktreeState === "foreign") {
+    gates.push(
+      gate("worktree", false, `${out.workspace.worktree} exists but Git does not know it`),
+    );
+    return { ...out, status: "WORKTREE_CONFLICT" };
+  }
+
+  if (expectWorktree === false) {
+    // Starting fresh: nothing of this task's may already exist, or we would be
+    // resuming someone else's work by accident.
+    const branchTaken = git.branchExists?.(out.workspace.branch) ?? false;
+    gates.push(
+      gate(
+        "branch_free",
+        !branchTaken,
+        `${out.workspace.branch} ${branchTaken ? "already exists" : "is free"}`,
+      ),
+    );
+    if (branchTaken) return { ...out, status: "BRANCH_EXISTS" };
+
+    const free = out.worktreeState === "absent";
+    gates.push(gate("worktree_absent", free, `${out.workspace.worktree} is ${out.worktreeState}`));
+    if (!free) return { ...out, status: "WORKTREE_CONFLICT" };
+  } else if (expectWorktree === true) {
+    // Resuming: the workspace this run created must still be intact.
+    const branchThere = git.branchExists?.(out.workspace.branch) ?? true;
+    gates.push(gate("branch_present", branchThere, `${out.workspace.branch}`));
+    if (!branchThere) return { ...out, status: "WORKTREE_CONFLICT" };
+
+    const registered = out.worktreeState === "registered";
+    gates.push(
+      gate("worktree_present", registered, `${out.workspace.worktree} is ${out.worktreeState}`),
+    );
+    if (!registered) return { ...out, status: "WORKTREE_CONFLICT" };
+  } else {
+    gates.push(gate("worktree", true, `${out.workspace.worktree} is ${out.worktreeState}`));
+  }
 
   return { ...out, status: "READY_TO_RUN" };
 }

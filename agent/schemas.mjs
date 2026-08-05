@@ -57,7 +57,32 @@ export const FINAL_STATUSES = [
   "BASE_COMMIT_MISMATCH",
   "DIRTY_REPOSITORY",
   "WORKTREE_CONFLICT",
+  "BRANCH_EXISTS",
   "FAILED",
+];
+
+/**
+ * States an execution run can end a stage in, beyond the preflight statuses.
+ *
+ * - `PASS`                   — review passed and the task produced no file
+ *                              changes. Nothing for a human to commit.
+ * - `READY_FOR_HUMAN_REVIEW` — review passed and a diff is waiting in the
+ *                              worktree for a human to inspect and commit.
+ * - `CHECKS_FAILED`          — a required check ended in NEW_FAILURE and the
+ *                              revision budget is spent.
+ * - `SCOPE_VIOLATION`        — the Builder touched a path outside allowedPaths
+ *                              or inside forbiddenPaths.
+ * - `NEEDS_HUMAN`            — unresolved disagreement, malformed reviewer
+ *                              output, revision budget spent, or a repeated
+ *                              identical failure.
+ */
+export const EXECUTION_STATES = [
+  "RUNNING",
+  "PASS",
+  "READY_FOR_HUMAN_REVIEW",
+  "CHECKS_FAILED",
+  "SCOPE_VIOLATION",
+  "NEEDS_HUMAN",
 ];
 
 /**
@@ -72,7 +97,76 @@ export const PAUSE_STATES = [
   "RESUMING",
 ];
 
-export const RUN_STATES = [...FINAL_STATUSES, ...PAUSE_STATES];
+export const RUN_STATES = [...FINAL_STATUSES, ...PAUSE_STATES, ...EXECUTION_STATES];
+
+/**
+ * Every run state, classified. `active` means work is in flight, `paused` means
+ * recoverable and waiting, `terminal` means the run is over.
+ */
+export const STATE_PHASE = {
+  RUNNING: "active",
+  RESUMING: "active",
+
+  PAUSED_USAGE_LIMIT: "paused",
+  PAUSED_AUTH_REQUIRED: "paused",
+  PAUSED_NETWORK_ERROR: "paused",
+  RESUME_SCHEDULED: "paused",
+
+  PASS: "terminal",
+  READY_FOR_HUMAN_REVIEW: "terminal",
+  CHECKS_FAILED: "terminal",
+  SCOPE_VIOLATION: "terminal",
+  NEEDS_HUMAN: "terminal",
+  READY_FOR_APPROVAL: "terminal",
+  READY_TO_RUN: "terminal",
+  BLOCKED_PERMISSION: "terminal",
+  INVALID_TASK: "terminal",
+  BASE_COMMIT_MISMATCH: "terminal",
+  DIRTY_REPOSITORY: "terminal",
+  WORKTREE_CONFLICT: "terminal",
+  BRANCH_EXISTS: "terminal",
+  FAILED: "terminal",
+};
+
+export const phaseOf = (state) => STATE_PHASE[state] ?? "unknown";
+
+/** Reviewer verdicts. Anything else is malformed output and is rejected. */
+export const REVIEW_VERDICTS = ["PASS", "REVISE", "NEEDS_HUMAN"];
+
+export const FINDING_SEVERITIES = ["blocker", "major", "minor"];
+
+/**
+ * How a Builder invocation ended. Pause outcomes are recoverable and do not
+ * consume a revision round; the rest are the run's own problem.
+ */
+export const BUILDER_OUTCOMES = [
+  "success",
+  "implementation_failure",
+  "usage_limit",
+  "auth_failure",
+  "network_failure",
+  "malformed_output",
+  "timeout",
+];
+
+/** Builder outcomes that pause rather than fail, and the state each maps to. */
+export const PAUSING_OUTCOMES = {
+  usage_limit: "PAUSED_USAGE_LIMIT",
+  auth_failure: "PAUSED_AUTH_REQUIRED",
+  network_failure: "PAUSED_NETWORK_ERROR",
+};
+
+/**
+ * Notification events recorded on the run so a future Agent OS can display
+ * them. Nothing is sent anywhere — no SMS, email or Messenger. Deliberate.
+ */
+export const NOTIFICATION_EVENTS = [
+  "paused",
+  "resume_scheduled",
+  "resumed",
+  "completed",
+  "blocked",
+];
 
 /** Which pause state a reason maps to. */
 export const PAUSE_REASONS = {
@@ -269,6 +363,56 @@ export function validateCheckpoint(checkpoint) {
     !(checkpoint.pauseReason in PAUSE_REASONS)
   ) {
     errors.push(`pauseReason must be null or one of: ${Object.keys(PAUSE_REASONS).join(", ")}`);
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Validate a Reviewer verdict. Strict on purpose: a review the runner cannot
+ * parse is rejected as malformed, never guessed at or coerced into a PASS.
+ *
+ * @returns {{ valid: boolean, errors: string[] }}
+ */
+export function validateReview(review) {
+  const errors = [];
+  if (review === null || typeof review !== "object" || Array.isArray(review)) {
+    return { valid: false, errors: ["review must be an object"] };
+  }
+
+  if (!REVIEW_VERDICTS.includes(review.verdict)) {
+    errors.push(`verdict must be one of: ${REVIEW_VERDICTS.join(", ")}`);
+  }
+
+  if (!Array.isArray(review.findings)) {
+    errors.push("findings must be an array");
+    return { valid: false, errors };
+  }
+
+  review.findings.forEach((finding, index) => {
+    const at = `findings[${index}]`;
+    if (finding === null || typeof finding !== "object") {
+      errors.push(`${at} must be an object`);
+      return;
+    }
+    if (!isNonEmptyString(finding.id)) errors.push(`${at}.id must be a non-empty string`);
+    if (!FINDING_SEVERITIES.includes(finding.severity)) {
+      errors.push(`${at}.severity must be one of: ${FINDING_SEVERITIES.join(", ")}`);
+    }
+    if (!isNonEmptyString(finding.category)) errors.push(`${at}.category is required`);
+    if (!isNonEmptyString(finding.evidence)) errors.push(`${at}.evidence is required`);
+    if (!isNonEmptyString(finding.requiredCorrection)) {
+      errors.push(`${at}.requiredCorrection is required`);
+    }
+    // `file` is optional — a finding may be about the change as a whole.
+    if ("file" in finding && finding.file !== null && !isNonEmptyString(finding.file)) {
+      errors.push(`${at}.file must be a non-empty string or null`);
+    }
+  });
+
+  // A REVISE verdict with nothing to revise is not actionable.
+  if (review.verdict === "REVISE" && review.findings.length === 0) {
+    errors.push("REVISE requires at least one finding");
   }
 
   return { valid: errors.length === 0, errors };

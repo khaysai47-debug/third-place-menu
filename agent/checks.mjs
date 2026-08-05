@@ -4,11 +4,14 @@
 // `format` is deliberately absent: `prettier --write` mutates the working tree,
 // which a verification step must never do.
 //
-// Lint is baseline-aware. This repository has a known repository-wide failure —
-// files are stored LF and checked out CRLF, so `prettier/prettier` reports
-// "Delete `␍`" on essentially every line of every pre-existing file. That debt
-// is real and must stay visible, but it is not any single task's fault. See
-// project/TEST_MATRIX.md and decision D-009.
+// Lint is baseline-aware. The repository carries pre-existing lint debt (317
+// errors after line-ending normalization, D-012) that is nobody's task to fix in
+// passing. Errors in files a run changed are that run's problem; errors in files
+// it never opened are baseline. See project/TEST_MATRIX.md and decisions D-009
+// and D-012.
+//
+// Every check accepts a `cwd`, because an execution run's checks must run inside
+// the isolated worktree, not in the main checkout.
 import { execFileSync } from "node:child_process";
 import path from "node:path";
 import { ALLOWED_CHECKS } from "./schemas.mjs";
@@ -16,7 +19,7 @@ import { ALLOWED_CHECKS } from "./schemas.mjs";
 // Node refuses to spawn a Windows .cmd shim without `shell: true`, so eslint is
 // invoked through its own JS entry point instead of npx: no shell, no quoting
 // hazard, and the JSON report arrives intact.
-const ESLINT_BIN = path.join(process.cwd(), "node_modules", "eslint", "bin", "eslint.js");
+const eslintBin = (cwd) => path.join(cwd, "node_modules", "eslint", "bin", "eslint.js");
 
 /** check name -> npm script name */
 export const CHECK_SCRIPTS = {
@@ -43,7 +46,16 @@ export const LINT_BASELINE = {
     "Repository is stored LF and checked out CRLF; prettier reports a stray CR on every line.",
 };
 
-const normalize = (file) => file.replace(/\\/g, "/").replace(/^.*?third-place-menu\//, "");
+/**
+ * eslint reports absolute paths; make them relative to the directory the check
+ * ran in so they line up with the task's repo-relative allowedPaths.
+ */
+const relativeTo = (file, cwd) => {
+  const rel = path.relative(cwd, file);
+  return (rel.startsWith("..") ? file : rel).replace(/\\/g, "/");
+};
+
+const normalize = (file) => file.replace(/\\/g, "/").replace(/^\.\//, "");
 
 /** Is this message the known CRLF debt? Used for reporting, not for blame. */
 export const isCrlfMessage = (message) =>
@@ -56,14 +68,14 @@ export const isCrlfMessage = (message) =>
  * @param {Array} eslintResults eslint --format json output
  * @param {Set<string>} owned   normalized repo-relative paths the run changed
  */
-export function classifyLintResults(eslintResults, owned = new Set()) {
+export function classifyLintResults(eslintResults, owned = new Set(), cwd = process.cwd()) {
   const newFailures = [];
   const baselineFailures = [];
   let crlf = 0;
   let other = 0;
 
   for (const file of eslintResults) {
-    const path = normalize(file.filePath);
+    const path = relativeTo(file.filePath, cwd);
     for (const message of file.messages) {
       if (message.severity !== 2) continue;
       const entry = {
@@ -109,12 +121,13 @@ export function resolveChecks(task) {
  * @param {string[]} changedFiles repo-relative paths the run is accountable for
  * @returns {{ name, result, exitCode, newFailures, baselineFailures, files }}
  */
-export function runLint(changedFiles = []) {
+export function runLint(changedFiles = [], cwd = process.cwd()) {
   const owned = new Set(changedFiles.map(normalize));
   let raw = "";
   let exitCode = 0;
   try {
-    raw = execFileSync(process.execPath, [ESLINT_BIN, ".", "--format", "json"], {
+    raw = execFileSync(process.execPath, [eslintBin(cwd), ".", "--format", "json"], {
+      cwd,
       encoding: "utf8",
       maxBuffer: 64 * 1024 * 1024,
     });
@@ -139,7 +152,7 @@ export function runLint(changedFiles = []) {
     };
   }
 
-  return { name: "lint", exitCode, files: [...owned], ...classifyLintResults(results, owned) };
+  return { name: "lint", exitCode, files: [...owned], ...classifyLintResults(results, owned, cwd) };
 }
 
 const classify = (newCount, baselineCount) => {
@@ -154,33 +167,55 @@ const classify = (newCount, baselineCount) => {
  * typecheck and build have no baseline concept: they pass or they do not.
  * lint is classified against LINT_BASELINE.
  */
-export function runCheck(name, changedFiles = []) {
-  if (name === "lint") return runLint(changedFiles);
+export function runCheck(name, changedFiles = [], cwd = process.cwd()) {
+  const started = Date.now();
+  const stamp = (result) => ({
+    ...result,
+    command: name === "lint" ? "eslint . --format json" : `npm run ${CHECK_SCRIPTS[name] ?? name}`,
+    cwd,
+    durationMs: Date.now() - started,
+  });
+
+  if (name === "lint") return stamp(runLint(changedFiles, cwd));
 
   const script = CHECK_SCRIPTS[name];
   if (!script) {
-    return {
+    return stamp({
       name,
       result: "NEW_FAILURE",
       exitCode: -1,
       newFailures: [{ file: "(runner)", message: `unsupported check "${name}"` }],
       baselineFailures: [],
-    };
+      log: "",
+    });
   }
 
   try {
     // shell: true so npm.cmd resolves on Windows; every argument here is a
     // fixed literal from CHECK_SCRIPTS, never task-supplied input.
-    execFileSync("npm", ["run", script], { stdio: "inherit", shell: true });
-    return { name, result: "PASS", exitCode: 0, newFailures: [], baselineFailures: [] };
+    const log = execFileSync("npm", ["run", script], {
+      cwd,
+      shell: true,
+      encoding: "utf8",
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    return stamp({
+      name,
+      result: "PASS",
+      exitCode: 0,
+      newFailures: [],
+      baselineFailures: [],
+      log,
+    });
   } catch (error) {
-    return {
+    return stamp({
       name,
       result: "NEW_FAILURE",
       exitCode: error.status ?? 1,
       newFailures: [{ file: "(check)", message: `${script} failed` }],
       baselineFailures: [],
-    };
+      log: `${error.stdout ?? ""}${error.stderr ?? ""}`,
+    });
   }
 }
 
@@ -190,10 +225,10 @@ export function runCheck(name, changedFiles = []) {
  *
  * Not called by the dry run: the dry run only reports which checks apply.
  */
-export function runChecks(names, changedFiles = []) {
+export function runChecks(names, changedFiles = [], cwd = process.cwd()) {
   const results = [];
   for (const name of names) {
-    const result = runCheck(name, changedFiles);
+    const result = runCheck(name, changedFiles, cwd);
     results.push(result);
     if (result.result === "NEW_FAILURE") break;
   }

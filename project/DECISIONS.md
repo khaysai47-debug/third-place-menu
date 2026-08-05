@@ -165,3 +165,48 @@ would be redundant.
 **Not done:** the 317 remaining genuine lint errors were reported, not fixed.
 Auto-fixing 315 Prettier errors would reformat 36 files inside a task whose scope
 is line endings — exactly the unreviewable diff this decision avoids.
+
+## D-013 — Safety is enforced by process launch, not by instruction
+
+**Date:** 2026-08-05
+**Decision:** The Builder runs with `--disallowedTools Bash,WebFetch,WebSearch,
+NotebookEdit` and `--permission-mode acceptEdits`; the Reviewer runs with
+`--sandbox read-only`. `assertSafeCommand()` in each adapter throws if a
+permission-bypass flag ever appears in a constructed command.
+**Why:** A prompt that says "do not commit" is a request. A process with no shell
+*cannot* commit. Removing Bash from the Builder makes commit, push, merge, deploy
+and dependency installation unreachable rather than merely forbidden, and it does
+so with one flag instead of a list of prohibitions that must stay in sync with
+whatever git subcommands exist. The prompts still state the rules, as a second
+layer for a model that somehow gains a shell.
+**Cost:** the Builder cannot run the checks itself. That is fine — the
+Coordinator runs them and owns the result, which is the honest arrangement
+anyway: a Builder that grades its own work is not evidence.
+
+## D-014 — A pause is a pause, even with automatic resume switched off
+
+**Date:** 2026-08-05
+**Decision:** With `--no-auto-resume`, a usage-limit or network pause leaves the
+run in `PAUSED_*` awaiting `agent:resume`. Only an exhausted retry budget becomes
+`NEEDS_HUMAN`. An auth failure is always `PAUSED_AUTH_REQUIRED` and is never
+retried on a timer.
+**Why:** The first implementation collapsed "no scheduler configured" into
+`NEEDS_HUMAN`, which the tests caught. That conflated two different things: a run
+waiting for quota (recoverable, resumable, nobody's fault) and a run that has
+tried and failed (needs a person). Retrying an auth failure on a timer is worse
+than useless — only a human can log in, so the retries just burn the budget
+before the human arrives.
+
+## D-015 — Changed files are parsed from NUL-separated porcelain
+
+**Date:** 2026-08-05
+**Decision:** `changedFiles()` uses `git status --porcelain=v1 -z
+--untracked-files=all` and consumes the origin record after an `R`/`C` entry.
+**Why:** The first version trimmed the command output and sliced three characters
+off each line. Trimming ate the leading status space of the first entry, so the
+first character of that path was lost — `src/feature.ts` became `rc/feature.ts`.
+That is not a cosmetic bug: a mangled path does not match `allowedPaths`, so a
+perfectly legitimate change was reported as a `SCOPE_VIOLATION` on the second
+revision round. `-z` also removes quoting and escaping, so a filename with a
+space or a non-ASCII character parses like any other. The engine tests now cover
+both the happy path and the multi-round case that exposed it.

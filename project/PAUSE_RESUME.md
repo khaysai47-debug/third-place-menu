@@ -1,8 +1,13 @@
 # Pause and Resume
 
-**Design only.** No scheduler and no Claude resume command exist in this
-bootstrap. This page defines the states, the checkpoint and the rules that the
-implementation must obey when it is built.
+**Implemented.** `agent/engine.mjs` writes checkpoints, pauses, schedules a
+cautious retry and resumes; `agent:resume --run <RUN_ID>` continues a run
+manually after the PC or the runner was stopped.
+
+Two deliberate limits remain: there is **no external notifier** (events are
+recorded in `run.json`, nothing is sent by SMS, email or Messenger), and
+automatic resume only works **while the runner process stays alive** — see
+"Hosting reality" at the end.
 
 A usage limit is not a failure. The plan is sound, the code is fine, the account
 is simply out of quota until a reset time. Treating that as a failed
@@ -39,6 +44,21 @@ be in one of five pause/resume states (`PAUSE_STATES`):
 
 `PAUSED_AUTH_REQUIRED` only reaches `RESUME_SCHEDULED` after a human clears the
 credential problem. The runner never resolves an auth pause on its own.
+
+### As implemented
+
+| Situation | Result |
+| --- | --- |
+| Usage limit / network error, auto-resume on, budget left | `RESUME_SCHEDULED` → wait → revalidate → `RESUMING` → continue |
+| Usage limit / network error, auto-resume **off** (`--no-auto-resume`) | stays `PAUSED_*`, waits for `agent:resume`. A pause is not a failure. |
+| Auth failure | always `PAUSED_AUTH_REQUIRED`. Never retried on a timer — only a human can log in. |
+| Retry budget exhausted (`maxRetries`, default 3) | `NEEDS_HUMAN` |
+| Revalidation fails after the wait | the matching terminal status, and the Builder is never re-invoked |
+
+Wait time: `expectedRetryAt` from the provider's own reset stamp plus one
+minute, when Claude supplied one (`Claude AI usage limit reached|<epoch>`);
+otherwise `retryMs × retryCount` — a linear back-off from a 15-minute default.
+Never a tight retry loop.
 
 ## Checkpoint
 
@@ -114,10 +134,25 @@ Stages: `planning`, `implementation`, `checks`, `review`, `revision`,
   `retryCount`. When the cap is reached, stop and escalate to the human rather
   than retrying indefinitely.
 
+## Notifications
+
+`notify()` appends `{event, message, at}` to `run.notifications` for `paused`,
+`resume_scheduled`, `resumed`, `completed` and `blocked`. That is the whole
+mechanism: **nothing is sent anywhere.** No SMS, no email, no Messenger.
+
+This is deliberate, not an oversight. An agent that can message people is a
+different safety problem from one that cannot, and this repository's Messenger
+integration reaches real customers. The events sit in `run.json` so a future
+Agent OS can display them.
+
 ## Hosting reality
 
-- Local automatic resume requires the PC to stay awake and the runner process to
-  stay alive. If the machine sleeps, the resume does not happen — the checkpoint
-  survives, but a human has to restart the runner.
+- Local automatic resume requires the PC to stay awake **and the runner process
+  to stay alive**. `agent:run` waits in-process during a scheduled resume; if
+  you close the terminal, the machine sleeps, or the process is killed, the
+  automatic resume does not happen.
+- The checkpoint survives regardless. `npm run agent:resume -- --run <RUN_ID>`
+  picks the run back up, revalidates everything and continues — which is exactly
+  the recovery path after an interrupted process.
 - Future VPS hosting would make 24/7 resume reliable. Until then, a pause
   overnight most likely means a human resumes it in the morning.

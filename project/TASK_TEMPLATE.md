@@ -65,3 +65,25 @@ npm run agent:dry-run  -- --task project/tasks/ATLAS-000.json
 compares `baseCommit` against HEAD, inspects repository cleanliness, plans a
 branch and worktree, resolves the checks, detects protected actions, and writes a
 report to `project/runs/`.
+
+## Executing an approved task
+
+```
+npm run agent:run    -- --task project/tasks/ATLAS-000.json
+npm run agent:resume -- --run run-20260805T101112Z-ATLAS-000
+```
+
+`agent:run` **requires** `approved: true` with `approvedAt` and `approvedBy`. It
+re-validates everything from scratch — a passing dry run authorizes nothing — and
+refuses before any model is invoked if the task is unapproved, the base commit
+has moved, the main repository is dirty, a protected permission is requested, or
+the task's branch or worktree already exists.
+
+Scoping advice that matters in practice:
+
+- **`allowedPaths` is enforced, not advisory.** A Builder edit outside it ends
+  the run at `SCOPE_VIOLATION` before the Reviewer is called.
+- **Claiming a file means owning its lint debt.** 317 pre-existing errors sit in
+  36 files (see `TEST_MATRIX.md`); if `allowedPaths` covers one of them, the run
+  will be blocked by failures the task did not create. Check the list first.
+- **`requiredChecks` runs inside the worktree**, not the main checkout.

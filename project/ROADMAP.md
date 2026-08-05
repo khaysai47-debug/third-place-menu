@@ -9,15 +9,24 @@
    gates, execution-time revalidation, baseline-aware checks, workspace
    planning, reports, dry run, coordinator tests, pause/resume schema. No model
    execution, no scheduler.
-2. **Builder execution.** Run Claude inside a real isolated worktree on an
-   approved task, with the diff confined to `allowedPaths`.
-3. **Reviewer execution.** Run Codex against the diff and evidence, returning
-   `PASS` / `REVISE` / `NEEDS_HUMAN`.
-4. **Evidence-backed handoff.** A completed run leaves a human a diff, check
-   results and a verdict — still uncommitted.
-5. **Pause scheduler and session resume.** Implement the states, checkpoint and
-   rules already defined in `PAUSE_RESUME.md`. Local resume needs the PC awake;
-   reliable 24/7 resume needs VPS hosting.
+2. ~~**Builder execution.**~~ **Done 2026-08-05.** Claude runs in a real isolated
+   worktree, with no shell, and the diff is confined to `allowedPaths`.
+3. ~~**Reviewer execution.**~~ **Done 2026-08-05.** Codex reviews the diff
+   read-only and returns `PASS` / `REVISE` / `NEEDS_HUMAN`.
+4. ~~**Evidence-backed handoff.**~~ **Done 2026-08-05.** A run leaves a preserved
+   worktree, `diff.patch`, check results and a verdict — still uncommitted.
+5. ~~**Pause scheduler and session resume.**~~ **Done 2026-08-05**, with two
+   documented limits: automatic resume needs the runner process alive, and
+   nothing is notified externally.
+
+### Next
+
+6. **First real task execution.** The loop has never been run against a real
+   Atlas task; every test to date uses fake adapters. The first live run should
+   be small, low-risk, and watched.
+7. **Agent OS surface.** Read `run.json` and display state, notifications and
+   diffs. The notification events already exist and are recorded.
+8. **VPS hosting.** Makes 24/7 automatic resume reliable.
 
 ## Maintenance
 

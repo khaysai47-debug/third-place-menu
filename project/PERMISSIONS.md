@@ -46,6 +46,27 @@ Explicit, named, human approval every time. Never batched with anything else.
 | `order_or_payment` | Create or alter a real order or payment |
 | `destructive_production_action` | Any other destructive Production action |
 
+## What `agent:run` does automatically
+
+Under Tier 1, and only after a fresh preflight passes, an execution run may:
+
+- create **one** task branch from the approved base commit
+- create **one** isolated worktree outside the repository, and link `node_modules`
+- invoke the Claude Builder inside that worktree, with no shell access
+- run `typecheck` / `lint` / `build` in that worktree
+- run `git add --intent-to-add` **inside the worktree only**, so untracked files
+  appear in the diff (no content is staged, and the main index is never touched)
+- invoke the Codex Reviewer read-only
+- write the run directory under `project/runs/<run-id>/`
+
+It may not, and structurally cannot: commit, push, open a pull request, merge,
+tag, deploy, delete a branch that has work on it, touch the main working tree, or
+reach n8n, Supabase, Meta Messenger, Vercel or any secret.
+
+The Builder is launched with `--disallowedTools Bash,…`, so it has no shell and
+therefore no `git`. The Reviewer is launched with `--sandbox read-only`. These are
+process-level guarantees, not instructions a model may choose to follow.
+
 ## Enforcement
 
 `agent/schemas.mjs` defines the tiers. Anything in Tier 2 or Tier 3 is a

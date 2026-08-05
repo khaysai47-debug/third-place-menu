@@ -13,9 +13,24 @@ The runner supports three checks, each mapped to an existing package script:
 `npm run format` is **never** run as a check: it rewrites files. Formatting is
 verified through `lint`.
 
-The agent foundation itself is covered by `npm run agent:test`
-(`node --test agent/agent.test.mjs`): coordinator gate and exit-code tests using
-a fake git reader, creating no branch, worktree, commit, push or deployment.
+The agent itself is covered by `npm run agent:test`, which runs two suites:
+
+| Suite | Command | What it covers |
+| --- | --- | --- |
+| `agent/agent.test.mjs` | (included in `agent:test`) | Coordinator gates, exit-code mapping, checkpoint and schema validation, using a fake git reader |
+| `agent/engine.test.mjs` | `npm run agent:test:engine` | The full execution loop against **real temporary git repositories** with **fake Builder and Reviewer adapters** |
+
+The engine suite covers: preflight refusals (unapproved, wrong base commit, dirty
+repository, protected permission, existing branch) with an assertion that **no
+adapter is invoked**; the happy path to `READY_FOR_HUMAN_REVIEW`; `PASS` with no
+diff; scope violations; check `NEW_FAILURE` → revision → pass; the revision
+budget; reviewer `REVISE`/`NEEDS_HUMAN`/malformed; repeated identical failure;
+usage-limit checkpointing; scheduled and manual resume; resume refusal after the
+base commit moves; adapter command construction and output classification.
+
+No test invokes Claude or Codex, touches the network, consumes quota, commits,
+pushes or deploys. Temporary repositories, branches and worktrees are removed in
+`afterEach`, and every test asserts the main checkout stays clean.
 
 ## Check result model
 

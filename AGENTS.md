@@ -4,9 +4,31 @@ The Atlas Development Agent is a local, human-supervised development loop for th
 Atlas / The Third Place restaurant operations system. It exists to make changes
 **proposed, reviewed and evidenced** before a human decides anything irreversible.
 
-This bootstrap contains memory, schemas, permission gates, workspace planning,
-check execution and reporting. It does **not** yet execute Claude or Codex as
-subprocesses — that comes later, on top of these rules.
+The local execution loop is implemented: an approved task runs in an isolated Git
+worktree, the Claude Builder implements it, the checks run, the Codex Reviewer
+judges the diff independently, and at most two revision rounds follow. The run
+**stops before commit, push, pull request, merge and deployment** — always. What
+a human receives is a preserved worktree, a diff and a report.
+
+## The loop
+
+```
+approved task
+   │  executionPreflight()  — fresh, every time; refuses before any model runs
+   ▼
+isolated worktree (branch from the approved base commit, outside the repo)
+   │
+   ▼
+Claude Builder  ──▶  scope gate  ──▶  checks  ──▶  Codex Reviewer
+   ▲                     │              │              │
+   │                  violation      NEW_FAILURE     REVISE
+   │                     │              │              │
+   └──── at most 2 revision rounds ◀────┴──────────────┘
+                         │
+                         ▼
+        final report + preserved worktree + diff.patch
+                   STOP. A human decides.
+```
 
 ## Roles
 
@@ -109,12 +131,43 @@ switches to paid API usage on its own.
 
 States, checkpoint schema and the full rule set: `project/PAUSE_RESUME.md`.
 
+## Model adapter boundaries
+
+Neither model is trusted to obey an instruction it could ignore. The boundary is
+enforced by how the process is launched.
+
+| | Claude Builder | Codex Reviewer |
+| --- | --- | --- |
+| Adapter | `agent/adapters/claude.mjs` | `agent/adapters/codex.mjs` |
+| Mode | `--print` (non-interactive), `--output-format json` | `codex exec`, `--output-last-message` |
+| Can edit files | **Yes**, inside the worktree only | **No** — `--sandbox read-only` |
+| Can run a shell | **No** — `--disallowedTools Bash,…` | No |
+| Permission mode | `acceptEdits` (never `bypassPermissions`) | n/a |
+| cwd | the isolated worktree | the isolated worktree |
+| Bounded by | `--max-turns`, wall-clock timeout | wall-clock timeout |
+| Output contract | fenced ```json `{summary, filesChanged, notes}` | fenced ```json `{verdict, summary, findings[]}` |
+
+Consequences worth stating plainly:
+
+- **The Builder has no shell**, so it cannot run `git` at all. Commit, push,
+  merge and deploy are not "forbidden by policy" — they are unreachable.
+- **The Reviewer cannot write**, so a review can never quietly become an edit.
+- **`--dangerously-skip-permissions` is never used.** `assertSafeCommand()` in
+  each adapter throws if such a flag ever appears in a constructed command.
+- **Malformed output is rejected, never guessed at.** An unreadable review
+  becomes `NEEDS_HUMAN`; it can never become a PASS.
+- The Coordinator never edits application code. Implementation belongs to the
+  Builder, judgement to the Reviewer, and the decision to a human.
+
 ## Loop limits
 
 - **Maximum two planning rounds.** If the plan is not agreed after two, stop with
   `NEEDS_HUMAN`.
 - **Maximum two revision rounds.** If the Reviewer still finds blocking issues
   after two revisions, stop with `NEEDS_HUMAN`.
+- **A scope violation is not iterated on.** Writing outside `allowedPaths` or
+  inside `forbiddenPaths` ends the run at `SCOPE_VIOLATION` immediately, before
+  the Reviewer is ever called. It is a boundary breach, not a quality problem.
 - **Stop on repeated identical failure.** The same check failing the same way
   twice is a signal that the agent does not understand the problem. Stop; do not
   try a third variation.
@@ -140,10 +193,46 @@ States, checkpoint schema and the full rule set: `project/PAUSE_RESUME.md`.
 ## Commands
 
 ```
-npm run agent:validate -- --task project/tasks/ATLAS-001.json
-npm run agent:dry-run  -- --task project/tasks/ATLAS-001.json
-npm run agent:test
+npm run agent:validate -- --task project/tasks/<TASK>.json   # structure only
+npm run agent:dry-run  -- --task project/tasks/<TASK>.json   # inspect, authorize nothing
+npm run agent:run      -- --task project/tasks/<TASK>.json   # execute an APPROVED task
+npm run agent:resume   -- --run <RUN_ID>                     # continue a paused run
+npm run agent:test                                           # all agent tests
+npm run agent:test:engine                                    # engine tests only
 ```
+
+Useful `run`/`resume` flags: `--runs-dir <dir>` (keep reports out of
+`project/runs`), `--no-auto-resume` (pause instead of scheduling a retry),
+`--max-retries <n>`, `--retry-ms <ms>`.
+
+### Task approval flow
+
+1. Draft the task JSON in `project/tasks/`. `approved` starts `false`.
+2. `agent:validate` — is it structurally sound?
+3. `agent:dry-run` — what would it do? Stops at `READY_FOR_APPROVAL`.
+4. **A human sets `approved: true` with `approvedAt` and `approvedBy`.** This is
+   a reviewable edit to a versioned file, not an interactive prompt.
+5. `agent:run` — re-validates everything from scratch, then executes.
+6. A human reads the report, inspects the worktree, and decides whether to
+   commit. The agent never does.
+
+### Where a run leaves things
+
+```
+project/runs/<run-id>/
+  run.json            live state and notification log
+  checkpoint.json     what a resume needs
+  task-snapshot.json  the task exactly as approved
+  builder/            raw Builder stdout/stderr per round
+  reviewer/           raw Reviewer output per round
+  checks/             per-check logs
+  diff.patch          the full unified diff
+  final-report.md     the human-readable outcome
+```
+
+The worktree lives at `<repo>-agent-worktrees/<task-id>/`, outside the
+repository, and is **preserved** after the run — including after a pause or a
+failure — so a human can inspect it. Nothing is cleaned up automatically.
 
 The dry run reads the repository and writes a report under `project/runs/`. It
 creates no branch, no worktree, no commit, no push and no deployment.
