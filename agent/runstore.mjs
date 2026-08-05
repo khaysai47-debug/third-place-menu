@@ -200,6 +200,11 @@ export function finalReportMarkdown(run) {
 | --- | --- |
 | Task | ${run.taskId} |
 | Final state | **${run.state}** (${phaseOf(run.state)}) |
+| Stage reached | ${run.stage ?? "(none)"} (last good: ${run.lastSuccessfulStage ?? "none"}) |
+| Error category | ${run.errorCategory ?? "(none)"} |
+| Error | ${run.errorMessage ?? "(none)"} |
+| Worktree created | ${run.worktreeCreated === true} |
+| Model invoked | ${run.modelInvoked === true} |
 | Reviewer verdict | ${run.reviewVerdict ?? "(none)"} |
 | Base commit | ${run.baseCommit} |
 | Branch | ${run.branch ?? "(none)"} |

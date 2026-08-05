@@ -149,18 +149,29 @@ if (command === "validate") {
   console.log(`report    ${paths.markdownPath}`);
   console.log(`status    ${report.finalStatus}`);
   process.exit(OK_STATUSES.includes(report.finalStatus) ? 0 : 1);
-} else if (command === "run") {
-  const { run, reportPath } = await runTask(taskFile, engineOptions());
-  printRun(run, reportPath);
-  process.exit(RUN_OK.includes(run.state) ? 0 : 1);
-} else if (command === "resume") {
-  if (!runId) {
+} else if (command === "run" || command === "resume") {
+  if (command === "resume" && !runId) {
     console.error(usage);
     process.exit(1);
   }
-  const { run, reportPath } = await resumeRun(runId, engineOptions());
-  printRun(run, reportPath);
-  process.exit(RUN_OK.includes(run.state) ? 0 : 1);
+  try {
+    const { run, reportPath } =
+      command === "run"
+        ? await runTask(taskFile, engineOptions())
+        : await resumeRun(runId, engineOptions());
+    printRun(run, reportPath);
+    process.exit(RUN_OK.includes(run.state) ? 0 : 1);
+  } catch (error) {
+    // The engine records adapter and workspace faults as terminal run states.
+    // Anything reaching here is a bug in the runner itself; report it as one
+    // line rather than a stack trace, and never as a partial success.
+    console.error(`state     FAILED (runner error)`);
+    console.error(`detail    ${String(error?.message ?? error).split("\n")[0]}`);
+    console.error(
+      "\nNo model was invoked by this failure path. Nothing was committed or deployed.",
+    );
+    process.exit(1);
+  }
 } else {
   console.error(`unknown command: ${command}`);
   console.error(usage);

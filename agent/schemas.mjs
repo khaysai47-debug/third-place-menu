@@ -61,6 +61,7 @@ export const FINAL_STATUSES = [
   "APPROVAL_MISSING",
   "APPROVAL_INVALID",
   "APPROVAL_STALE",
+  "ADAPTER_CONFIGURATION_ERROR",
   "FAILED",
 ];
 
@@ -131,8 +132,25 @@ export const STATE_PHASE = {
   APPROVAL_MISSING: "terminal",
   APPROVAL_INVALID: "terminal",
   APPROVAL_STALE: "terminal",
+  ADAPTER_CONFIGURATION_ERROR: "terminal",
   FAILED: "terminal",
 };
+
+/**
+ * Error categories recorded on a run. A category answers "what kind of thing
+ * went wrong", so a human can tell a misconfigured runner from a bad task from
+ * a model that could not do the work.
+ */
+export const ERROR_CATEGORIES = [
+  "adapter_configuration",
+  "workspace",
+  "builder",
+  "reviewer",
+  "checks",
+  "scope",
+  "approval",
+  "git",
+];
 
 export const phaseOf = (state) => STATE_PHASE[state] ?? "unknown";
 

@@ -12,6 +12,7 @@
 //   * NEVER --dangerously-skip-permissions, NEVER bypassPermissions.
 //   * cwd is the worktree, so even a file write cannot reach the main checkout.
 import { spawnSync } from "node:child_process";
+import { AdapterConfigurationError, flagNames, parseArgv, redactCommand } from "./argv.mjs";
 
 export const DEFAULTS = {
   maxTurns: 30,
@@ -40,22 +41,117 @@ export function buildCommand({ prompt, sessionId = null, maxTurns, disallowedToo
     (disallowedTools ?? DEFAULTS.disallowedTools).join(","),
   ];
   // Resuming keeps the Builder's reasoning context across a revision or a pause.
-  if (sessionId) args.push("--resume", sessionId);
+  if (sessionId) {
+    // A session id is an opaque identifier, never a place to smuggle a flag.
+    // It must START alphanumeric: "-" is legal inside a uuid but a leading dash
+    // would make the value look like a flag to anything that reads argv.
+    if (!/^[A-Za-z0-9][A-Za-z0-9_.-]*$/.test(String(sessionId))) {
+      throw new AdapterConfigurationError(`refusing malformed session id: ${typeof sessionId}`);
+    }
+    args.push("--resume", String(sessionId));
+  }
   return { command: CLI, args };
 }
 
-const UNSAFE_FLAGS = [
-  "--dangerously-skip-permissions",
-  "bypassPermissions",
-  "--dangerously-allow-browser",
-];
+/**
+ * Flags whose NEXT argv token is their value. `--print` is here because the
+ * prompt follows it — that is what keeps 31 KB of prompt text out of the flag
+ * namespace.
+ */
+export const VALUE_FLAGS = new Set([
+  "--print",
+  "-p",
+  "--output-format",
+  "--input-format",
+  "--max-turns",
+  "--permission-mode",
+  "--disallowedTools",
+  "--allowedTools",
+  "--resume",
+  "--session-id",
+  "--model",
+  "--fallback-model",
+  "--add-dir",
+  "--append-system-prompt",
+  "--system-prompt",
+  "--settings",
+  "--mcp-config",
+  "--permission-prompt-tool",
+]);
 
-/** Guard: refuse to run a command that contains a permission-bypass flag. */
+/** Flags that must never appear as an actual argv FLAG token. */
+export const UNSAFE_FLAGS = new Set([
+  "--dangerously-skip-permissions",
+  "--dangerously-allow-browser",
+  "--no-sandbox",
+  "--yolo",
+]);
+
+/** Permission modes that remove the guardrails. */
+export const DANGEROUS_PERMISSION_MODES = new Set([
+  "bypassPermissions",
+  "dangerouslySkipPermissions",
+  "yolo",
+]);
+
+/** The only permission modes the Builder may run under. */
+export const SAFE_PERMISSION_MODES = new Set(["default", "acceptEdits", "plan"]);
+
+/** Tools the Builder must always be denied. Bash covers git, npm and curl. */
+export const REQUIRED_DISALLOWED_TOOLS = ["Bash", "WebFetch", "WebSearch", "NotebookEdit"];
+
+/**
+ * Guard: refuse an unsafe Builder command.
+ *
+ * Inspects only real argv FLAGS and their configuration values. Prompt text is
+ * the value of `--print` and is never examined — a prompt that discusses
+ * `--dangerously-skip-permissions` (as AGENTS.md does) is documentation, not
+ * configuration, and must not trip this check.
+ *
+ * @throws {AdapterConfigurationError}
+ */
 export function assertSafeCommand({ args }) {
-  const joined = args.join(" ");
-  for (const flag of UNSAFE_FLAGS) {
-    if (joined.includes(flag)) throw new Error(`refusing unsafe Builder flag: ${flag}`);
+  const parsed = parseArgv(args, VALUE_FLAGS);
+  const refuse = (message) => {
+    throw new AdapterConfigurationError(message);
+  };
+
+  for (const flag of flagNames(parsed)) {
+    if (UNSAFE_FLAGS.has(flag)) refuse(`refusing unsafe Builder flag: ${flag}`);
   }
+
+  // Non-interactive, or a permission prompt would hang forever.
+  if (!parsed.flags.has("--print") && !parsed.flags.has("-p")) {
+    refuse("Builder must run non-interactively (--print)");
+  }
+
+  const mode = parsed.flags.get("--permission-mode");
+  if (typeof mode !== "string") refuse("Builder must set an explicit --permission-mode");
+  if (DANGEROUS_PERMISSION_MODES.has(mode)) refuse(`refusing dangerous permission mode: ${mode}`);
+  if (!SAFE_PERMISSION_MODES.has(mode)) refuse(`refusing unknown permission mode: ${mode}`);
+
+  const disallowed = String(parsed.flags.get("--disallowedTools") ?? "")
+    .split(",")
+    .map((tool) => tool.trim())
+    .filter(Boolean);
+  for (const tool of REQUIRED_DISALLOWED_TOOLS) {
+    if (!disallowed.includes(tool)) refuse(`Builder must disallow the ${tool} tool`);
+  }
+
+  // An explicit allow-list must never hand back what the deny-list removed.
+  const allowed = String(parsed.flags.get("--allowedTools") ?? "")
+    .split(",")
+    .map((tool) => tool.trim())
+    .filter(Boolean);
+  for (const tool of allowed) {
+    if (
+      REQUIRED_DISALLOWED_TOOLS.some((denied) => tool === denied || tool.startsWith(`${denied}(`))
+    ) {
+      refuse(`refusing to re-allow the ${tool} tool`);
+    }
+  }
+
+  return parsed;
 }
 
 /* ── Failure classification ──────────────────────────────────────────────── */
@@ -206,7 +302,7 @@ export function invokeBuilder({
     durationMs: Date.now() - started,
     stdout: proc.stdout ?? "",
     stderr: proc.stderr ?? "",
-    command: `${command} ${args.join(" ")}`,
+    command: redactCommand(command, args),
   };
 }
 

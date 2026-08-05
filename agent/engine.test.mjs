@@ -488,6 +488,77 @@ test("repeated identical failure stops instead of retrying", async () => {
   assert.equal(run.revisionRound, 1);
 });
 
+/* ── Adapter configuration faults ────────────────────────────────────────── */
+
+test("an adapter that throws ends the run at ADAPTER_CONFIGURATION_ERROR", async () => {
+  const box = sandbox();
+  // Exactly what the real incident did: assertSafeCommand threw before spawn.
+  const builder = {
+    name: "throwing-builder",
+    build: async () => {
+      const error = new Error("refusing unsafe Builder flag: --dangerously-skip-permissions");
+      error.category = "adapter_configuration";
+      throw error;
+    },
+  };
+  const reviewer = fakeReviewer([{ review: PASS_REVIEW }]);
+
+  const { run, store } = await runTask(
+    box.taskFile,
+    engineOpts(box, { builder, reviewer, runChecks: passingChecks }),
+  );
+
+  // Controlled terminal state, not an uncaught stack trace.
+  assert.equal(run.state, "ADAPTER_CONFIGURATION_ERROR");
+  assert.equal(run.errorCategory, "adapter_configuration");
+  assert.match(run.errorMessage, /refusing unsafe Builder flag/);
+  assert.equal(reviewer.calls, 0);
+
+  // The report records what a human needs to triage it.
+  assert.equal(run.stage, "complete");
+  assert.equal(run.lastSuccessfulStage, "planning");
+  assert.equal(run.worktreeCreated, true, "the worktree was created before the fault");
+  assert.equal(run.modelInvoked, false, "no model ran: the adapter refused before spawning");
+  assert.ok(run.endedAt, "a terminal run records when it ended");
+
+  const report = readFileSync(store.file("final-report.md"), "utf8");
+  assert.match(report, /ADAPTER_CONFIGURATION_ERROR/);
+  assert.match(report, /Error category \| adapter_configuration/);
+  assert.match(report, /Model invoked \| false/);
+  assert.match(report, /Worktree created \| true/);
+
+  // A run that ended in a recorded terminal state is not resumable.
+  assert.equal(run.state !== "RUNNING", true, "the run must not be stranded at RUNNING");
+});
+
+test("a non-configuration adapter throw is recorded as FAILED", async () => {
+  const box = sandbox();
+  const builder = {
+    name: "exploding-builder",
+    build: async () => {
+      const error = new Error("something else broke");
+      error.category = "builder";
+      throw error;
+    },
+  };
+  const { run } = await runTask(box.taskFile, engineOpts(box, { builder }));
+  assert.equal(run.state, "FAILED");
+  assert.equal(run.errorCategory, "builder");
+  assert.equal(run.modelInvoked, false);
+});
+
+test("a successful adapter call records modelInvoked", async () => {
+  const box = sandbox();
+  const builder = fakeBuilder([{ files: { "src/feature.ts": "x\n" } }]);
+  const reviewer = fakeReviewer([{ review: PASS_REVIEW }]);
+  const { run } = await runTask(
+    box.taskFile,
+    engineOpts(box, { builder, reviewer, runChecks: passingChecks }),
+  );
+  assert.equal(run.modelInvoked, true);
+  assert.equal(run.errorCategory, null);
+});
+
 /* ── Malformed model output ──────────────────────────────────────────────── */
 
 test("malformed Builder output fails the run", async () => {

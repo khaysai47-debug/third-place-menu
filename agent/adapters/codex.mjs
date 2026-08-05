@@ -16,6 +16,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { validateReview } from "../schemas.mjs";
+import { AdapterConfigurationError, flagNames, parseArgv, redactCommand } from "./argv.mjs";
 
 export const DEFAULTS = {
   timeoutMs: 15 * 60 * 1000,
@@ -23,8 +24,6 @@ export const DEFAULTS = {
 };
 
 const CLI = process.platform === "win32" ? "codex.cmd" : "codex";
-
-const UNSAFE_FLAGS = ["--full-auto", "danger-full-access", "--yolo", "workspace-write"];
 
 /** Build the argv for a review. Pure, so tests can assert it without spawning. */
 export function buildCommand({ prompt, worktree, outputFile, sandbox = DEFAULTS.sandbox } = {}) {
@@ -42,13 +41,59 @@ export function buildCommand({ prompt, worktree, outputFile, sandbox = DEFAULTS.
   return { command: CLI, args };
 }
 
-/** Guard: refuse any command that would let the Reviewer write. */
+/** Flags whose NEXT argv token is their value. The prompt is a positional. */
+export const VALUE_FLAGS = new Set([
+  "--sandbox",
+  "-s",
+  "--cd",
+  "-C",
+  "--output-last-message",
+  "--model",
+  "-m",
+  "--config",
+  "-c",
+  "--image",
+  "-i",
+]);
+
+/** Flags that must never appear as an actual argv FLAG token. */
+export const UNSAFE_FLAGS = new Set([
+  "--full-auto",
+  "--yolo",
+  "--dangerously-bypass-approvals-and-sandbox",
+  "--skip-permissions",
+]);
+
+/** The only sandbox the Reviewer may run under. It must not be able to write. */
+export const REQUIRED_SANDBOX = "read-only";
+
+/**
+ * Guard: refuse any command that would let the Reviewer write.
+ *
+ * Inspects only real argv flags and their values. The previous version joined
+ * argv into a string and asserted it CONTAINED "read-only" — which the reviewed
+ * diff could satisfy on its own, letting a `workspace-write` sandbox through.
+ * That was a false negative in a safety check; this compares the actual value
+ * of `--sandbox` instead.
+ *
+ * @throws {AdapterConfigurationError}
+ */
 export function assertSafeCommand({ args }) {
-  const joined = args.join(" ");
-  for (const flag of UNSAFE_FLAGS) {
-    if (joined.includes(flag)) throw new Error(`refusing unsafe Reviewer flag: ${flag}`);
+  const parsed = parseArgv(args, VALUE_FLAGS);
+  const refuse = (message) => {
+    throw new AdapterConfigurationError(message);
+  };
+
+  for (const flag of flagNames(parsed)) {
+    if (UNSAFE_FLAGS.has(flag)) refuse(`refusing unsafe Reviewer flag: ${flag}`);
   }
-  if (!joined.includes("read-only")) throw new Error("Reviewer must run with --sandbox read-only");
+
+  const sandbox = parsed.flags.get("--sandbox") ?? parsed.flags.get("-s");
+  if (sandbox !== REQUIRED_SANDBOX) {
+    refuse(`Reviewer must run with --sandbox ${REQUIRED_SANDBOX}, got ${sandbox ?? "(unset)"}`);
+  }
+
+  return parsed;
 }
 
 /**
@@ -122,7 +167,7 @@ export function invokeReviewer({
     stdout,
     stderr,
     lastMessage,
-    command: `${command} ${args.join(" ")}`,
+    command: redactCommand(command, args),
   };
 
   if (proc.error?.code === "ETIMEDOUT" || proc.signal === "SIGTERM") {

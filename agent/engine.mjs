@@ -119,6 +119,11 @@ export async function runTask(taskFile, given = {}) {
     findings: [],
     reviewVerdict: null,
     lastSignature: null,
+    // Failure forensics, always present so a report never has to guess.
+    errorCategory: null,
+    errorMessage: null,
+    worktreeCreated: false,
+    modelInvoked: false,
     executionGates: preflight.gates,
     notifications: [],
     notes: [],
@@ -148,11 +153,14 @@ export async function runTask(taskFile, given = {}) {
     });
     run.branch = workspace.branch;
     run.worktree = workspace.worktree;
+    run.worktreeCreated = true;
     if (!workspace.linkedNodeModules) {
       run.notes.push("node_modules could not be linked into the worktree; checks may fail");
     }
   } catch (error) {
-    run.notes.push(`workspace creation failed: ${error.message}`);
+    run.errorCategory = "workspace";
+    run.errorMessage = safeMessage(error);
+    run.notes.push(`workspace creation failed: ${run.errorMessage}`);
     return finish(store, run, "FAILED", opts);
   }
 
@@ -401,7 +409,29 @@ async function tryRevision(
  */
 async function invokeWithPauses(store, run, opts, invoke) {
   for (;;) {
-    const value = await invoke();
+    let value;
+    try {
+      value = await invoke();
+    } catch (error) {
+      // An adapter that refuses to construct a command — a bad flag, a bad
+      // permission mode, a malformed session id — is a RUNNER configuration
+      // fault, not a model failure. It must end the run in a recorded terminal
+      // state, never as an uncaught stack trace that strands the run at
+      // RUNNING with no report.
+      const category = error?.category ?? "adapter_configuration";
+      run.errorCategory = category;
+      run.errorMessage = safeMessage(error);
+      run.notes.push(`adapter configuration error: ${run.errorMessage}`);
+      notify(run, "blocked", `adapter refused to run: ${run.errorMessage}`);
+      const state = category === "adapter_configuration" ? "ADAPTER_CONFIGURATION_ERROR" : "FAILED";
+      return { paused: true, result: await finish(store, run, state, opts) };
+    }
+
+    // The adapter returned, so a model process actually ran (or was attempted
+    // and reported a pause). A pre-spawn configuration refusal never reaches
+    // this line, which is why it leaves modelInvoked false.
+    run.modelInvoked = true;
+
     const pauseState = PAUSING_OUTCOMES[value.outcome];
     if (!pauseState) return { paused: false, value };
 
@@ -468,6 +498,17 @@ async function invokeWithPauses(store, run, opts, invoke) {
   }
 }
 
+/**
+ * A message safe to write into a run report: one line, bounded, and never the
+ * command itself (which carries the whole prompt).
+ */
+export function safeMessage(error, limit = 300) {
+  const raw = String(error?.message ?? error ?? "unknown error")
+    .replace(/\s+/g, " ")
+    .trim();
+  return raw.length > limit ? `${raw.slice(0, limit)}…` : raw;
+}
+
 const pauseKey = (outcome) =>
   ({ usage_limit: "usage_limit", auth_failure: "auth_required", network_failure: "network_error" })[
     outcome
@@ -492,6 +533,7 @@ const TERMINAL = new Set([
   "APPROVAL_MISSING",
   "APPROVAL_INVALID",
   "APPROVAL_STALE",
+  "ADAPTER_CONFIGURATION_ERROR",
 ]);
 
 export const isTerminal = (state) => TERMINAL.has(state);
