@@ -24,7 +24,10 @@
     "test:payment-review": "node scripts/test-payment-review-notify.mjs",
     "test:supabase-auth": "node scripts/test-supabase-auth.mjs",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "agent:test": "node --test agent/agent.test.mjs",
+    "agent:validate": "node agent/cli.mjs validate",
+    "agent:dry-run": "node agent/cli.mjs dry-run"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

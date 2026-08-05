@@ -1,0 +1,35 @@
+{
+  "runId": "run-20260805T094129Z-ATLAS-001",
+  "taskId": "ATLAS-001",
+  "taskFile": "project/tasks/ATLAS-001.json",
+  "timestamp": "2026-08-05T09:41:29.134Z",
+  "mode": "dry-run",
+  "authorizes": false,
+  "baseCommit": "1c1e8908dc14ce49f0f188d66870447eb0b40a9c",
+  "currentCommit": "1c1e8908dc14ce49f0f188d66870447eb0b40a9c",
+  "repositoryStatus": "M package.json\n?? .gitattributes\n?? AGENTS.md\n?? agent/\n?? project/",
+  "repositoryClean": false,
+  "validation": {
+    "valid": true,
+    "errors": []
+  },
+  "approval": {
+    "approved": false,
+    "approvedBy": null
+  },
+  "proposedBranch": "agent/ATLAS-001-customer-menu-dark-mode",
+  "proposedWorktree": "D:\\Projects\\third-place-menu-agent-worktrees\\ATLAS-001",
+  "worktreeState": null,
+  "requiredChecks": [
+    "typecheck",
+    "lint",
+    "build"
+  ],
+  "checkResults": [],
+  "protectedActions": [],
+  "executionGates": [],
+  "notes": [
+    "task is not approved — no work may start"
+  ],
+  "finalStatus": "READY_FOR_APPROVAL"
+}

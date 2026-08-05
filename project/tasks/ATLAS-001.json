@@ -1,0 +1,41 @@
+{
+  "taskId": "ATLAS-001",
+  "title": "Customer menu dark mode",
+  "objective": "Give the customer-facing menu a dark mode with an explicit toggle, defaulting to the visitor's system preference and remembering their choice.",
+  "context": "Proposed, not approved, and not implemented. The customer menu is currently light-only. Staff dashboards are out of scope: they are used during service and a colour change there is a separate, higher-risk decision. This task touches presentation only — no Messenger, ordering, payment, n8n or Supabase behaviour may change.",
+  "owner": "Shan Chin",
+  "riskLevel": "low",
+  "baseCommit": "1c1e8908dc14ce49f0f188d66870447eb0b40a9c",
+  "allowedPaths": ["src/"],
+  "forbiddenPaths": ["api/", "scripts/", "docs/", "agent/", "project/", "vercel.json"],
+  "acceptanceCriteria": [
+    "Dark mode applies to the customer menu only.",
+    "A clearly visible, labelled light/dark toggle is available on the customer menu.",
+    "With no stored preference, the theme follows the system preference (prefers-color-scheme).",
+    "An explicit choice is persisted and survives a page reload.",
+    "Text and interactive elements meet WCAG AA contrast in both themes.",
+    "Staff dashboards are unchanged.",
+    "Messenger, ordering, payment, n8n and Supabase behaviour are unchanged.",
+    "typecheck, lint and build all pass."
+  ],
+  "requiredChecks": ["typecheck", "lint", "build"],
+  "permissions": [
+    "read_repository",
+    "plan_workspace",
+    "edit_task_workspace",
+    "run_checks",
+    "inspect_local_logs",
+    "review_local_diff",
+    "prepare_reports"
+  ],
+  "stoppingRules": [
+    "Stop if any change is needed outside allowedPaths.",
+    "Stop if a staff dashboard file would be modified.",
+    "Stop if any Messenger, ordering, payment, n8n or Supabase code path would change.",
+    "Stop if the same check fails identically twice.",
+    "Stop and escalate as NEEDS_HUMAN after two revision rounds."
+  ],
+  "approved": false,
+  "approvedAt": null,
+  "approvedBy": null
+}

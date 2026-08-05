@@ -1,0 +1,57 @@
+# Line endings.
+#
+# The repository is stored LF. Before this file existed, core.autocrlf=true
+# checked every text file out as CRLF while Prettier defaults to endOfLine:"lf",
+# so `npm run lint` reported a stray CR on essentially every line of every file
+# (25,637 errors). These rules make the checkout match the storage.
+#
+# Attributes win over core.autocrlf, so no local Git configuration is required.
+
+# Default: detect text, and check text out as LF on every platform.
+* text=auto eol=lf
+
+# Source
+*.js    text eol=lf
+*.mjs   text eol=lf
+*.cjs   text eol=lf
+*.jsx   text eol=lf
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.css   text eol=lf
+*.html  text eol=lf
+
+# Data and config
+*.json  text eol=lf
+*.jsonc text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.toml  text eol=lf
+*.sql   text eol=lf
+*.md    text eol=lf
+
+# Shell scripts must be LF or they will not run.
+*.sh    text eol=lf
+*.bash  text eol=lf
+
+# Environment examples (never real secrets — those are untracked).
+.env.example    text eol=lf
+*.env.example   text eol=lf
+
+# Windows-only scripts: CRLF is required by cmd.exe and PowerShell tooling.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary: never touched, never diffed as text.
+*.jpg  binary
+*.jpeg binary
+*.png  binary
+*.gif  binary
+*.webp binary
+*.avif binary
+*.ico  binary
+*.pdf  binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.otf   binary
