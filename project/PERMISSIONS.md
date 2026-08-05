@@ -46,6 +46,26 @@ Explicit, named, human approval every time. Never batched with anything else.
 | `order_or_payment` | Create or alter a real order or payment |
 | `destructive_production_action` | Any other destructive Production action |
 
+## How approval is granted
+
+Approval is **not** a field in a tracked file. It is a receipt written outside
+the repository by `npm run agent:approve -- --task <file> --by "Your Name"`,
+binding one named human to one exact task content (SHA-256) at one exact base
+commit.
+
+- Approving changes nothing in the repository — no dirty tree, no commit, no
+  moved HEAD.
+- Editing the task after approval invalidates the receipt (`APPROVAL_STALE`).
+- A task file carrying `approved: true` is a validation **error**; it authorizes
+  nothing and must not look as though it does.
+- Receipts contain no secrets. They live in `<repo>-agent-state/approvals/`,
+  overridable with `--state-dir` or `ATLAS_AGENT_STATE_DIR`.
+
+`agent:approve` itself is Tier 1: it reads the repository and writes one file
+outside it. It creates no branch, no worktree, no commit, and invokes no model.
+It refuses to approve a task that requests any Tier 2 or Tier 3 permission —
+those need their own separate human decision, not this command.
+
 ## What `agent:run` does automatically
 
 Under Tier 1, and only after a fresh preflight passes, an execution run may:

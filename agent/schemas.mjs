@@ -58,6 +58,9 @@ export const FINAL_STATUSES = [
   "DIRTY_REPOSITORY",
   "WORKTREE_CONFLICT",
   "BRANCH_EXISTS",
+  "APPROVAL_MISSING",
+  "APPROVAL_INVALID",
+  "APPROVAL_STALE",
   "FAILED",
 ];
 
@@ -125,6 +128,9 @@ export const STATE_PHASE = {
   DIRTY_REPOSITORY: "terminal",
   WORKTREE_CONFLICT: "terminal",
   BRANCH_EXISTS: "terminal",
+  APPROVAL_MISSING: "terminal",
+  APPROVAL_INVALID: "terminal",
+  APPROVAL_STALE: "terminal",
   FAILED: "terminal",
 };
 
@@ -240,12 +246,32 @@ const isNonEmptyString = (value) => typeof value === "string" && value.trim() !=
 /**
  * Validate a task object.
  *
- * @returns {{ valid: boolean, errors: string[] }}
+ * A task file is a pure SPECIFICATION. It carries no approval: consent lives in
+ * an external receipt (see agent/approval.mjs and decision D-016). The three old
+ * approval fields are therefore deprecated — tolerated as a warning so existing
+ * drafts still validate, except `approved: true`, which is a hard error. A file
+ * claiming to be approved would otherwise read as authorization to a human while
+ * meaning nothing to the runner, which is the worst of both worlds.
+ *
+ * @returns {{ valid: boolean, errors: string[], warnings: string[] }}
  */
 export function validateTask(task) {
   const errors = [];
+  const warnings = [];
   if (task === null || typeof task !== "object" || Array.isArray(task)) {
-    return { valid: false, errors: ["task must be a JSON object"] };
+    return { valid: false, errors: ["task must be a JSON object"], warnings };
+  }
+
+  for (const field of ["approved", "approvedAt", "approvedBy"]) {
+    if (field in task) {
+      warnings.push(`${field} is deprecated in task files — approval lives in an external receipt`);
+    }
+  }
+  if (task.approved === true) {
+    errors.push(
+      "approved: true in a tracked task file does not authorize anything and must be removed — " +
+        "run `npm run agent:approve` to create an external approval receipt instead",
+    );
   }
 
   for (const field of REQUIRED_STRINGS) {
@@ -287,14 +313,7 @@ export function validateTask(task) {
     }
   }
 
-  if (typeof task.approved !== "boolean") {
-    errors.push("approved must be a boolean");
-  } else if (task.approved) {
-    if (!isNonEmptyString(task.approvedAt)) errors.push("approved tasks need approvedAt");
-    if (!isNonEmptyString(task.approvedBy)) errors.push("approved tasks need approvedBy");
-  }
-
-  return { valid: errors.length === 0, errors };
+  return { valid: errors.length === 0, errors, warnings };
 }
 
 /** Permissions the task requests that the runner may never grant itself. */

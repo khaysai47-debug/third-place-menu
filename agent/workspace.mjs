@@ -22,6 +22,64 @@ export const statusShort = (cwd) => git(["status", "--short"], cwd);
 
 export const isClean = (cwd) => statusShort(cwd) === "";
 
+/**
+ * Is `head` an acceptable current commit for a task based on `baseCommit`?
+ *
+ * THE REGRESS THIS SOLVES
+ *
+ *   A task file is tracked, and its baseCommit is supposed to be HEAD. But
+ *   committing the task file MOVES HEAD, so the task it just committed now
+ *   names the previous commit. Set baseCommit to the new HEAD and commit again,
+ *   and HEAD moves again. Strict equality can never be satisfied for a tracked
+ *   task file — the flow "prepare task → commit task → approve" would be
+ *   impossible.
+ *
+ * THE RULE
+ *
+ *   HEAD must be baseCommit, OR a descendant of it whose every changed file is
+ *   under `project/` — the agent's own memory directory, which holds no
+ *   application code. Committing a task specification, a decision record or a
+ *   run report therefore does not invalidate the base it names. Committing a
+ *   single line of `src/` does.
+ *
+ * @returns {{ ok: boolean, reason: string, drifted: string[] }}
+ */
+export function baseCommitAcceptable(baseCommit, head, cwd) {
+  if (baseCommit === head) return { ok: true, reason: "HEAD is the base commit", drifted: [] };
+
+  try {
+    execFileSync("git", ["merge-base", "--is-ancestor", baseCommit, head], {
+      cwd,
+      stdio: "ignore",
+    });
+  } catch {
+    return {
+      ok: false,
+      reason: `base ${baseCommit} is not an ancestor of HEAD ${head}`,
+      drifted: [],
+    };
+  }
+
+  const changed = git(["diff", "--name-only", `${baseCommit}..${head}`], cwd)
+    .split("\n")
+    .filter(Boolean)
+    .map((f) => f.replace(/\\/g, "/"));
+  const drifted = changed.filter((f) => f !== "project" && !f.startsWith("project/"));
+
+  if (drifted.length > 0) {
+    return {
+      ok: false,
+      reason: `HEAD has moved past the base with non-project changes: ${drifted.slice(0, 5).join(", ")}`,
+      drifted,
+    };
+  }
+  return {
+    ok: true,
+    reason: `HEAD is ${changed.length} project-only commit(s) ahead of the base`,
+    drifted: [],
+  };
+}
+
 /** Does a local branch already exist? */
 export function branchExists(name, cwd) {
   try {

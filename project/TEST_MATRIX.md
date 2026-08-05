@@ -19,6 +19,19 @@ The agent itself is covered by `npm run agent:test`, which runs two suites:
 | --- | --- | --- |
 | `agent/agent.test.mjs` | (included in `agent:test`) | Coordinator gates, exit-code mapping, checkpoint and schema validation, using a fake git reader |
 | `agent/engine.test.mjs` | `npm run agent:test:engine` | The full execution loop against **real temporary git repositories** with **fake Builder and Reviewer adapters** |
+| `agent/approval.test.mjs` | (included in `agent:test`) | External approval receipts: canonical hashing, the approve command, every rejection status, and the guarantee that approving touches no repository |
+
+The approval suite covers: hash stability across formatting and key order; hash
+sensitivity to any instruction change; the default receipt directory being
+outside the repository; deprecated task fields; a valid receipt; missing,
+malformed, wrong-task-id, missing-approver, invalid- and future-timestamp
+receipts; a stale hash after the task is edited; a receipt bound to a different
+base commit; committing the task file not invalidating its own base; refusal on
+a dirty repository, on a moved base, on a missing approver, and on a task
+requesting a protected permission; and `agent:run` refusing both a missing and a
+stale approval **without invoking any adapter**. Each test asserts the temporary
+repository stays clean and gains no commit, branch or worktree, and receipts are
+written to a temp directory outside it that is removed afterwards.
 
 The engine suite covers: preflight refusals (unapproved, wrong base commit, dirty
 repository, protected permission, existing branch) with an assertion that **no

@@ -15,10 +15,12 @@
 // A dry run does not "pre-clear" a later execution. Execution re-runs the whole
 // preflight itself, and a stale READY_TO_RUN from ten minutes ago means nothing.
 import { readFileSync } from "node:fs";
+import { approvalsDir, hashTask, verifyApproval } from "./approval.mjs";
 import { resolveChecks } from "./checks.mjs";
 import { makeRunId, RUNS_DIR, writeReport } from "./report.mjs";
 import { protectedActions, validateTask } from "./schemas.mjs";
 import {
+  baseCommitAcceptable,
   branchExists,
   headCommit,
   planWorkspace,
@@ -34,7 +36,13 @@ export const OK_STATUSES = ["READY_TO_RUN", "READY_FOR_APPROVAL"];
  * exists so the test suites can drive every gate deterministically without
  * creating branches, worktrees or commits. Production callers never pass it.
  */
-export const liveGit = { headCommit, statusShort, worktreeState, branchExists };
+export const liveGit = {
+  headCommit,
+  statusShort,
+  worktreeState,
+  branchExists,
+  baseCommitAcceptable: (base, head) => baseCommitAcceptable(base, head),
+};
 
 /** The same readers, bound to a specific repository root. */
 export const liveGitAt = (cwd) => ({
@@ -43,6 +51,7 @@ export const liveGitAt = (cwd) => ({
   worktreeState: (p) => worktreeState(p, cwd),
   branchExists: (name) => branchExists(name, cwd),
   planWorkspace: (task) => planWorkspace(task, cwd),
+  baseCommitAcceptable: (base, head) => baseCommitAcceptable(base, head, cwd),
 });
 
 /**
@@ -83,7 +92,10 @@ const gate = (name, ok, detail) => ({ name, ok, detail });
  * @returns {{ status, gates, task, validation, currentCommit, repositoryStatus,
  *             repositoryClean, workspace, worktreeState, protectedActions }}
  */
-export function executionPreflight(taskFile, { git = liveGit, expectWorktree = null } = {}) {
+export function executionPreflight(
+  taskFile,
+  { git = liveGit, expectWorktree = null, stateDir, repoRoot = process.cwd() } = {},
+) {
   const gates = [];
   const out = {
     status: "FAILED",
@@ -96,6 +108,8 @@ export function executionPreflight(taskFile, { git = liveGit, expectWorktree = n
     workspace: null,
     worktreeState: null,
     protectedActions: [],
+    approval: null,
+    approvalDir: null,
   };
 
   // 1. Task, re-read from disk. Not the object a caller happens to be holding.
@@ -111,11 +125,15 @@ export function executionPreflight(taskFile, { git = liveGit, expectWorktree = n
   gates.push(gate("no_protected_actions", noProtected, out.protectedActions.join(", ") || "none"));
   if (!noProtected) return { ...out, status: "BLOCKED_PERMISSION" };
 
-  // 3. Approval, re-read from the file. An execution never trusts an earlier
-  //    "it was approved when we planned it".
-  const approved = task.approved === true;
-  gates.push(gate("approved", approved, approved ? `by ${task.approvedBy}` : "not approved"));
-  if (!approved) return { ...out, status: "READY_FOR_APPROVAL" };
+  // 3. Approval, re-read from the EXTERNAL RECEIPT and re-verified against the
+  //    task exactly as it sits on disk. The task file itself never authorizes
+  //    anything, and an execution never trusts an earlier "it was approved when
+  //    we planned it". See agent/approval.mjs and decision D-016.
+  const dir = approvalsDir({ stateDir, repoRoot });
+  out.approval = verifyApproval({ task, dir });
+  out.approvalDir = dir;
+  gates.push(gate("approval", out.approval.status === "APPROVED", out.approval.detail));
+  if (out.approval.status !== "APPROVED") return { ...out, status: out.approval.status };
 
   // 4. Live HEAD vs. the task's expected base commit.
   try {
@@ -127,9 +145,11 @@ export function executionPreflight(taskFile, { git = liveGit, expectWorktree = n
   }
   out.repositoryClean = out.repositoryStatus === "";
 
-  const onBase = out.currentCommit === task.baseCommit;
-  gates.push(gate("base_commit", onBase, `HEAD ${out.currentCommit} vs base ${task.baseCommit}`));
-  if (!onBase) return { ...out, status: "BASE_COMMIT_MISMATCH" };
+  const onBase = git.baseCommitAcceptable
+    ? git.baseCommitAcceptable(task.baseCommit, out.currentCommit)
+    : { ok: out.currentCommit === task.baseCommit, reason: `HEAD ${out.currentCommit}` };
+  gates.push(gate("base_commit", onBase.ok, onBase.reason));
+  if (!onBase.ok) return { ...out, status: "BASE_COMMIT_MISMATCH" };
 
   // 5. Working tree cleanliness.
   gates.push(gate("clean_tree", out.repositoryClean, out.repositoryClean ? "clean" : "dirty"));
@@ -185,7 +205,10 @@ export function executionPreflight(taskFile, { git = liveGit, expectWorktree = n
  * Inspect a task against the current repository and write a run report.
  * Makes no Git changes whatsoever, and authorizes nothing.
  */
-export function dryRun(taskFile, { git = liveGit, runsDir = RUNS_DIR } = {}) {
+export function dryRun(
+  taskFile,
+  { git = liveGit, runsDir = RUNS_DIR, stateDir, repoRoot = process.cwd() } = {},
+) {
   const timestamp = new Date().toISOString();
   const { task, error } = loadTask(taskFile);
   const validation = error ? { valid: false, errors: [error] } : validateTask(task);
@@ -203,7 +226,7 @@ export function dryRun(taskFile, { git = liveGit, runsDir = RUNS_DIR } = {}) {
     repositoryStatus: null,
     repositoryClean: null,
     validation,
-    approval: { approved: task?.approved === true, approvedBy: task?.approvedBy ?? null },
+    approval: { status: "APPROVAL_MISSING", approvedBy: null, taskHash: null, detail: null },
     proposedBranch: null,
     proposedWorktree: null,
     worktreeState: null,
@@ -244,18 +267,38 @@ export function dryRun(taskFile, { git = liveGit, runsDir = RUNS_DIR } = {}) {
   report.proposedBranch = workspace.branch;
   report.proposedWorktree = workspace.worktree;
 
-  // Draft rules: an unapproved task is waiting on a human, not on a clean tree.
-  // It stops here without ever touching the execution gate.
-  if (!report.approval.approved) {
-    report.notes.push("task is not approved — no work may start");
+  for (const warning of validation.warnings ?? []) report.notes.push(`deprecated: ${warning}`);
+
+  // Approval comes from the external receipt, never from the task file.
+  const dir = approvalsDir({ stateDir, repoRoot });
+  const approval = verifyApproval({ task, dir });
+  report.approval = {
+    status: approval.status,
+    approvedBy: approval.receipt?.approvedBy ?? null,
+    taskHash: hashTask(task),
+    detail: approval.detail,
+    receiptFile: approval.receiptFile,
+  };
+
+  // Draft rules: a task nobody has approved is waiting on a human, not on a
+  // clean tree. A dry run reports that as READY_FOR_APPROVAL rather than
+  // APPROVAL_MISSING — the same condition, named for the draft context. It
+  // stops here without ever touching the execution gate.
+  if (approval.status === "APPROVAL_MISSING") {
+    report.notes.push(`no approval receipt — run agent:approve (${dir})`);
     report.finalStatus = "READY_FOR_APPROVAL";
+    return finish(report, runsDir);
+  }
+  if (approval.status !== "APPROVED") {
+    report.notes.push(`approval problem: ${approval.detail}`);
+    report.finalStatus = approval.status;
     return finish(report, runsDir);
   }
 
   // Approved: run the real execution gate, fresh. Its verdict is this report's
   // verdict — but the report does NOT carry that authorization forward. An
   // execution must run the preflight again for itself.
-  const preflight = executionPreflight(taskFile, { git });
+  const preflight = executionPreflight(taskFile, { git, stateDir, repoRoot });
   report.executionGates = preflight.gates;
   report.worktreeState = preflight.worktreeState;
   report.finalStatus = preflight.status;

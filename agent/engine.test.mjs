@@ -22,6 +22,7 @@ import {
   buildCommand as buildCodexCommand,
   parseReview,
 } from "./adapters/codex.mjs";
+import { buildReceipt, writeReceipt } from "./approval.mjs";
 import { liveGitAt } from "./coordinator.mjs";
 import { resumeRun, runTask } from "./engine.mjs";
 import { RunStore } from "./runstore.mjs";
@@ -41,9 +42,6 @@ const BASE_TASK = {
   requiredChecks: ["typecheck"],
   permissions: ["read_repository", "run_checks"],
   stoppingRules: ["Stop on anything unexpected."],
-  approved: true,
-  approvedAt: "2026-08-05T00:00:00Z",
-  approvedBy: "test",
 };
 
 /* ── Temporary repository ────────────────────────────────────────────────── */
@@ -64,7 +62,7 @@ afterEach(() => {
   }
 });
 
-function sandbox({ task = {}, dirty = false } = {}) {
+function sandbox({ task = {}, dirty = false, approve = true } = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), "atlas-engine-"));
   const repo = path.join(dir, "repo");
   mkdirSync(path.join(repo, "src"), { recursive: true });
@@ -87,6 +85,12 @@ function sandbox({ task = {}, dirty = false } = {}) {
   const full = { ...BASE_TASK, baseCommit, ...task };
   writeFileSync(taskFile, JSON.stringify(full));
 
+  // Approval is an EXTERNAL receipt, written outside the temp repository.
+  const state = path.join(dir, "state", "approvals");
+  if (approve) {
+    writeReceipt(buildReceipt({ task: full, taskFile, approvedBy: "test" }), state);
+  }
+
   const box = {
     dir,
     repo,
@@ -94,6 +98,7 @@ function sandbox({ task = {}, dirty = false } = {}) {
     task: full,
     baseCommit,
     runsRoot: path.join(dir, "runs"),
+    state,
     branches: [`agent/${full.taskId}-${full.title.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`],
     worktreeFor: () => path.join(dir, `${path.basename(repo)}-agent-worktrees`, full.taskId),
     git,
@@ -105,6 +110,7 @@ function sandbox({ task = {}, dirty = false } = {}) {
 const engineOpts = (box, extra = {}) => ({
   repoRoot: box.repo,
   runsRoot: box.runsRoot,
+  stateDir: box.state,
   git: liveGitAt(box.repo),
   autoResume: false,
   sleep: async () => {},
@@ -205,15 +211,15 @@ const failingChecks = () => [
 
 /* ── Preflight refusals: no adapter may be invoked ───────────────────────── */
 
-test("unapproved task is blocked before any adapter is invoked", async () => {
-  const box = sandbox({ task: { approved: false, approvedAt: null, approvedBy: null } });
+test("a task with no approval receipt is blocked before any adapter is invoked", async () => {
+  const box = sandbox({ approve: false });
   const builder = fakeBuilder([{ files: {} }]);
   const reviewer = fakeReviewer([{ review: PASS_REVIEW }]);
 
   const { run } = await runTask(box.taskFile, engineOpts(box, { builder, reviewer }));
 
-  assert.equal(run.state, "READY_FOR_APPROVAL");
-  assert.equal(builder.calls, 0, "Builder must not be invoked for an unapproved task");
+  assert.equal(run.state, "APPROVAL_MISSING");
+  assert.equal(builder.calls, 0, "Builder must not be invoked without an approval receipt");
   assert.equal(reviewer.calls, 0);
   assert.equal(run.worktree, null, "no worktree may be created");
 });

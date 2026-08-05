@@ -54,6 +54,8 @@ function options(given = {}) {
   return {
     repoRoot,
     runsRoot: given.runsRoot ?? RUNS_ROOT,
+    // Where approval receipts live. Undefined means the default outside the repo.
+    stateDir: given.stateDir,
     builder: given.builder ?? claudeBuilder,
     reviewer: given.reviewer ?? codexReviewer,
     runChecks: given.runChecks ?? realRunChecks,
@@ -83,7 +85,12 @@ export async function runTask(taskFile, given = {}) {
   const startedAt = opts.now().toISOString();
 
   // The authorizing gate, fresh. A dry run's verdict is worth nothing here.
-  const preflight = executionPreflight(taskFile, { git: opts.git, expectWorktree: false });
+  const preflight = executionPreflight(taskFile, {
+    git: opts.git,
+    expectWorktree: false,
+    stateDir: opts.stateDir,
+    repoRoot: opts.repoRoot,
+  });
   const taskId = preflight.task?.taskId ?? "UNKNOWN";
   const store = new RunStore(makeRunId(taskId, startedAt), opts.runsRoot);
 
@@ -178,7 +185,12 @@ export async function resumeRun(runId, given = {}) {
   persist(store, run);
 
   // Full revalidation. The worktree must still be the one we created.
-  const preflight = executionPreflight(run.taskFile, { git: opts.git, expectWorktree: true });
+  const preflight = executionPreflight(run.taskFile, {
+    git: opts.git,
+    expectWorktree: true,
+    stateDir: opts.stateDir,
+    repoRoot: opts.repoRoot,
+  });
   if (preflight.status !== "READY_TO_RUN") {
     run.notes.push(`resume revalidation failed: ${preflight.status}`);
     run.executionGates = preflight.gates;
@@ -435,7 +447,12 @@ async function invokeWithPauses(store, run, opts, invoke) {
     await opts.sleep(waitMs);
 
     // Revalidate before touching anything again. Never restart blindly.
-    const preflight = executionPreflight(run.taskFile, { git: opts.git, expectWorktree: true });
+    const preflight = executionPreflight(run.taskFile, {
+      git: opts.git,
+      expectWorktree: true,
+      stateDir: opts.stateDir,
+      repoRoot: opts.repoRoot,
+    });
     if (preflight.status !== "READY_TO_RUN") {
       run.notes.push(`resume revalidation failed: ${preflight.status}`);
       run.executionGates = preflight.gates;
@@ -472,6 +489,9 @@ const TERMINAL = new Set([
   "WORKTREE_CONFLICT",
   "BRANCH_EXISTS",
   "READY_FOR_APPROVAL",
+  "APPROVAL_MISSING",
+  "APPROVAL_INVALID",
+  "APPROVAL_STALE",
 ]);
 
 export const isTerminal = (state) => TERMINAL.has(state);

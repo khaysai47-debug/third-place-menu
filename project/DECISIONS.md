@@ -210,3 +210,46 @@ perfectly legitimate change was reported as a `SCOPE_VIOLATION` on the second
 revision round. `-z` also removes quoting and escaping, so a filename with a
 space or a non-ASCII character parses like any other. The engine tests now cover
 both the happy path and the multi-round case that exposed it.
+
+## D-016 — The task file is immutable; approval is an external receipt
+
+**Date:** 2026-08-05
+**Decision:** Task files carry no approval. `approved`, `approvedAt` and
+`approvedBy` are deprecated (warning if present, hard error if `approved: true`).
+Consent is a receipt written to `<repo>-agent-state/approvals/<TASK-ID>.json`,
+outside the repository, containing `approvalVersion`, `taskId`, `taskFile`,
+`taskHash` (SHA-256 over the canonical specification), `baseCommit`, `approvedBy`
+and `approvedAt`. `agent:run` verifies it before invoking any model, refusing
+with `APPROVAL_MISSING`, `APPROVAL_INVALID` or `APPROVAL_STALE`.
+**Why:** Approving by editing a tracked field made the repository dirty, which
+the execution preflight then refused as `DIRTY_REPOSITORY`. Committing the edit
+to get clean moved HEAD, which broke the `baseCommit` the task named. The old
+design made approval and execution mutually exclusive — you could satisfy one
+gate or the other, never both. Moving consent outside the repository dissolves
+the conflict: approving writes nothing here at all.
+**Bonus property:** binding the receipt to a content hash makes approval
+*specific*. Widen `allowedPaths` after approving and the hash moves, so the run
+stops. Under the old model, editing the task after setting `approved: true` was
+silent — the flag stayed true and the agent executed instructions nobody had
+read. That was the more dangerous bug of the two.
+**Status mapping:** a dry run reports a missing receipt as `READY_FOR_APPROVAL`
+(the draft context) while execution reports `APPROVAL_MISSING` (the authorizing
+context). Same condition, named for who is asking.
+
+## D-017 — HEAD may lead the base commit by `project/`-only commits
+
+**Date:** 2026-08-05
+**Decision:** `baseCommitAcceptable()` accepts HEAD when it equals `baseCommit`,
+or when it is a descendant whose every changed file is under `project/`.
+Anything else is `BASE_COMMIT_MISMATCH`.
+**Why:** Strict `HEAD === baseCommit` is unsatisfiable for a tracked task file.
+The task names the current HEAD; committing the task moves HEAD; updating
+`baseCommit` to the new HEAD and committing moves it again. The documented flow
+"prepare task → commit task → approve" could never complete. The tests caught
+this immediately — the temp repository could not construct a state the approve
+command would accept.
+**Why `project/` specifically:** it is the agent's own memory directory and
+contains no application code, so a commit confined to it cannot change what the
+Builder would be working on. The worktree still branches from `baseCommit`, so
+the code the Builder sees is exactly the code that was approved. Committing one
+line of `src/` moves the code and is correctly refused.

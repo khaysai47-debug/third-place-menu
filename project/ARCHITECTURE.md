@@ -54,6 +54,8 @@ agent/cli.mjs           argument parsing, exit codes
                  ├── agent/checks.mjs       check → npm script, baseline-aware
                  └── agent/runstore.mjs     project/runs/<run-id>/, atomic writes
 
+agent/approval.mjs      canonical task hashing, receipt build/read/verify
+agent/approve.mjs       the `agent:approve` command
 agent/schemas.mjs       task schema, permission tiers, run states, check
                         results, checkpoint and review validation
 agent/report.mjs        flat dry-run reports
@@ -61,11 +63,29 @@ agent/agent.test.mjs    coordinator safety tests
 agent/engine.test.mjs   engine tests (fake adapters, temporary repositories)
 ```
 
+### State outside the repository
+
+```
+D:\Projects\third-place-menu\                      the repository
+D:\Projects\third-place-menu-agent-state\
+    approvals\<TASK-ID>.json                       approval receipts
+D:\Projects\third-place-menu-agent-worktrees\
+    <TASK-ID>\                                     isolated Builder worktrees
+```
+
+Both live **outside** the checkout on purpose. A receipt inside the repository
+would dirty the tree the moment anyone approved anything, and committing it
+would move HEAD past the base commit the approval names. A worktree inside the
+repository would make the Builder's edits show up as changes to the human's
+working copy. Neither is recoverable by being careful; both are prevented by
+living elsewhere.
+
 ### What writes what
 
 | Component | Writes |
 | --- | --- |
 | `coordinator.mjs` | nothing but a dry-run report |
+| `approve.mjs` | one receipt file outside the repository. Nothing inside it. |
 | `workspace.mjs` | one branch, one worktree, and `git add --intent-to-add` **inside the worktree only** |
 | `engine.mjs` | the run directory under `project/runs/` |
 | Claude Builder | files inside the worktree, nothing else (no shell) |

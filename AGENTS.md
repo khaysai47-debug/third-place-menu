@@ -195,26 +195,52 @@ Consequences worth stating plainly:
 ```
 npm run agent:validate -- --task project/tasks/<TASK>.json   # structure only
 npm run agent:dry-run  -- --task project/tasks/<TASK>.json   # inspect, authorize nothing
+npm run agent:approve  -- --task project/tasks/<TASK>.json --by "Your Name"
 npm run agent:run      -- --task project/tasks/<TASK>.json   # execute an APPROVED task
 npm run agent:resume   -- --run <RUN_ID>                     # continue a paused run
 npm run agent:test                                           # all agent tests
 npm run agent:test:engine                                    # engine tests only
 ```
 
-Useful `run`/`resume` flags: `--runs-dir <dir>` (keep reports out of
-`project/runs`), `--no-auto-resume` (pause instead of scheduling a retry),
-`--max-retries <n>`, `--retry-ms <ms>`.
+Useful flags: `--runs-dir <dir>` (keep reports out of `project/runs`),
+`--state-dir <dir>` (where approval receipts live), `--no-auto-resume` (pause
+instead of scheduling a retry), `--max-retries <n>`, `--retry-ms <ms>`.
+
+Approval receipts default to `<repo>-agent-state/approvals/`, outside the
+repository; `ATLAS_AGENT_STATE_DIR` overrides the root.
 
 ### Task approval flow
 
-1. Draft the task JSON in `project/tasks/`. `approved` starts `false`.
-2. `agent:validate` — is it structurally sound?
-3. `agent:dry-run` — what would it do? Stops at `READY_FOR_APPROVAL`.
-4. **A human sets `approved: true` with `approvedAt` and `approvedBy`.** This is
-   a reviewable edit to a versioned file, not an interactive prompt.
-5. `agent:run` — re-validates everything from scratch, then executes.
-6. A human reads the report, inspects the worktree, and decides whether to
-   commit. The agent never does.
+The task file is an **immutable specification**. It says what should be done; it
+never says "yes, do it". Approval is a separate **receipt**, written outside the
+repository, that binds one named human to one exact task content at one exact
+base commit.
+
+```
+1. task prepared      edit project/tasks/<TASK>.json, baseCommit = current HEAD
+2. task committed     commit it — a project/-only commit
+3. clean repository   git status --short is empty
+4. approval receipt   npm run agent:approve -- --task <file> --by "Your Name"
+5. execution          npm run agent:run -- --task <file>
+6. human decision     read the report, inspect the worktree, decide whether to
+                      commit. The agent never does.
+```
+
+Why external? Approving by editing a tracked field made the repository dirty,
+and committing that edit moved HEAD, which broke the very `baseCommit` the task
+named. A receipt outside the repository changes nothing here: no dirty tree, no
+new commit, no moved HEAD. See decision D-016.
+
+Change one word of the task after approving and its SHA-256 moves, so the
+receipt no longer describes it and the run is refused as `APPROVAL_STALE`.
+Approval is consent to a specific thing, not a standing permission.
+
+Step 2 moves HEAD past the `baseCommit` the task names. HEAD may be ahead of the
+base **only** when every commit between them touches `project/` alone — the
+agent's own memory directory, which holds no application code. Committing a task
+specification therefore cannot invalidate the base it names; committing a line of
+`src/` does. Without that rule the sequence above could never be satisfied
+(D-017).
 
 ### Where a run leaves things
 

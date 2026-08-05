@@ -12,6 +12,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
 import { classifyLintResults, hasNewFailure } from "./checks.mjs";
+import { buildReceipt, writeReceipt } from "./approval.mjs";
 import { dryRun, executionPreflight, OK_STATUSES, validate } from "./coordinator.mjs";
 import {
   CHECK_RESULTS,
@@ -49,19 +50,22 @@ const baseTask = (overrides = {}) => ({
   requiredChecks: ["typecheck", "lint", "build"],
   permissions: ["read_repository", "run_checks"],
   stoppingRules: ["Stop on anything unexpected."],
-  approved: false,
-  approvedAt: null,
-  approvedBy: null,
   ...overrides,
 });
 
-const approved = (overrides = {}) =>
-  baseTask({
-    approved: true,
-    approvedAt: "2026-08-05T00:00:00Z",
-    approvedBy: "test",
-    ...overrides,
-  });
+const stateDir = () => path.join(dir, "approvals");
+
+/**
+ * Approval is an EXTERNAL receipt now: the task file never says "yes".
+ * Writing one is what makes a task executable.
+ */
+const approve = (task, patch = {}) => {
+  writeReceipt(
+    { ...buildReceipt({ task, taskFile: "fixture.json", approvedBy: "test" }), ...patch },
+    stateDir(),
+  );
+  return task;
+};
 
 const writeTask = (name, task) => {
   const file = path.join(dir, `${name}.json`);
@@ -77,8 +81,11 @@ const fakeGit = ({ head = BASE, status = "", worktree = "absent" } = {}) => ({
 });
 
 const statusOf = (name, task, gitOptions) =>
-  dryRun(writeTask(name, task), { git: fakeGit(gitOptions), runsDir: runsDir() }).report
-    .finalStatus;
+  dryRun(writeTask(name, task), {
+    git: fakeGit(gitOptions),
+    runsDir: runsDir(),
+    stateDir: stateDir(),
+  }).report.finalStatus;
 
 test("structurally invalid task is rejected", () => {
   const file = writeTask("invalid", baseTask({ riskLevel: "wat", permissions: ["nope"] }));
@@ -89,7 +96,7 @@ test("structurally invalid task is rejected", () => {
   assert.equal(statusOf("invalid2", baseTask({ riskLevel: "wat" })), "INVALID_TASK");
 });
 
-test("unapproved valid task stops at READY_FOR_APPROVAL", () => {
+test("a task with no approval receipt stops at READY_FOR_APPROVAL", () => {
   assert.equal(validateTask(baseTask()).valid, true);
   // Dirty tree and drifted HEAD must not mask the real blocker: no approval.
   assert.equal(
@@ -99,28 +106,37 @@ test("unapproved valid task stops at READY_FOR_APPROVAL", () => {
 });
 
 test("protected action request is blocked", () => {
-  const task = approved({ permissions: ["read_repository", "production_deploy"] });
+  const task = approve(baseTask({ permissions: ["read_repository", "production_deploy"] }));
   assert.equal(statusOf("protected", task), "BLOCKED_PERMISSION");
-  const preflight = executionPreflight(writeTask("protected2", task), { git: fakeGit() });
+  const preflight = executionPreflight(writeTask("protected2", task), {
+    git: fakeGit(),
+    stateDir: stateDir(),
+  });
   assert.equal(preflight.status, "BLOCKED_PERMISSION");
   assert.deepEqual(preflight.protectedActions, ["production_deploy"]);
 });
 
 test("wrong base commit is blocked", () => {
-  assert.equal(statusOf("mismatch", approved(), { head: OTHER }), "BASE_COMMIT_MISMATCH");
+  assert.equal(statusOf("mismatch", approve(baseTask()), { head: OTHER }), "BASE_COMMIT_MISMATCH");
 });
 
 test("dirty repository is blocked for an approved task", () => {
-  assert.equal(statusOf("dirty", approved(), { status: " M src/a.ts" }), "DIRTY_REPOSITORY");
+  assert.equal(
+    statusOf("dirty", approve(baseTask()), { status: " M src/a.ts" }),
+    "DIRTY_REPOSITORY",
+  );
 });
 
 test("foreign worktree path is blocked", () => {
-  assert.equal(statusOf("foreign", approved(), { worktree: "foreign" }), "WORKTREE_CONFLICT");
+  assert.equal(
+    statusOf("foreign", approve(baseTask()), { worktree: "foreign" }),
+    "WORKTREE_CONFLICT",
+  );
 });
 
 test("valid approved low-risk task reaches READY_TO_RUN", () => {
-  const file = writeTask("ready", approved());
-  const { report } = dryRun(file, { git: fakeGit(), runsDir: runsDir() });
+  const file = writeTask("ready", approve(baseTask()));
+  const { report } = dryRun(file, { git: fakeGit(), runsDir: runsDir(), stateDir: stateDir() });
   assert.equal(report.finalStatus, "READY_TO_RUN");
   assert.equal(report.proposedBranch, "agent/TEST-001-test-task");
   // A dry run never authorizes execution, even when every gate passes.
@@ -128,21 +144,24 @@ test("valid approved low-risk task reaches READY_TO_RUN", () => {
 });
 
 test("execution preflight re-reads the task from disk", () => {
-  const file = writeTask("revalidate", approved());
-  assert.equal(executionPreflight(file, { git: fakeGit() }).status, "READY_TO_RUN");
-  // Approval revoked on disk after a clean preflight: the next call must fail.
-  writeFileSync(file, JSON.stringify(baseTask()));
-  assert.equal(executionPreflight(file, { git: fakeGit() }).status, "READY_FOR_APPROVAL");
+  const file = writeTask("revalidate", approve(baseTask()));
+  const opts = { git: fakeGit(), stateDir: stateDir() };
+  assert.equal(executionPreflight(file, opts).status, "READY_TO_RUN");
+  // The task is edited on disk after a clean preflight. The receipt approved
+  // different content, so the next call must refuse.
+  writeFileSync(file, JSON.stringify(baseTask({ objective: "something else entirely" })));
+  assert.equal(executionPreflight(file, opts).status, "APPROVAL_STALE");
 });
 
 test("every gate is recorded in order and stops at the first failure", () => {
-  const { gates, status } = executionPreflight(writeTask("gates", approved()), {
+  const { gates, status } = executionPreflight(writeTask("gates", approve(baseTask())), {
     git: fakeGit({ status: " M src/a.ts" }),
+    stateDir: stateDir(),
   });
   assert.equal(status, "DIRTY_REPOSITORY");
   assert.deepEqual(
     gates.map((g) => g.name),
-    ["task_valid", "no_protected_actions", "approved", "base_commit", "clean_tree"],
+    ["task_valid", "no_protected_actions", "approval", "base_commit", "clean_tree"],
   );
   assert.equal(gates.at(-1).ok, false);
 });
@@ -163,12 +182,24 @@ test("status to exit-code mapping", () => {
   }
 });
 
-test("CLI exits 0 on the real unapproved sample task", () => {
+test("CLI exits 0 on the real sample task with no approval receipt", () => {
   const out = execFileSync(
     process.execPath,
-    ["agent/cli.mjs", "dry-run", "--task", "project/tasks/ATLAS-001.json", "--runs-dir", runsDir()],
+    [
+      "agent/cli.mjs",
+      "dry-run",
+      "--task",
+      "project/tasks/ATLAS-001.json",
+      "--runs-dir",
+      runsDir(),
+      // An isolated approvals directory, so a real receipt on the developer's
+      // machine cannot change what this test observes.
+      "--state-dir",
+      path.join(dir, "cli-approvals"),
+    ],
     { encoding: "utf8" },
   );
+  assert.match(out, /approval {2}APPROVAL_MISSING/);
   assert.match(out, /status {4}READY_FOR_APPROVAL/);
 });
 

@@ -3,8 +3,12 @@
 //
 //   npm run agent:validate -- --task project/tasks/ATLAS-001.json
 //   npm run agent:dry-run  -- --task project/tasks/ATLAS-001.json
+//   npm run agent:approve  -- --task project/tasks/ATLAS-001.json --by "Name"
 //   npm run agent:run      -- --task project/tasks/ATLAS-001.json
 //   npm run agent:resume   -- --run run-20260805T101112Z-ATLAS-001
+//
+// Approval is an EXTERNAL receipt, written outside the repository, so approving
+// does not modify, dirty or commit anything here. See agent/approval.mjs.
 //
 // `run` executes an APPROVED task: isolated worktree → Claude Builder → checks →
 // Codex Reviewer → at most two revision rounds → report. It stops before commit,
@@ -16,6 +20,8 @@
 //      run/resume: PASS or READY_FOR_HUMAN_REVIEW
 //   1  everything else — refused preflight, scope violation, failing checks,
 //      NEEDS_HUMAN, a pause awaiting a human, or CLI misuse
+import { approvalsDir } from "./approval.mjs";
+import { approveTask } from "./approve.mjs";
 import { dryRun, OK_STATUSES, validate } from "./coordinator.mjs";
 import { resumeRun, runTask } from "./engine.mjs";
 import { phaseOf } from "./schemas.mjs";
@@ -25,17 +31,30 @@ const flagValue = (name) => {
   const index = argv.indexOf(name);
   return index === -1 ? undefined : argv[index + 1];
 };
-const FLAGS = ["--task", "--runs-dir", "--run", "--max-retries", "--retry-ms"];
+const FLAGS = [
+  "--task",
+  "--runs-dir",
+  "--run",
+  "--max-retries",
+  "--retry-ms",
+  "--by",
+  "--state-dir",
+];
 const flagValues = new Set(FLAGS.map(flagValue).filter(Boolean));
 const command = argv.find((arg) => !arg.startsWith("--") && !flagValues.has(arg));
 const taskFile = flagValue("--task");
 const runId = flagValue("--run");
 // --runs-dir keeps the test suites out of project/runs; production runs omit it.
 const runsDir = flagValue("--runs-dir");
+// --state-dir points at the approvals directory; the default lives outside the
+// repository (see approvalsDir()).
+const stateDir = flagValue("--state-dir");
+const approvedBy = flagValue("--by");
 const noResume = argv.includes("--no-auto-resume");
 
 const usage =
   "usage: node agent/cli.mjs <validate|dry-run|run> --task <task.json>\n" +
+  '       node agent/cli.mjs approve --task <task.json> --by "Full Name"\n' +
   "       node agent/cli.mjs resume --run <run-id>";
 
 const RUN_OK = ["PASS", "READY_FOR_HUMAN_REVIEW"];
@@ -62,6 +81,7 @@ function printRun(run, reportPath) {
 
 const engineOptions = () => ({
   ...(runsDir ? { runsRoot: runsDir } : {}),
+  ...(stateDir ? { stateDir } : {}),
   ...(noResume ? { autoResume: false } : {}),
   ...(flagValue("--max-retries") ? { maxRetries: Number(flagValue("--max-retries")) } : {}),
   ...(flagValue("--retry-ms") ? { retryMs: Number(flagValue("--retry-ms")) } : {}),
@@ -72,27 +92,46 @@ if (!command) {
   process.exit(1);
 }
 
-if (command === "validate" || command === "dry-run" || command === "run") {
-  if (!taskFile) {
-    console.error(usage);
-    process.exit(1);
-  }
+if (["validate", "dry-run", "run", "approve"].includes(command) && !taskFile) {
+  console.error(usage);
+  process.exit(1);
 }
 
 if (command === "validate") {
   const result = validate(taskFile);
+  for (const warning of result.warnings ?? []) console.log(`WARN    ${warning}`);
   if (result.valid) {
     console.log(`VALID   ${taskFile} (${result.task.taskId})`);
-    if (result.task.approved !== true) {
-      console.log("NOTE    task is not approved — dry-run will stop at READY_FOR_APPROVAL");
-    }
+    console.log("NOTE    approval is an external receipt — run agent:approve to authorize");
     process.exit(0);
   }
   console.error(`INVALID ${taskFile}`);
   for (const error of result.errors) console.error(`  - ${error}`);
   process.exit(1);
+} else if (command === "approve") {
+  const result = approveTask(taskFile, { approvedBy, stateDir });
+  for (const warning of result.warnings) console.log(`WARN      ${warning}`);
+  if (!result.ok) {
+    console.error(`status    ${result.status}`);
+    console.error(`detail    ${result.detail}`);
+    process.exit(1);
+  }
+  console.log(`task      ${result.receipt.taskId}`);
+  console.log(`taskHash  ${result.taskHash}`);
+  console.log(`base      ${result.receipt.baseCommit}`);
+  console.log(`approvedBy ${result.receipt.approvedBy}`);
+  console.log(`approvedAt ${result.receipt.approvedAt}`);
+  console.log(`receipt   ${result.receiptFile}`);
+  console.log(`status    APPROVED`);
+  console.log(
+    "\nNothing in the repository changed. Editing the task now invalidates this receipt.",
+  );
+  process.exit(0);
 } else if (command === "dry-run") {
-  const { report, paths } = dryRun(taskFile, runsDir ? { runsDir } : {});
+  const { report, paths } = dryRun(taskFile, {
+    ...(runsDir ? { runsDir } : {}),
+    ...(stateDir ? { stateDir } : {}),
+  });
   console.log(`run       ${report.runId}`);
   console.log(`task      ${report.taskId}`);
   console.log(`base      ${report.baseCommit ?? "(none)"}`);
@@ -102,6 +141,9 @@ if (command === "validate") {
   console.log(`worktree  ${report.proposedWorktree ?? "(not planned)"}`);
   console.log(`checks    ${report.requiredChecks.join(", ") || "(none)"}`);
   console.log(`protected ${report.protectedActions.join(", ") || "(none)"}`);
+  console.log(`approval  ${report.approval.status}`);
+  console.log(`taskHash  ${report.approval.taskHash ?? "(not hashed)"}`);
+  console.log(`approvals ${approvalsDir({ stateDir })}`);
   for (const note of report.notes) console.log(`note      ${note}`);
   console.log(`report    ${paths.jsonPath}`);
   console.log(`report    ${paths.markdownPath}`);

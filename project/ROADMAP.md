@@ -23,7 +23,10 @@
 
 6. **First real task execution.** The loop has never been run against a real
    Atlas task; every test to date uses fake adapters. The first live run should
-   be small, low-risk, and watched.
+   be small, low-risk, and watched. ATLAS-001 is scoped and waiting; the
+   remaining steps are: commit the task, then `agent:approve`, then `agent:run`.
+   ~~Blocked by the approval flow dirtying the repository~~ — fixed 2026-08-05
+   by the external receipt model (D-016, D-017).
 7. **Agent OS surface.** Read `run.json` and display state, notifications and
    diffs. The notification events already exist and are recorded.
 8. **VPS hosting.** Makes 24/7 automatic resume reliable.
