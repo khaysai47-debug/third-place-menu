@@ -30,6 +30,7 @@ import {
 import {
   assertSafeCommand as assertReviewerSafe,
   buildCommand as buildReviewerCommand,
+  STDIN_PROMPT,
 } from "./adapters/codex.mjs";
 import { builderPrompt, reviewerPrompt } from "./prompts.mjs";
 import { BUILDER_OUTCOMES } from "./schemas.mjs";
@@ -52,7 +53,10 @@ const TASK = {
 
 /* ── The regression that caused the incident ─────────────────────────────── */
 
-test("a prompt that MENTIONS --dangerously-skip-permissions is still safe", () => {
+// A prompt mentioning forbidden flags was the ORIGINAL incident. It is now safe
+// for a stronger reason than the guard being careful: the prompt is not in argv
+// at all, so there is nothing for the guard to misread.
+test("prompt text mentioning --dangerously-skip-permissions never reaches argv", () => {
   const prompt = [
     "Implement the task.",
     "HARD RULES:",
@@ -61,26 +65,28 @@ test("a prompt that MENTIONS --dangerously-skip-permissions is still safe", () =
     "- --full-auto and --yolo are forbidden.",
   ].join("\n");
 
-  const built = buildBuilderCommand({ prompt });
-  // Must not throw: the flag names appear in prompt TEXT, not in configuration.
+  const built = buildBuilderCommand();
   assert.doesNotThrow(() => assertBuilderSafe(built));
 
-  // And the prompt really is in there — otherwise this test proves nothing.
-  assert.ok(built.args.includes(prompt));
-  assert.ok(built.args.join(" ").includes("--dangerously-skip-permissions"));
+  // The prompt is nowhere in argv — buildCommand cannot even accept one.
+  assert.ok(!built.args.includes(prompt));
+  assert.ok(!built.args.join(" ").includes("--dangerously-skip-permissions"));
+  assert.ok(!built.args.join(" ").includes("bypassPermissions"));
 });
 
-test("the REAL Builder prompt (which embeds AGENTS.md) passes the guard", () => {
+test("the REAL Builder prompt (which embeds AGENTS.md) never enters argv", () => {
   const prompt = builderPrompt({ task: TASK, repoRoot: process.cwd() });
-  // AGENTS.md documents the forbidden flag; that is what broke the old guard.
+  // AGENTS.md documents the forbidden flag; that is what broke the FIRST guard.
   assert.ok(
     prompt.includes("--dangerously-skip-permissions"),
     "precondition: project memory documents the forbidden flag",
   );
-  assert.doesNotThrow(() => assertBuilderSafe(buildBuilderCommand({ prompt })));
+  const built = buildBuilderCommand();
+  assert.doesNotThrow(() => assertBuilderSafe(built));
+  for (const token of built.args) assert.ok(!token.includes("dangerously-skip-permissions"));
 });
 
-test("the REAL Reviewer prompt passes even when the diff mentions dangerous flags", () => {
+test("the REAL Reviewer prompt never enters argv either", () => {
   const diff = [
     "diff --git a/x b/x",
     "+// never run codex with --full-auto or --sandbox workspace-write",
@@ -93,15 +99,46 @@ test("the REAL Reviewer prompt passes even when the diff mentions dangerous flag
     checkResults: [],
     builderSummary: "s",
   });
-  const built = buildReviewerCommand({ prompt, worktree: "/tmp/wt", outputFile: "/tmp/o.txt" });
-  assert.ok(built.args.join(" ").includes("--full-auto"), "precondition: prompt mentions the flag");
+  assert.ok(prompt.includes("--full-auto"), "precondition: prompt mentions the flag");
+  const built = buildReviewerCommand({ worktree: "/tmp/wt", outputFile: "/tmp/o.txt" });
+  assert.ok(!built.args.join(" ").includes("--full-auto"), "the diff must not be in argv");
+  assert.deepEqual(built.args.slice(-1), [STDIN_PROMPT], "the prompt slot is the stdin marker");
   assert.doesNotThrow(() => assertReviewerSafe(built));
+});
+
+/* ── The prompt must never go back onto the command line ──────────────────── */
+
+test("a prompt put back into Builder argv is refused at the boundary", () => {
+  const built = buildBuilderCommand();
+  built.args.push("a 32 KB prompt would go here");
+  assert.throws(() => assertBuilderSafe(built), AdapterConfigurationError);
+  assert.throws(() => assertBuilderSafe(built), /flags only|belongs on stdin/);
+
+  // The refusal must not echo the token back into a run record.
+  try {
+    assertBuilderSafe(built);
+    assert.fail("expected a refusal");
+  } catch (error) {
+    assert.ok(!error.message.includes("32 KB prompt would go here"));
+  }
+});
+
+test("a prompt put back into Reviewer argv is refused at the boundary", () => {
+  const built = buildReviewerCommand({ worktree: "/w", outputFile: "/o" });
+  built.args.push("the whole diff would go here");
+  assert.throws(() => assertReviewerSafe(built), /stdin marker|belongs on stdin/);
+
+  // Replacing the marker with a prompt is refused too — the count alone is not
+  // what makes it safe.
+  const swapped = buildReviewerCommand({ worktree: "/w", outputFile: "/o" });
+  swapped.args[swapped.args.length - 1] = "diff --git a/x b/x";
+  assert.throws(() => assertReviewerSafe(swapped), /stdin marker/);
 });
 
 /* ── Real unsafe configuration is still rejected ─────────────────────────── */
 
 test("an actual --dangerously-skip-permissions argv token is rejected", () => {
-  const built = buildBuilderCommand({ prompt: "safe prompt" });
+  const built = buildBuilderCommand();
   built.args.push("--dangerously-skip-permissions");
   assert.throws(() => assertBuilderSafe(built), AdapterConfigurationError);
   assert.throws(() => assertBuilderSafe(built), /refusing unsafe Builder flag/);
@@ -109,7 +146,7 @@ test("an actual --dangerously-skip-permissions argv token is rejected", () => {
 
 test("dangerous permission modes are rejected", () => {
   for (const mode of ["bypassPermissions", "dangerouslySkipPermissions", "yolo"]) {
-    const args = buildBuilderCommand({ prompt: "p" }).args.slice();
+    const args = buildBuilderCommand().args.slice();
     args[args.indexOf("--permission-mode") + 1] = mode;
     assert.throws(
       () => assertBuilderSafe({ args }),
@@ -117,24 +154,25 @@ test("dangerous permission modes are rejected", () => {
     );
   }
   // An unknown mode is refused too — allow-list, not deny-list.
-  const args = buildBuilderCommand({ prompt: "p" }).args.slice();
+  const args = buildBuilderCommand().args.slice();
   args[args.indexOf("--permission-mode") + 1] = "someNewModeNobodyVetted";
   assert.throws(() => assertBuilderSafe({ args }), /unknown permission mode/);
 });
 
 test("other unsafe Builder flags are rejected", () => {
   for (const flag of ["--dangerously-allow-browser", "--no-sandbox", "--yolo"]) {
-    const built = buildBuilderCommand({ prompt: "p" });
+    const built = buildBuilderCommand();
     built.args.push(flag);
     assert.throws(() => assertBuilderSafe(built), /refusing unsafe Builder flag/);
   }
 });
 
 test("a missing or interactive configuration is rejected", () => {
-  const noPrint = buildBuilderCommand({ prompt: "p" }).args.slice(2);
+  // Drop ONLY --print. It is a boolean now, so removing it removes no value.
+  const noPrint = buildBuilderCommand().args.filter((a) => a !== "--print");
   assert.throws(() => assertBuilderSafe({ args: noPrint }), /non-interactively/);
 
-  const noMode = buildBuilderCommand({ prompt: "p" }).args.filter(
+  const noMode = buildBuilderCommand().args.filter(
     (a, i, all) => a !== "--permission-mode" && all[i - 1] !== "--permission-mode",
   );
   assert.throws(() => assertBuilderSafe({ args: noMode }), /explicit --permission-mode/);
@@ -143,14 +181,19 @@ test("a missing or interactive configuration is rejected", () => {
 /* ── The intended configuration ──────────────────────────────────────────── */
 
 test("the intended acceptEdits configuration passes and is exactly as designed", () => {
-  const { command, args } = buildBuilderCommand({ prompt: "p", maxTurns: 30 });
+  const { command, args } = buildBuilderCommand({ maxTurns: 30 });
   assert.match(command, /claude/);
 
   const parsed = assertBuilderSafe({ args });
   assert.equal(parsed.flags.get("--permission-mode"), "acceptEdits");
   assert.equal(parsed.flags.get("--output-format"), "json");
   assert.equal(parsed.flags.get("--max-turns"), "30");
-  assert.equal(parsed.flags.get("--print"), "p", "the prompt is a VALUE, never a flag");
+  // --print is a BOOLEAN now. If it were still a value-flag, parseArgv would
+  // swallow --output-format as its value and the two asserts above would break —
+  // which is exactly the failure mode requirement 6 names.
+  assert.equal(parsed.flags.get("--print"), true, "--print takes no value");
+  assert.deepEqual(parsed.positional, [], "the Builder argv is flags only");
+  assert.equal(args.includes("-p"), false, "one spelling only");
 });
 
 test("Bash, WebFetch, WebSearch and NotebookEdit remain disallowed", () => {
@@ -160,13 +203,13 @@ test("Bash, WebFetch, WebSearch and NotebookEdit remain disallowed", () => {
   // Dropping any one of them is refused.
   for (const tool of REQUIRED_DISALLOWED_TOOLS) {
     const kept = REQUIRED_DISALLOWED_TOOLS.filter((t) => t !== tool);
-    const built = buildBuilderCommand({ prompt: "p", disallowedTools: kept });
+    const built = buildBuilderCommand({ disallowedTools: kept });
     assert.throws(() => assertBuilderSafe(built), new RegExp(`must disallow the ${tool} tool`));
   }
 
   // Re-allowing one through --allowedTools is refused too.
   for (const grant of ["Bash", "Bash(git:*)", "WebFetch"]) {
-    const built = buildBuilderCommand({ prompt: "p" });
+    const built = buildBuilderCommand();
     built.args.push("--allowedTools", grant);
     assert.throws(() => assertBuilderSafe(built), /refusing to re-allow/);
   }
@@ -174,10 +217,10 @@ test("Bash, WebFetch, WebSearch and NotebookEdit remain disallowed", () => {
 
 test("a session id cannot smuggle a flag", () => {
   assert.throws(
-    () => buildBuilderCommand({ prompt: "p", sessionId: "--dangerously-skip-permissions" }),
+    () => buildBuilderCommand({ sessionId: "--dangerously-skip-permissions" }),
     AdapterConfigurationError,
   );
-  const ok = buildBuilderCommand({ prompt: "p", sessionId: "abc-123_XYZ.4" });
+  const ok = buildBuilderCommand({ sessionId: "abc-123_XYZ.4" });
   assert.deepEqual(ok.args.slice(-2), ["--resume", "abc-123_XYZ.4"]);
   assert.doesNotThrow(() => assertBuilderSafe(ok));
 });
@@ -185,31 +228,25 @@ test("a session id cannot smuggle a flag", () => {
 /* ── Reviewer ────────────────────────────────────────────────────────────── */
 
 test("the Reviewer must actually be read-only, not merely mention it", () => {
-  const good = buildReviewerCommand({ prompt: "p", worktree: "/tmp/wt", outputFile: "/tmp/o" });
+  const good = buildReviewerCommand({ worktree: "/tmp/wt", outputFile: "/tmp/o" });
   assert.doesNotThrow(() => assertReviewerSafe(good));
 
   for (const sandbox of ["workspace-write", "danger-full-access"]) {
-    const built = buildReviewerCommand({
-      // The old guard passed whenever "read-only" appeared ANYWHERE, including
-      // in the prompt. This prompt says it; the sandbox does not.
-      prompt: "please note this review is read-only",
-      worktree: "/tmp/wt",
-      outputFile: "/tmp/o",
-      sandbox,
-    });
+    const built = buildReviewerCommand({ worktree: "/tmp/wt", outputFile: "/tmp/o", sandbox });
     assert.throws(() => assertReviewerSafe(built), /must run with --sandbox read-only/);
   }
 
-  // A command with no --sandbox at all is refused.
+  // A command with no --sandbox at all is refused. Well-formed positionals, so
+  // the sandbox check is what rejects it rather than the stdin-marker check.
   assert.throws(
-    () => assertReviewerSafe({ args: ["exec", "--cd", "/tmp/wt", "read-only in the prompt"] }),
+    () => assertReviewerSafe({ args: ["exec", "--cd", "/tmp/wt", STDIN_PROMPT] }),
     /must run with --sandbox read-only/,
   );
 });
 
 test("unsafe Reviewer flags are rejected", () => {
   for (const flag of ["--full-auto", "--yolo", "--dangerously-bypass-approvals-and-sandbox"]) {
-    const built = buildReviewerCommand({ prompt: "p", worktree: "/w", outputFile: "/o" });
+    const built = buildReviewerCommand({ worktree: "/w", outputFile: "/o" });
     built.args.push(flag);
     assert.throws(() => assertReviewerSafe(built), /refusing unsafe Reviewer flag/);
   }
@@ -416,17 +453,180 @@ test("process_spawn_error is a declared Builder outcome", () => {
   assert.ok(BUILDER_OUTCOMES.includes("process_spawn_error"));
 });
 
+/* ── The stdin transport ─────────────────────────────────────────────────── */
+//
+// The regression: ATLAS-002 died with ENAMETOOLONG before implementation. Its
+// prompt (32,538 chars) built a 32,928-char Windows command line against a
+// 32,767 limit. ATLAS-001 (31,514 → 31,950) had fit with 817 to spare. The
+// prompt only grows, so argv was never a viable transport.
+
+/** A shim that echoes its argv AND everything it read from stdin, as JSON. */
+function stdinShimDir() {
+  const dir = mkdtempSync(path.join(tmpdir(), "atlas-stdin-"));
+  writeFileSync(
+    path.join(dir, "echo-io.js"),
+    [
+      "const chunks = [];",
+      "process.stdin.on('data', (c) => chunks.push(c));",
+      "process.stdin.on('end', () => {",
+      "  const stdin = Buffer.concat(chunks);",
+      "  process.stdout.write(JSON.stringify({",
+      "    argv: process.argv.slice(2),",
+      "    stdin: stdin.toString('utf8'),",
+      "    bytes: stdin.length,",
+      "  }));",
+      "});",
+      "",
+    ].join("\n"),
+  );
+  writeFileSync(
+    path.join(dir, "probe.cmd"),
+    [
+      "@ECHO off",
+      "SETLOCAL",
+      'IF EXIST "%dp0%\\node.exe" (',
+      '  SET "_prog=%dp0%\\node.exe"',
+      ") ELSE (",
+      '  SET "_prog=node"',
+      ")",
+      'endLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\echo-io.js" %*',
+      "",
+    ].join("\r\n"),
+  );
+  return dir;
+}
+
+/**
+ * The hostile prompt: every class of character that a command line, a shell, or
+ * cmd.exe would mangle — plus the forbidden-flag text that caused the original
+ * incident, plus Unicode well outside the BMP.
+ */
+const HOSTILE_PROMPT = [
+  "Implement the task & do not stop.",
+  'A "quoted" phrase, 100% > 50% | pipes ^ carets, $(subshell), `backticks`.',
+  "The runner never passes --dangerously-skip-permissions or --yolo.",
+  "%PATH% %USERPROFILE% !DELAYED! must survive as literal text.",
+  "trailing backslash dir\\  and a lone -  and a --",
+  "Unicode: ไทย 中文 emoji 🍜🇹🇭 combining é za\u0301 zero-width\u200bhere",
+  "Newlines\r\nand\ttabs\tand a NUL-adjacent \u0001 control char.",
+].join("\n");
+
+test(
+  "a prompt far larger than the Windows command-line limit survives on stdin",
+  { skip: process.platform !== "win32" ? "Windows-only launcher path" : false },
+  () => {
+    const dir = stdinShimDir();
+    const originalPath = process.env.PATH;
+    try {
+      process.env.PATH = `${dir}${path.delimiter}${originalPath}`;
+
+      // Comfortably past the 32,767 ceiling that killed ATLAS-002, and built
+      // from the hostile text so size and content are tested together.
+      const prompt = `${HOSTILE_PROMPT}\n`.repeat(1000);
+      assert.ok(prompt.length > 60_000, `prompt is ${prompt.length} chars`);
+
+      const args = buildBuilderCommand().args;
+      const proc = spawnCli("probe.cmd", args, {
+        encoding: "utf8",
+        maxBuffer: 64 * 1024 * 1024,
+        input: Buffer.from(prompt, "utf8"),
+      });
+
+      assert.equal(proc.error, undefined, `spawn failed: ${proc.error?.message}`);
+      assert.equal(proc.status, 0, `stderr: ${proc.stderr}`);
+
+      const seen = JSON.parse(proc.stdout);
+      // 1. It arrives byte-for-byte.
+      assert.equal(seen.stdin, prompt, "the prompt must survive unmodified");
+      assert.equal(seen.bytes, Buffer.byteLength(prompt, "utf8"), "byte count must match");
+      // 2. It is nowhere in argv.
+      assert.deepEqual(seen.argv, args);
+      assert.ok(!seen.argv.join("\u0000").includes("dangerously-skip-permissions"));
+      assert.ok(!seen.argv.some((token) => token.length > 200));
+    } finally {
+      process.env.PATH = originalPath;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "a Reviewer-sized diff prompt also travels on stdin, not the command line",
+  { skip: process.platform !== "win32" ? "Windows-only launcher path" : false },
+  () => {
+    const dir = stdinShimDir();
+    const originalPath = process.env.PATH;
+    try {
+      process.env.PATH = `${dir}${path.delimiter}${originalPath}`;
+
+      // Recorded ATLAS-001 reviews already reached 30,812 chars. Go well past.
+      const diff = "diff --git a/x b/x\n+// with --full-auto in the text\n".repeat(1200);
+      const prompt = reviewerPrompt({
+        task: TASK,
+        changedFiles: ["src/x.ts"],
+        diff,
+        checkResults: [],
+        builderSummary: "s",
+      });
+      assert.ok(prompt.length > 40_000, `review prompt is ${prompt.length} chars`);
+
+      const args = buildReviewerCommand({ worktree: "/tmp/wt", outputFile: "/tmp/o.txt" }).args;
+      const proc = spawnCli("probe.cmd", args, {
+        encoding: "utf8",
+        maxBuffer: 64 * 1024 * 1024,
+        input: Buffer.from(prompt, "utf8"),
+      });
+
+      assert.equal(proc.error, undefined, `spawn failed: ${proc.error?.message}`);
+      const seen = JSON.parse(proc.stdout);
+      assert.equal(seen.stdin, prompt);
+      assert.deepEqual(seen.argv, args);
+      assert.ok(!seen.argv.join("\u0000").includes("--full-auto"), "the diff is not in argv");
+      assert.equal(seen.argv.at(-1), STDIN_PROMPT);
+    } finally {
+      process.env.PATH = originalPath;
+      rmSync(dir, { recursive: true, force: true });
+    }
+  },
+);
+
+test("stdin input reaches a plainly-spawned executable too (POSIX path)", () => {
+  const prompt = HOSTILE_PROMPT.repeat(500);
+  const proc = spawnCli(
+    process.execPath,
+    ["-e", "process.stdin.on('data',(c)=>process.stdout.write(c))"],
+    { encoding: "utf8", maxBuffer: 64 * 1024 * 1024, input: Buffer.from(prompt, "utf8") },
+  );
+  assert.equal(proc.error, undefined);
+  assert.equal(proc.stdout, prompt, "byte-for-byte on the non-launcher branch");
+});
+
+test("the measured ATLAS-002 argv no longer approaches the Windows limit", () => {
+  // The whole point: argv is now a fixed handful of flags whatever the task is.
+  const { command, args } = buildBuilderCommand({ maxTurns: 30 });
+  const argvChars = [command, ...args].join(" ").length;
+  assert.ok(argvChars < 200, `Builder argv is ${argvChars} chars, was 32,678`);
+
+  const review = buildReviewerCommand({
+    worktree: "D:\\Projects\\third-place-menu-agent-worktrees\\ATLAS-002",
+    outputFile: "C:\\Users\\User\\AppData\\Local\\Temp\\atlas-review-abc123\\verdict.txt",
+  });
+  const reviewChars = [review.command, ...review.args].join(" ").length;
+  assert.ok(reviewChars < 300, `Reviewer argv is ${reviewChars} chars, was 30,900+`);
+});
+
 /* ── No secrets in the recorded command ──────────────────────────────────── */
 
-test("the recorded command redacts bulky prompt text", () => {
+test("the recorded command carries no prompt text", () => {
   const prompt = builderPrompt({ task: TASK, repoRoot: process.cwd() });
-  const { command, args } = buildBuilderCommand({ prompt });
+  const { command, args } = buildBuilderCommand();
   const recorded = redactCommand(command, args);
 
   assert.ok(recorded.length < 400, "the record must not carry the whole prompt");
   assert.ok(!recorded.includes(prompt));
-  assert.match(recorded, /<redacted:\d+ chars>/);
-  // The flags a reviewer needs to audit are still visible verbatim.
+  // Nothing needs redacting any more: argv is flags only, so the whole command
+  // is auditable verbatim.
+  assert.ok(!recorded.includes("<redacted:"));
   assert.match(recorded, /--permission-mode acceptEdits/);
   assert.match(recorded, /--disallowedTools Bash,WebFetch,WebSearch,NotebookEdit/);
   // Nothing that looks like a credential.

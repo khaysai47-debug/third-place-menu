@@ -11,6 +11,25 @@
 //     run git, cannot commit, cannot push, cannot deploy, cannot install.
 //   * NEVER --dangerously-skip-permissions, NEVER bypassPermissions.
 //   * cwd is the worktree, so even a file write cannot reach the main checkout.
+//
+// THE PROMPT TRAVELS ON STDIN, NEVER IN ARGV.
+//
+//   A live ATLAS-002 run died with ENAMETOOLONG before implementation started.
+//   Windows caps a process command line at 32,767 UTF-16 units INCLUDING the
+//   executable path, the flags, and the backslash/quote escaping libuv adds.
+//   Measured: ATLAS-001's prompt (31,514 chars) built a 31,950-char command
+//   line and fit with 817 to spare; ATLAS-002's (32,538) built 32,928 and
+//   overflowed by 161. The prompt embeds AGENTS.md plus the task, so it only
+//   grows — argv was never a viable transport for it.
+//
+//   `claude --print` with NO prompt positional reads the prompt from stdin
+//   (verified against claude 2.1.228). So argv now carries flags only, and the
+//   prompt goes through spawnSync's `input` as a UTF-8 Buffer: no shell, no
+//   quoting, no interpreter, and no length limit worth caring about.
+//
+//   assertSafeCommand is STRICTER as a result, not looser — it now refuses any
+//   positional argument at all, so a prompt cannot leak back into argv without
+//   the guard stopping the run.
 import {
   AdapterConfigurationError,
   flagNames,
@@ -32,11 +51,16 @@ const CLI = process.platform === "win32" ? "claude.cmd" : "claude";
 /**
  * Build the argv for a Builder invocation. Pure, so tests can assert the exact
  * command without spawning anything.
+ *
+ * It takes NO prompt — deliberately. The prompt is stdin's job (see the header),
+ * and a `buildCommand` that cannot accept one is a `buildCommand` that cannot
+ * put 32 KB back on the command line by accident.
  */
-export function buildCommand({ prompt, sessionId = null, maxTurns, disallowedTools } = {}) {
+export function buildCommand({ sessionId = null, maxTurns, disallowedTools } = {}) {
   const args = [
+    // Boolean here: with no prompt positional, --print makes the CLI read the
+    // prompt from stdin. That is the whole transport change.
     "--print",
-    prompt ?? "",
     "--output-format",
     "json",
     "--max-turns",
@@ -60,13 +84,19 @@ export function buildCommand({ prompt, sessionId = null, maxTurns, disallowedToo
 }
 
 /**
- * Flags whose NEXT argv token is their value. `--print` is here because the
- * prompt follows it — that is what keeps 31 KB of prompt text out of the flag
- * namespace.
+ * Flags whose NEXT argv token is their value.
+ *
+ * `--print`/`-p` are DELIBERATELY NOT HERE. They used to be, because the prompt
+ * followed `--print` and listing them kept 31 KB of prompt text out of the flag
+ * namespace. The prompt is on stdin now, so `--print` is what it actually is to
+ * the CLI: a boolean. Leaving it in this set would make parseArgv swallow
+ * `--output-format` as its value — the guard would then see no output format, no
+ * `--output-format` flag, and the wrong shape entirely.
+ *
+ * Nothing is weakened by the removal: the prompt is no longer an argv token, and
+ * assertSafeCommand now refuses positionals outright.
  */
 export const VALUE_FLAGS = new Set([
-  "--print",
-  "-p",
   "--output-format",
   "--input-format",
   "--max-turns",
@@ -110,9 +140,9 @@ export const REQUIRED_DISALLOWED_TOOLS = ["Bash", "WebFetch", "WebSearch", "Note
  * Guard: refuse an unsafe Builder command.
  *
  * Inspects only real argv FLAGS and their configuration values. Prompt text is
- * the value of `--print` and is never examined — a prompt that discusses
- * `--dangerously-skip-permissions` (as AGENTS.md does) is documentation, not
- * configuration, and must not trip this check.
+ * never examined, because prompt text is never IN argv — it arrives on stdin. A
+ * prompt that discusses `--dangerously-skip-permissions` (as AGENTS.md does) is
+ * documentation, not configuration, and cannot reach this function at all.
  *
  * @throws {AdapterConfigurationError}
  */
@@ -121,6 +151,18 @@ export function assertSafeCommand({ args }) {
   const refuse = (message) => {
     throw new AdapterConfigurationError(message);
   };
+
+  // The Builder argv is flags ONLY. A positional here means something that
+  // belongs on stdin — almost certainly the prompt — has been put back on the
+  // command line, which is what produced the ENAMETOOLONG run. Refuse it at the
+  // boundary rather than letting Windows discover it 32 KB later. Never report
+  // the token itself: a leaked prompt must not be echoed into a run record.
+  if (parsed.positional.length > 0) {
+    refuse(
+      `Builder argv must carry flags only, got ${parsed.positional.length} positional ` +
+        "argument(s) — the prompt belongs on stdin",
+    );
+  }
 
   for (const flag of flagNames(parsed)) {
     if (UNSAFE_FLAGS.has(flag)) refuse(`refusing unsafe Builder flag: ${flag}`);
@@ -296,18 +338,23 @@ export function invokeBuilder({
   timeoutMs = DEFAULTS.timeoutMs,
   disallowedTools = DEFAULTS.disallowedTools,
 } = {}) {
-  const { command, args } = buildCommand({ prompt, sessionId, maxTurns, disallowedTools });
+  const { command, args } = buildCommand({ sessionId, maxTurns, disallowedTools });
   assertSafeCommand({ args });
 
   const started = Date.now();
   // No shell: arguments are passed as an array, so a prompt can never be
   // reinterpreted as shell syntax. On Windows this also resolves the .cmd
   // launcher to the executable it wraps, which Node cannot spawn directly.
+  //
+  // The prompt is a UTF-8 Buffer, not a string: spawnSync would encode a string
+  // using `encoding` anyway, and passing the bytes directly removes any question
+  // about what happens to Unicode on the way to the child.
   const proc = spawnCli(command, args, {
     cwd: worktree,
     encoding: "utf8",
     timeout: timeoutMs,
     maxBuffer: 64 * 1024 * 1024,
+    input: Buffer.from(prompt ?? "", "utf8"),
   });
 
   const timedOut = proc.error?.code === "ETIMEDOUT" || proc.signal === "SIGTERM";
@@ -325,7 +372,10 @@ export function invokeBuilder({
     durationMs: Date.now() - started,
     stdout: proc.stdout ?? "",
     stderr: proc.stderr ?? "",
-    command: redactCommand(command, args),
+    // argv is now flags only, so the whole command is recordable verbatim. The
+    // prompt SIZE is still recorded — that number is what identified the
+    // ENAMETOOLONG failure, and losing it would cost the next diagnosis.
+    command: `${redactCommand(command, args)} <stdin:${(prompt ?? "").length} chars>`,
   };
 }
 

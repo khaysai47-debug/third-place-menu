@@ -193,8 +193,16 @@ const launchRefused = (message, code) => ({
  *
  * Arguments are always passed as an ARRAY. Prompt text is never concatenated
  * into a command string that an interpreter would parse.
+ *
+ * STDIN: pass `options.input` (a Buffer, ideally) and it reaches the child on
+ * every branch below — spawnSync writes it to the child's stdin pipe, which is
+ * an entirely separate channel from the command line. That is what lets the
+ * adapters keep a 32 KB+ prompt off argv without a shell, a temp file, or a
+ * quoting scheme. Nothing here inspects, transforms, or logs it.
  */
 export function spawnCli(command, args, options = {}) {
+  // `input` rides along in the spread, deliberately unnamed here: this function
+  // has no business knowing what the bytes are.
   const spawnOptions = { ...options, shell: false };
   if (process.platform !== "win32" || !WINDOWS_LAUNCHER.test(command)) {
     return spawnSync(command, args, spawnOptions);
