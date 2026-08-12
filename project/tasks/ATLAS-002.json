@@ -1,0 +1,83 @@
+{
+  "taskId": "ATLAS-002",
+  "title": "Payment review Messenger contract certification",
+  "objective": "Certify the repository-side contract between the existing payment.reviewed notification event and the existing authenticated send-chat-message path without modifying live payment, Messenger, Supabase, n8n, or Production behavior.",
+  "context": "This is the first real restaurant task after ATLAS-001 proved the Development Agent loop. Repository inspection already found that staff payment review, payment.reviewed event generation, server-side Messenger identity resolution, and the authenticated send-chat-message sender all exist. The remaining repository-side gap is that no automated test spans those two halves. End-to-end Production certification still depends on later read-only inspection and controlled testing of n8n, Supabase, Meta, and Production. Do not claim full operational certification from this task alone.\n\nKnown current flow:\n- Staff review is handled by POST /api/staff/review-payment-proof and api/_lib/paymentProof.server.ts.\n- payment.reviewed is emitted by api/_lib/paymentReviewNotify.server.ts only when the review RPC reports changed=true and an order number exists.\n- Messenger identity is resolved server-side from orders to completed bot_sessions; it must not come from arbitrary browser input.\n- payment.reviewed includes eventId, eventType, occurredAt, orderNumber, channel, externalChatId, decision, rejectionReason and paymentStatus.\n- POST /api/automation/send-chat-message is implemented by api/_lib/chatMessaging.server.ts.\n- Sender-side duplicate protection claims eventId in chat_message_dispatches before calling the Meta provider.\n- The unverified contract is whether the payment.reviewed event can be transformed into a valid send request while preserving eventId exactly.\n\nImplement only an offline repository contract certification. Do not modify the existing live payment review, notification dispatcher, chat sender, bot-session, Meta webhook or JWT implementation unless the required test proves an actual defect that cannot be certified without such a change. If such a defect is found, stop as NEEDS_HUMAN rather than expanding scope.",
+  "owner": "claude-builder",
+  "riskLevel": "medium",
+  "baseCommit": "13935e5ddd656f54befa1c289c618162244e6118",
+  "allowedPaths": [
+    "scripts/test-payment-review-messenger-contract.mjs",
+    "package.json",
+    "docs/payment-proof-tuesday.md",
+    "docs/n8n-workflow-side-effects.md"
+  ],
+  "forbiddenPaths": [
+    "agent/",
+    "project/",
+    "api/",
+    "src/",
+    "docs/sql/",
+    ".env",
+    ".env.local",
+    ".env.example",
+    ".gitattributes",
+    ".prettierrc",
+    ".prettierignore",
+    "package-lock.json",
+    "bun.lock",
+    "bunfig.toml",
+    "components.json",
+    "eslint.config.js",
+    "tsconfig.json",
+    "vite.config.ts",
+    "vercel.json"
+  ],
+  "acceptanceCriteria": [
+    "Add one offline contract test that exercises the actual existing payment.reviewed event generation path with stubbed external dependencies and then validates compatibility with the actual existing send-chat-message handler using a mock outbound provider.",
+    "The contract test covers both approved and rejected payment-review decisions.",
+    "For the approved path, the generated event is compatible with the sender contract and cannot be interpreted as a rejection.",
+    "For the rejected path, the generated event is compatible with the sender contract and cannot be interpreted as an approval.",
+    "The test verifies that the original payment.reviewed eventId is preserved as the sender eventId.",
+    "Replaying the same logical event with the same eventId is classified as a duplicate and does not invoke the outbound provider a second time.",
+    "The test verifies that the generated eventId satisfies the sender's UUID requirements and that the order number satisfies the sender contract for the tested valid order.",
+    "The contract test does not perform network access, does not use real secrets, does not access live Supabase, does not call n8n, does not call Meta, and does not send a real customer message.",
+    "No existing live implementation file under api/ or src/ is modified.",
+    "No database schema, migration, Supabase data, n8n workflow, Meta configuration, Vercel configuration, Production environment or deployment is changed.",
+    "Add a package.json script named test:payment-review-messenger-contract that runs only the new offline contract test.",
+    "Run the new contract test successfully.",
+    "Run the existing relevant offline payment-review and chat-messaging tests successfully, including test:payment-review and test:chat-messaging.",
+    "Document the repository-side contract that has been certified and explicitly state that full end-to-end certification still requires verification that n8n forwards the original payment.reviewed eventId unchanged.",
+    "Document the existing open order-number-format risk: the sender requires a TP- prefixed order number while other repository validation is broader; do not modify that behavior in this task.",
+    "Nothing is committed, pushed, merged, deployed or published; all changes remain in the isolated worktree for human review.",
+    "npm run typecheck and npm run build pass.",
+    "npm run lint introduces no new lint failure in any changed file."
+  ],
+  "requiredChecks": [
+    "typecheck",
+    "lint",
+    "build"
+  ],
+  "permissions": [
+    "read_repository",
+    "plan_workspace",
+    "edit_task_workspace",
+    "run_checks",
+    "inspect_local_logs",
+    "review_local_diff",
+    "prepare_reports"
+  ],
+  "stoppingRules": [
+    "Stop if any implementation change is required under api/ or src/.",
+    "Stop if any path outside allowedPaths must be modified.",
+    "Stop if any path in forbiddenPaths would be modified.",
+    "Stop if a real secret, credential, token, customer identifier or real payment data would be required.",
+    "Stop if live network access to n8n, Supabase, Meta, Vercel or Production would be required.",
+    "Stop if a database schema or migration change appears necessary.",
+    "Stop if completing the task would require sending a real customer message.",
+    "Stop if the original payment.reviewed eventId cannot be preserved through the repository-side contract without changing live implementation code.",
+    "Stop and report the TP- order-number-format mismatch if it prevents certification; do not silently change validation rules.",
+    "Stop if the same check fails identically twice.",
+    "Stop and escalate as NEEDS_HUMAN after two revision rounds."
+  ]
+}
