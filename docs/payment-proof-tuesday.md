@@ -372,6 +372,52 @@ stores a **keyed** one-way `chat_ref` (HMAC over channel + chat id, keyed with
 PSID impossible. Logs carry order number / event id / channel / `chat_ref` /
 state only.
 
+### Repository-side contract certification (2026-08-12)
+
+`payment.reviewed` and `send-chat-message` were each covered by their own
+suite, and **nothing spanned them**. `npm run test:payment-review-messenger-contract`
+(`scripts/test-payment-review-messenger-contract.mjs`) now does: it takes the
+event the real dispatcher produced, transforms it the way a forwarder must,
+and feeds it to the real send handler with a **mock** provider and a stubbed
+dispatch store whose `event_id` really is unique. Offline — no network, no
+secrets, no Supabase, no n8n, no Meta, no message.
+
+**What is certified (repository side, Messenger, `TP-`-prefixed order):**
+
+| | |
+| --- | --- |
+| Transformation | `eventId`, `orderNumber`, `channel`, `externalChatId` are carried **verbatim**; only the wording is composed by the caller |
+| Approved | the event is a valid send request and cannot be read as a rejection |
+| Rejected | the event is a valid send request, carries the staff reason, and cannot be read as an approval |
+| `eventId` | the dispatcher's UUIDv4 satisfies the sender's `UUID_V4_PATTERN`, and the **same** id claims the dispatch row and reaches the provider |
+| `orderNumber` | the dispatcher's order number satisfies the sender's `ORDER_NUMBER_PATTERN` |
+| Replay | the same `eventId` sent again is `duplicate`, answers from the stored row, and does **not** invoke the provider a second time |
+
+**What is NOT certified — do not read this as operational certification.**
+
+- ⚠️ **n8n forwarding is unverified.** The whole chain holds only if the
+  workflow forwards the **original** `payment.reviewed` `eventId` unchanged
+  into the `send-chat-message` body. If n8n mints a new id (or maps the
+  `x-atlas-event-id` header to something else), the database claim protects
+  nothing and a retry messages the customer twice. That must still be verified
+  by read-only inspection of the real workflow.
+- **Instagram is not certified.** The dispatcher can emit `channel:
+  "instagram"`; the sender refuses it before the claim (`503`,
+  `needs_review`/`other`), so no `eventId` is consumed and the event stays
+  replayable once Instagram sending lands.
+- Supabase, Meta, Vercel and Production behaviour are untouched by this check
+  and remain to be verified separately.
+
+⚠️ **Open: the order-number format mismatch.** The sender requires the `TP-`
+prefix (`^TP-[A-Za-z0-9-]{1,29}$`, byte-identical to the
+`chat_message_dispatches_order_number_format` CHECK). Other repository
+validation is broader — `^[A-Za-z0-9-]{1,32}$` in
+`api/_lib/paymentIntake.server.ts` and `api/_lib/staffDashboardReads.server.ts`
+— so an order number legal at intake (e.g. `IG-000042`) is a `400` at the
+sender. Every order number Atlas currently mints carries the prefix, so this is
+latent, not active. The certification test **pins** the mismatch; it does not
+resolve it. Changing either rule is its own task and touches the database CHECK.
+
 ## Environment variables
 
 | Name | Scope | Purpose |
@@ -422,6 +468,10 @@ Create the bucket by hand (never from code):
 - `npm run test:status-transitions` (transition guard + Cash-only mark-paid + idempotency)
 - `npm run test:payment-intake` (auth, chat↔order binding, ambiguity refusal, magic bytes, cleanup)
 - `npm run test:payment-proof` (review mapping incl. cancelled / already-paid)
+- `npm run test:payment-review` (the `payment.reviewed` dispatcher)
+- `npm run test:chat-messaging` (the app-owned sender)
+- `npm run test:payment-review-messenger-contract` (the two halves, spanned —
+  see § Repository-side contract certification for what it does **not** prove)
 - `npm run test:order-details` (receipt payload contract)
 - `npm run test:dashboard` / `test:dashboard-parity` (no signing on poll; on-demand signed history; no storage path leaks)
 - `npm run build`

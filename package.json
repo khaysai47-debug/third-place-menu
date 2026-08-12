@@ -22,6 +22,7 @@
     "test:payment-intake": "node scripts/test-payment-intake.mjs",
     "test:proof-review": "node scripts/test-proof-review.mjs",
     "test:payment-review": "node scripts/test-payment-review-notify.mjs",
+    "test:payment-review-messenger-contract": "node scripts/test-payment-review-messenger-contract.mjs",
     "test:supabase-auth": "node scripts/test-supabase-auth.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",

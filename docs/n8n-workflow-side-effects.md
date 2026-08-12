@@ -138,6 +138,35 @@ Hard rules for the receiving workflow:
   route) — n8n holds NO Supabase credential for this flow. Full contract in
   docs/backend-separation-runbook.md § Phase 3B.
 
+## `payment.reviewed` → `send-chat-message` — the forwarding obligation (2026-08-12)
+
+The repository side of this hop is now certified offline by
+`npm run test:payment-review-messenger-contract`: the event the real dispatcher
+generates is a valid `send-chat-message` request for both decisions, an
+approval cannot be read as a rejection (or the reverse), and replaying the same
+`eventId` answers `duplicate` without invoking the provider again. Details in
+docs/payment-proof-tuesday.md § Repository-side contract certification.
+
+⚠️ **That certification stops at the repository boundary.** The duplicate
+protection is a PostgreSQL `UNIQUE event_id` claim, so it only protects the
+customer if the workflow **forwards the original `eventId` unchanged**:
+
+- The `eventId` in the `send-chat-message` body MUST be the `eventId` from the
+  `payment.reviewed` body (equivalently its JWT `jti` / `x-atlas-event-id` —
+  all three are the same value). **Never** a freshly generated id, a run id, or
+  an execution id: a new id per retry defeats the claim and the customer is
+  told twice.
+- `orderNumber`, `channel` and `externalChatId` are forwarded verbatim too. The
+  workflow composes only the message text.
+- A `duplicate` / `in_progress` answer is a **success**, not a failure to retry.
+  `needs_review` goes to a human; there is no automatic resend anywhere.
+
+**Unverified today:** nobody has inspected the live workflow to confirm the id
+is forwarded unchanged — the n8n Atlas Chat Sender nodes are still disabled and
+disconnected, and `N8N_PAYMENT_REVIEW_WEBHOOK_URL` is unset in Production. That
+check is read-only inspection plus controlled testing, and it is what stands
+between this and end-to-end certification.
+
 ## Bottom line
 
 All five normal-op write workflows are DB-only today → recommendation **A**
