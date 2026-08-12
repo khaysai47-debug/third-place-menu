@@ -171,6 +171,8 @@ export const BUILDER_OUTCOMES = [
   "network_failure",
   "malformed_output",
   "timeout",
+  // The CLI never launched — a runner fault, distinct from a model that failed.
+  "process_spawn_error",
 ];
 
 /** Builder outcomes that pause rather than fail, and the state each maps to. */

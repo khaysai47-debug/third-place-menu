@@ -11,8 +11,14 @@
 //     run git, cannot commit, cannot push, cannot deploy, cannot install.
 //   * NEVER --dangerously-skip-permissions, NEVER bypassPermissions.
 //   * cwd is the worktree, so even a file write cannot reach the main checkout.
-import { spawnSync } from "node:child_process";
-import { AdapterConfigurationError, flagNames, parseArgv, redactCommand } from "./argv.mjs";
+import {
+  AdapterConfigurationError,
+  flagNames,
+  parseArgv,
+  redactCommand,
+  spawnCli,
+  spawnFailure,
+} from "./argv.mjs";
 
 export const DEFAULTS = {
   maxTurns: 30,
@@ -182,10 +188,26 @@ export function parseResetAt(text = "") {
  * limit that gets recorded as an implementation failure would burn a revision
  * round for something the Builder did not do wrong.
  */
-export function classifyResult({ status, stdout = "", stderr = "", timedOut = false }) {
+export function classifyResult({
+  status,
+  stdout = "",
+  stderr = "",
+  timedOut = false,
+  spawnError = null,
+}) {
   const text = `${stdout}\n${stderr}`;
 
   if (timedOut) return { outcome: "timeout", detail: "Builder exceeded its timeout" };
+  // A process that never started produces no stdout. Falling through to the
+  // JSON parse below would report that silence as malformed model output and
+  // blame the Builder for a runner fault. Checked before anything reads stdout.
+  if (spawnError) {
+    return {
+      outcome: "process_spawn_error",
+      category: spawnError.category,
+      detail: spawnError.detail,
+    };
+  }
   if (USAGE.test(text)) {
     return { outcome: "usage_limit", detail: "usage limit reached", resetAt: parseResetAt(text) };
   }
@@ -278,14 +300,14 @@ export function invokeBuilder({
   assertSafeCommand({ args });
 
   const started = Date.now();
-  const proc = spawnSync(command, args, {
+  // No shell: arguments are passed as an array, so a prompt can never be
+  // reinterpreted as shell syntax. On Windows this also resolves the .cmd
+  // launcher to the executable it wraps, which Node cannot spawn directly.
+  const proc = spawnCli(command, args, {
     cwd: worktree,
     encoding: "utf8",
     timeout: timeoutMs,
     maxBuffer: 64 * 1024 * 1024,
-    // No shell: arguments are passed as an array, so a prompt can never be
-    // reinterpreted as shell syntax.
-    shell: false,
   });
 
   const timedOut = proc.error?.code === "ETIMEDOUT" || proc.signal === "SIGTERM";
@@ -294,6 +316,7 @@ export function invokeBuilder({
     stdout: proc.stdout ?? "",
     stderr: proc.stderr ?? (proc.error ? String(proc.error.message) : ""),
     timedOut,
+    spawnError: timedOut ? null : spawnFailure(proc),
   });
 
   return {

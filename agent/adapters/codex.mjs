@@ -11,12 +11,18 @@
 // The verdict must parse cleanly. A review the runner cannot read is rejected as
 // malformed rather than guessed at — an unreadable review must never become a
 // silent PASS.
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { validateReview } from "../schemas.mjs";
-import { AdapterConfigurationError, flagNames, parseArgv, redactCommand } from "./argv.mjs";
+import {
+  AdapterConfigurationError,
+  flagNames,
+  parseArgv,
+  redactCommand,
+  spawnCli,
+  spawnFailure,
+} from "./argv.mjs";
 
 export const DEFAULTS = {
   timeoutMs: 15 * 60 * 1000,
@@ -142,12 +148,13 @@ export function invokeReviewer({
   let proc;
   let lastMessage = "";
   try {
-    proc = spawnSync(command, args, {
+    // Same Windows .cmd hazard as the Builder: never `shell: true`, and never
+    // a concatenated command string carrying the reviewed diff.
+    proc = spawnCli(command, args, {
       cwd: worktree,
       encoding: "utf8",
       timeout: timeoutMs,
       maxBuffer: 64 * 1024 * 1024,
-      shell: false,
     });
     try {
       lastMessage = readFileSync(outputFile, "utf8");
@@ -172,6 +179,17 @@ export function invokeReviewer({
 
   if (proc.error?.code === "ETIMEDOUT" || proc.signal === "SIGTERM") {
     return { ...base, outcome: "timeout", error: "Reviewer exceeded its timeout" };
+  }
+  // A Reviewer that never launched wrote no verdict. That is a runner fault,
+  // not an unreadable review, and must not be reported as malformed output.
+  const launch = spawnFailure(proc);
+  if (launch) {
+    return {
+      ...base,
+      outcome: "process_spawn_error",
+      category: launch.category,
+      error: launch.detail,
+    };
   }
   if (USAGE.test(text)) return { ...base, outcome: "usage_limit", error: "usage limit reached" };
   if (AUTH.test(text))
