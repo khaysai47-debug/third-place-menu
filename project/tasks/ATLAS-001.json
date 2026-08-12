@@ -5,7 +5,7 @@
   "context": "NOT YET APPROVED and NOT implemented. Scoped for the first controlled real agent run.\n\nWhat the Builder needs to know about this codebase:\n- The customer menu is src/components/menu/MenuScreen.tsx. BOTH customer routes render it: '/' (src/routes/index.tsx, the public menu) and '/m' (src/routes/m.tsx, the secure bot-session link). Changing MenuScreen therefore changes both, which is intended.\n- Tailwind v4 is configured with `@custom-variant dark (&:is(.dark *))` in src/styles.css, so dark styling applies to DESCENDANTS of an element carrying the `.dark` class. A `.dark` block already exists at the top of src/styles.css defining --background and --foreground.\n- src/styles.css is SHARED by the customer menu, the staff dashboard and the owner console (the `--oc-*` block is the owner console design system). Add customer-menu dark tokens without altering existing staff or owner rules.\n- src/routes/__root.tsx is deliberately OUT OF SCOPE: it is the shared document shell for staff and owner routes too. Apply the theme class on the customer menu's own container inside MenuScreen, not on <html>. A brief flash of the light theme before hydration is acceptable; changing the shared shell is not.\n- Do not add a dependency. Everything needed (React, Tailwind v4, matchMedia, localStorage) is already present.",
   "owner": "claude-builder",
   "riskLevel": "low",
-  "baseCommit": "7f4771bc40b19ba4fb525807d74de4a55f14e1fd",
+  "baseCommit": "f843aaf10ec3d51819019b1fcac24c26c14583de",
   "allowedPaths": [
     "src/components/menu/",
     "src/routes/index.tsx",
