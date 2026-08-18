@@ -23,9 +23,10 @@ import { supabaseAuthHeaders } from "./supabaseAuth.js";
 // the server-only service-role key and returns a deliberately mapped payload
 // (never raw rows, never Supabase errors).
 //
-// READ-ONLY GUARANTEE — this module performs exactly two GET requests
-// (orders, order_items). No insert/update/upsert/delete/RPC exists here;
-// scripts/test-order-details.mjs asserts every outgoing call is a GET.
+// READ-ONLY GUARANTEE — this module performs GET requests only (orders,
+// order_items, and bot_sessions for server-derived bot orders). No
+// insert/update/upsert/delete/RPC exists here; scripts/test-order-details.mjs
+// asserts every outgoing call is a GET.
 //
 // Never log the JWT, Authorization header, secret, or Supabase key — logs
 // carry order number / event id / HTTP status only.
@@ -91,6 +92,9 @@ const SOURCE_TO_CHANNEL: Record<string, OrderEventChannel> = {
   messenger: "messenger",
 };
 
+/** Meta PSID/IGSID charset — mirrors the authoritative bot_sessions CHECK. */
+const EXTERNAL_CHAT_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
+
 // Explicit column lists — the response contract starts at the SELECT. No
 // select=*, no client-supplied columns, ever.
 const ORDER_COLUMNS =
@@ -98,6 +102,7 @@ const ORDER_COLUMNS =
   "customer_phone,customer_address,customer_note,subtotal,delivery_fee," +
   "total,payment_method,payment_status,created_at";
 const ITEM_COLUMNS = "item_code,item_name,quantity,unit_price,line_total";
+const BOT_SESSION_COLUMNS = "platform,external_chat_id";
 
 /** One GET against PostgREST. Rows on success, null on ANY failure (logged as status only). */
 async function supabaseGetRows(
@@ -203,6 +208,28 @@ export async function postOrderDetails(request: Request): Promise<Response> {
   if (deliveryFee === null) return invalidOrder("delivery_fee");
   if (total === null) return invalidOrder("total");
 
+  const channel = SOURCE_TO_CHANNEL[asStringOrNull(order.source) ?? ""] ?? null;
+  let externalChatId: string | null = null;
+  if (channel === "instagram" || channel === "messenger") {
+    const sessions = await supabaseGetRows(
+      `${base}/rest/v1/bot_sessions?order_id=eq.${encodeURIComponent(orderId)}` +
+        `&status=eq.completed&select=${BOT_SESSION_COLUMNS}&limit=2`,
+      key,
+      "bot_sessions",
+    );
+    if (sessions === null) return jsonError(502, "Order lookup failed.");
+    if (sessions.length > 1) return invalidOrder("multiple bot_sessions");
+    const session = sessions[0];
+    if (session) {
+      if (session.platform !== channel) return invalidOrder("bot_session platform");
+      const value = asStringOrNull(session.external_chat_id);
+      if (!value || !EXTERNAL_CHAT_ID_PATTERN.test(value)) {
+        return invalidOrder("external_chat_id");
+      }
+      externalChatId = value;
+    }
+  }
+
   const itemRows = await supabaseGetRows(
     `${base}/rest/v1/order_items?order_id=eq.${encodeURIComponent(orderId)}` +
       `&select=${ITEM_COLUMNS}&order=created_at.asc`,
@@ -250,7 +277,8 @@ export async function postOrderDetails(request: Request): Promise<Response> {
       paymentQrUrl: process.env.PAYMENT_QR_URL || null,
       order: {
         orderNumber,
-        channel: SOURCE_TO_CHANNEL[asStringOrNull(order.source) ?? ""] ?? null,
+        channel,
+        externalChatId,
         orderType: asStringOrNull(order.order_type),
         status: asStringOrNull(order.status),
         paymentStatus: asStringOrNull(order.payment_status),

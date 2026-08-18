@@ -32,6 +32,7 @@ const { postOrderDetails } = await import(
 const SECRET = "order-details-test-secret";
 const EVENT_ID = "11111111-2222-3333-4444-555555555555";
 const ORDER_NUMBER = "TP-20260715-120000";
+const MESSENGER_CHAT_ID = "messenger-chat-123";
 
 process.env.N8N_AUTOMATION_SECRET = SECRET;
 process.env.VITE_SUPABASE_URL = "https://supabase.invalid";
@@ -89,12 +90,18 @@ const ITEM_ROWS = [
   { item_code: "B01", item_name: "Thai Tea", quantity: 2, unit_price: 45, line_total: 90 },
   { item_code: "A02", item_name: "Fried Rice", quantity: 1, unit_price: 60, line_total: 60 },
 ];
+const BOT_SESSION_ROW = {
+  platform: "messenger",
+  external_chat_id: MESSENGER_CHAT_ID,
+};
 
 let fetchLog = [];
 let ordersBehavior = "ok"; // "ok" | "empty" | "http500" | "reject"
 let itemsBehavior = "ok";
+let sessionsBehavior = "ok"; // "ok" | "empty" | "http500" | "reject"
 let orderRowOverride = null; // spread over ORDER_ROW per test (malformed-row cases)
 let itemRowsOverride = null; // replaces ITEM_ROWS per test
+let sessionRowsOverride = null; // replaces the completed bot-session row per test
 
 globalThis.fetch = async (url, init = {}) => {
   fetchLog.push({ url: String(url), init });
@@ -107,6 +114,13 @@ globalThis.fetch = async (url, init = {}) => {
   if (u.includes("/rest/v1/order_items?")) {
     if (itemsBehavior === "http500") return new Response("boom", { status: 500 });
     return Response.json(itemRowsOverride ?? ITEM_ROWS);
+  }
+  if (u.includes("/rest/v1/bot_sessions?")) {
+    if (sessionsBehavior === "reject") throw new TypeError("fetch failed");
+    if (sessionsBehavior === "http500") return new Response("boom", { status: 500 });
+    return Response.json(
+      sessionsBehavior === "empty" ? [] : (sessionRowsOverride ?? [BOT_SESSION_ROW]),
+    );
   }
   throw new Error("unexpected fetch target in test");
 };
@@ -154,6 +168,7 @@ assert.deepEqual(ok, {
     order: {
       orderNumber: ORDER_NUMBER,
       channel: "customer",
+      externalChatId: null,
       orderType: "delivery",
       status: "new",
       paymentStatus: "unpaid",
@@ -290,8 +305,8 @@ await expectStatus(
 
 /* ── Phase 3C: bot channels are valid vocabulary; source → channel mapping ── */
 
-// instagram/messenger tokens verify (future trusted callers). The response
-// channel still comes from orders.source — never from the token.
+// instagram/messenger tokens verify. The response channel and chat identity
+// still come from server-side rows — never from the token.
 const igToken = await expectStatus(
   200,
   { auth: `Bearer ${makeJwt({ claims: { channel: "instagram" } })}` },
@@ -299,6 +314,7 @@ const igToken = await expectStatus(
 );
 trackCalls();
 assert.equal(igToken.data.order.channel, "customer", "response channel comes from orders.source");
+assert.equal(igToken.data.order.externalChatId, null, "normal order has no bot chat identity");
 await expectStatus(
   200,
   { auth: `Bearer ${makeJwt({ claims: { channel: "messenger" } })}` },
@@ -306,19 +322,44 @@ await expectStatus(
 );
 trackCalls();
 
-// SOURCE_TO_CHANNEL forward mappings (no current writer produces these
-// source values — Phase 3D bot sessions will, server-side).
+// SOURCE_TO_CHANNEL forward mappings. Bot orders resolve externalChatId only
+// through the completed session linked to the authoritative order id.
 for (const [source, expected] of [
   ["instagram", "instagram"],
   ["messenger", "messenger"],
   ["tiktok", null], // unknown sources still map to null, never leak raw
 ]) {
   orderRowOverride = { source };
+  sessionRowsOverride = expected
+    ? [{ platform: expected, external_chat_id: `${expected}-chat-123` }]
+    : null;
   const mapped = await expectStatus(200, { auth: `Bearer ${makeJwt()}` }, `source ${source}`);
   trackCalls();
   assert.equal(mapped.data.order.channel, expected, `source ${source} → channel ${expected}`);
+  assert.equal(
+    mapped.data.order.externalChatId,
+    expected ? `${expected}-chat-123` : null,
+    `source ${source} → authoritative externalChatId`,
+  );
+  if (expected) {
+    const sessionCall = fetchLog.find((call) => call.url.includes("/rest/v1/bot_sessions?"));
+    assert.ok(sessionCall, `${source}: completed bot-session lookup occurred`);
+    assert.ok(
+      sessionCall.url.includes(`order_id=eq.${ORDER_ROW.id}`),
+      `${source}: session lookup is bound to the authoritative order id`,
+    );
+    assert.ok(
+      sessionCall.url.includes("status=eq.completed"),
+      `${source}: completed sessions only`,
+    );
+    assert.ok(
+      sessionCall.url.includes("select=platform,external_chat_id&limit=2"),
+      `${source}: narrow session columns and duplicate detection`,
+    );
+  }
 }
 orderRowOverride = null;
+sessionRowsOverride = null;
 
 /* ── 13–14. Token↔body binding ───────────────────────────────────────────── */
 
@@ -362,6 +403,19 @@ await expectStatus(
   },
   "unknown field rejected",
 );
+await expectStatus(
+  400,
+  {
+    ...authed,
+    body: JSON.stringify({
+      eventId: EVENT_ID,
+      orderNumber: ORDER_NUMBER,
+      externalChatId: "attacker-supplied-chat",
+    }),
+  },
+  "caller-supplied externalChatId rejected",
+);
+assert.equal(fetchLog.length, 0, "caller-supplied externalChatId: no Supabase call");
 await expectStatus(
   400,
   { ...authed, body: JSON.stringify({ eventId: EVENT_ID, orderNumber: ` ${ORDER_NUMBER} ` }) },
@@ -434,6 +488,51 @@ await expectStatus(502, { auth: `Bearer ${makeJwt()}` }, "order_items read 500")
 trackCalls();
 itemsBehavior = "ok";
 
+/* ── Bot-session lookup: absence is null; failures and ambiguity fail closed ── */
+
+orderRowOverride = { source: "messenger" };
+sessionsBehavior = "empty";
+const noSession = await expectStatus(
+  200,
+  { auth: `Bearer ${makeJwt({ claims: { channel: "messenger" } })}` },
+  "bot order without completed session",
+);
+trackCalls();
+assert.equal(noSession.data.order.externalChatId, null, "missing completed session maps to null");
+
+sessionsBehavior = "http500";
+await expectStatus(
+  502,
+  { auth: `Bearer ${makeJwt({ claims: { channel: "messenger" } })}` },
+  "bot_sessions read 500",
+);
+trackCalls();
+
+sessionsBehavior = "reject";
+await expectStatus(
+  502,
+  { auth: `Bearer ${makeJwt({ claims: { channel: "messenger" } })}` },
+  "bot_sessions read network failure",
+);
+trackCalls();
+
+sessionsBehavior = "ok";
+for (const [rows, label] of [
+  [[BOT_SESSION_ROW, { ...BOT_SESSION_ROW, external_chat_id: "other-chat" }], "multiple sessions"],
+  [[{ ...BOT_SESSION_ROW, platform: "instagram" }], "session platform mismatch"],
+  [[{ ...BOT_SESSION_ROW, external_chat_id: "bad chat!" }], "malformed external chat id"],
+]) {
+  sessionRowsOverride = rows;
+  await expectStatus(
+    502,
+    { auth: `Bearer ${makeJwt({ claims: { channel: "messenger" } })}` },
+    label,
+  );
+  trackCalls();
+}
+orderRowOverride = null;
+sessionRowsOverride = null;
+
 /* ── Fail closed on malformed authoritative rows (all generic 502) ───────── */
 
 // A coerced value here would eventually reach a customer message — malformed
@@ -493,7 +592,7 @@ for (const call of allCalls) {
   assert.equal(call.init.method ?? "GET", "GET", `non-GET Supabase call: ${call.url}`);
   assert.equal(call.init.body, undefined, "Supabase calls must carry no body");
   assert.ok(
-    /\/rest\/v1\/(orders|order_items)\?/.test(call.url),
+    /\/rest\/v1\/(orders|order_items|bot_sessions)\?/.test(call.url),
     `unexpected Supabase target: ${call.url}`,
   );
 }
