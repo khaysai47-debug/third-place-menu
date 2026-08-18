@@ -34,20 +34,26 @@ import { secretMatches } from "./staffOrderWrites.server.js";
 //
 // PRIVACY RULE — THE POINT OF THIS MODULE. A Messenger payload is customer
 // data: message text, attachments, the sender PSID and the recipient Page ID.
-// NONE of it is logged or persisted, and the only part ever forwarded is the
-// sender PSID, as `externalChatId` on each event. The raw body exists only long
-// enough to verify its signature and read its structure, and what leaves this
-// file is the SanitizedMessengerPayload below: counts, categories, timestamps,
-// and that one id. If a field is not on that type, it does not exist
-// downstream.
+// NONE of it is logged or persisted, and the only parts ever forwarded are the
+// sender PSID, as `externalChatId` on each event, and the first image
+// attachment's URL, as `attachment` on a message event. The raw body exists
+// only long enough to verify its signature and read its structure, and what
+// leaves this file is the SanitizedMessengerPayload below: counts, categories,
+// timestamps, and those two values. If a field is not on that type, it does not
+// exist downstream.
 //
-// WHY THE PSID IS THE ONE EXCEPTION: it names the conversation to answer, so
-// without it n8n receives an event it cannot act on. It is opaque and
-// Page-scoped (meaningless to anyone but this Page), it travels ONLY in the
-// body of the forward to N8N_MESSENGER_EVENTS_WEBHOOK_URL, and it appears in
-// NO log line, NO stored row, and NOT in the eventId derivation. Message text,
-// the recipient Page id, attachments and postback payloads remain stripped
-// unconditionally — they are not needed to reply.
+// WHY THE PSID IS AN EXCEPTION: it names the conversation to answer, so without
+// it n8n receives an event it cannot act on. It is opaque and Page-scoped
+// (meaningless to anyone but this Page), it travels ONLY in the body of the
+// forward to N8N_MESSENGER_EVENTS_WEBHOOK_URL, and it appears in NO log line,
+// NO stored row, and NOT in the eventId derivation.
+//
+// WHY THE IMAGE URL IS THE OTHER EXCEPTION: a payment proof IS the image, so
+// without its URL the proof cannot be fetched and reviewed. Only the FIRST
+// valid image attachment travels, and only as { type, url } — one HTTPS URL,
+// nothing else from the attachment. Message text, the recipient Page id,
+// non-image attachments and postback payloads remain stripped unconditionally —
+// they are not needed to reply or to review a proof.
 
 /** Meta's verification query fields. */
 const HUB_MODE = "hub.mode";
@@ -75,9 +81,15 @@ export const EVENT_CATEGORIES = ["message", "postback", "delivery", "read", "oth
 export type MessengerEventCategory = (typeof EVENT_CATEGORIES)[number];
 
 /**
- * One messaging event, reduced to shape plus the ONE identifier a reply needs.
- * No recipient Page id, no message content, no attachments, no postback
- * payload.
+ * The one image reference that may leave this module: type and URL, nothing
+ * else. No file name, no size, no sticker or thumbnail metadata.
+ */
+export type SanitizedMessengerAttachment = { type: "image"; url: string };
+
+/**
+ * One messaging event, reduced to shape plus the identifier a reply needs and
+ * the image a payment proof consists of. No recipient Page id, no message text,
+ * no non-image attachment, no postback payload.
  */
 export type SanitizedMessengerEvent = {
   category: MessengerEventCategory;
@@ -94,12 +106,22 @@ export type SanitizedMessengerEvent = {
    * derives anything from it.
    */
   externalChatId: string | null;
+  /**
+   * The FIRST valid image attachment on a message event — `{ type: "image",
+   * url }` — else null. Always present, so the event shape stays fixed.
+   *
+   * WHY THIS IS NOT STRIPPED: a payment proof IS the image. Without its URL,
+   * the proof intake at /api/automation/payment-proof has nothing to fetch. It
+   * travels ONLY to N8N_MESSENGER_EVENTS_WEBHOOK_URL and is never logged.
+   */
+  attachment: SanitizedMessengerAttachment | null;
 };
 
 /**
  * THE ONLY shape that leaves this module. Everything is structural except
- * externalChatId above, which is the single opaque identifier a reply
- * requires. Nothing here carries message content, a Page id, or attachments.
+ * externalChatId and attachment above: the opaque identifier a reply requires,
+ * and the one image URL a payment proof consists of. Nothing here carries
+ * message text, a Page id, or any other attachment.
  */
 export type SanitizedMessengerPayload = {
   eventId: string;
@@ -195,18 +217,54 @@ function senderChatId(event: Record<string, unknown>): string | null {
   return typeof id === "string" && EXTERNAL_CHAT_ID_PATTERN.test(id) ? id : null;
 }
 
+/** HTTPS only, with a real host and no embedded userinfo credentials. */
+function isValidImageUrl(value: unknown): value is string {
+  if (typeof value !== "string" || /\s/.test(value)) return false;
+  try {
+    const url = new URL(value);
+    return (
+      url.protocol === "https:" && url.hostname !== "" && url.username === "" && url.password === ""
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The FIRST valid image attachment on the event, as `{ type, url }`, else null.
+ * Valid means `type === "image"` and `payload.url` is a non-empty HTTPS URL;
+ * an attachment failing either test is skipped, never partially forwarded.
+ *
+ * This is message-only by construction: it reads `event.message`, and
+ * categorize() returns "message" for exactly the events that carry that key. A
+ * postback, delivery or read event therefore always yields null. Nothing else
+ * from the attachment — file name, sticker id, size — is read at all.
+ */
+function imageAttachment(event: Record<string, unknown>): SanitizedMessengerAttachment | null {
+  const message = event.message;
+  if (!isRecord(message) || !Array.isArray(message.attachments)) return null;
+  for (const attachment of message.attachments) {
+    if (!isRecord(attachment) || attachment.type !== "image") continue;
+    const payload = attachment.payload;
+    if (!isRecord(payload)) continue;
+    const url = payload.url;
+    if (isValidImageUrl(url)) return { type: "image", url };
+  }
+  return null;
+}
+
 /**
  * Reduces the parsed payload to structure plus the one identifier a reply
- * needs. Returns null for anything that is not a `page` object — the only
+ * needs and the first image a message carries. Returns null for anything that is not a `page` object — the only
  * object type this endpoint accepts.
  *
  * Deliberately tolerant BELOW the object check: a missing or malformed entry /
  * messaging array counts as zero rather than throwing, because the signature
  * already proved the sender. Deliberately strict ABOUT what it emits: it reads
- * array lengths, the four discriminating keys, a numeric timestamp, and
- * `sender.id` — and nothing else. It never touches `recipient`, `message`,
- * `postback.payload`, or `attachments`, so no Page id and no content can reach
- * the returned object even by accident.
+ * array lengths, the four discriminating keys, a numeric timestamp, `sender.id`
+ * and one image URL — and nothing else. It never touches `recipient`,
+ * `message.text`, `message.mid` or `postback.payload`, so no Page id and no
+ * message content can reach the returned object even by accident.
  */
 function sanitize(payload: unknown, eventId: string): SanitizedMessengerPayload | null {
   if (!isRecord(payload) || payload.object !== "page") return null;
@@ -217,7 +275,7 @@ function sanitize(payload: unknown, eventId: string): SanitizedMessengerPayload 
     const messaging = isRecord(entry) && Array.isArray(entry.messaging) ? entry.messaging : [];
     for (const event of messaging) {
       if (!isRecord(event)) {
-        events.push({ category: "other", timestamp: null, externalChatId: null });
+        events.push({ category: "other", timestamp: null, externalChatId: null, attachment: null });
         continue;
       }
       const at = event.timestamp;
@@ -225,6 +283,7 @@ function sanitize(payload: unknown, eventId: string): SanitizedMessengerPayload 
         category: categorize(event),
         timestamp: typeof at === "number" && Number.isFinite(at) ? at : null,
         externalChatId: senderChatId(event),
+        attachment: imageAttachment(event),
       });
     }
   }
@@ -366,6 +425,7 @@ export async function postMetaMessengerWebhook(request: Request): Promise<Respon
 /** Exported for the standalone check (scripts/test-meta-messenger-webhook.mjs). */
 export const __test = {
   categorize,
+  imageAttachment,
   sanitize,
   senderChatId,
   SIGNATURE_HEADER,

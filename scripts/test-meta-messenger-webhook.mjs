@@ -10,9 +10,10 @@
 //   - the four event categories are counted across multiple entries;
 //   - the forward carries ONLY the approved sanitized keys: structure, plus
 //     the sender PSID as externalChatId (the one identifier a reply needs,
-//     validated against EXTERNAL_CHAT_ID_PATTERN and null when it fails) —
-//     never message text, a Page ID, an attachment URL, a postback payload,
-//     a mid, or any raw array;
+//     validated against EXTERNAL_CHAT_ID_PATTERN and null when it fails) and
+//     the first valid image attachment as { type, url } on a message event —
+//     never message text, a Page ID, a non-image attachment, a postback
+//     payload, a mid, or any raw array;
 //   - forwarding is skipped with no external request when the URL is unset, and
 //     a forward that fails, 500s, or times out still leaves Meta its 200;
 //   - no request ever reaches the Graph API and no customer message is sent;
@@ -133,10 +134,7 @@ async function deliver(raw, { signature = "auto", state = {} } = {}) {
   const headers = { "Content-Type": "application/json" };
   const value = signature === "auto" ? sign(body) : signature;
   if (value !== null) headers["x-hub-signature-256"] = value;
-  return run(
-    postMetaMessengerWebhook,
-    new Request(URL_BASE, { method: "POST", headers, body }),
-  );
+  return run(postMetaMessengerWebhook, new Request(URL_BASE, { method: "POST", headers, body }));
 }
 
 /* ── Payload builders ────────────────────────────────────────────────────── */
@@ -248,7 +246,9 @@ for (const malformed of [
 
 // Correct shape, wrong key — and the same body signed over a MUTATED payload,
 // which is the attack the signature actually exists to stop.
-out = await deliver(wrap(messageEvent), { signature: sign(JSON.stringify(wrap(messageEvent)), "wrong-key") });
+out = await deliver(wrap(messageEvent), {
+  signature: sign(JSON.stringify(wrap(messageEvent)), "wrong-key"),
+});
 assert.equal(out.status, 403, "10. a signature from the wrong key is rejected");
 assert.equal(out.calls.length, 0, "10. an invalid signature never forwards");
 
@@ -294,7 +294,11 @@ for (const unsupported of [
   42,
 ]) {
   out = await deliver(unsupported);
-  assert.equal(out.status, 400, `13. an unsupported object is rejected: ${JSON.stringify(unsupported)}`);
+  assert.equal(
+    out.status,
+    400,
+    `13. an unsupported object is rejected: ${JSON.stringify(unsupported)}`,
+  );
   assert.equal(out.calls.length, 0, "13. an unsupported object never forwards");
 }
 
@@ -317,12 +321,12 @@ const APPROVED_KEYS = [
   "receivedAt",
 ];
 
-for (const [event, category] of [
-  [messageEvent, "message"],
-  [postbackEvent, "postback"],
-  [deliveryEvent, "delivery"],
-  [readEvent, "read"],
-  [envelope({ optin: { ref: "x" } }), "other"],
+for (const [event, category, attachment] of [
+  [messageEvent, "message", { type: "image", url: ATTACHMENT_URL }],
+  [postbackEvent, "postback", null],
+  [deliveryEvent, "delivery", null],
+  [readEvent, "read", null],
+  [envelope({ optin: { ref: "x" } }), "other", null],
 ]) {
   out = await deliver(wrap(event));
   assert.equal(out.status, 200, `14. a ${category} event is accepted`);
@@ -330,17 +334,21 @@ for (const [event, category] of [
   assert.equal(sent.messagingEventCount, 1, `14. one ${category} event counted`);
   assert.deepEqual(
     sent.events,
-    [{ category, timestamp: event.timestamp, externalChatId: PSID }],
-    `14. a ${category} event is categorized with its timestamp and sender`,
+    [{ category, timestamp: event.timestamp, externalChatId: PSID, attachment }],
+    `14. a ${category} event is categorized with its timestamp, sender and image`,
   );
 }
 
 // 15. A timestamp is carried ONLY when it is a real finite number.
 out = await deliver(
-  wrap({ message: { text: TEXT }, timestamp: "1754300000001" }, { message: {} }, {
-    message: {},
-    timestamp: Number.NaN, // serializes to null
-  }),
+  wrap(
+    { message: { text: TEXT }, timestamp: "1754300000001" },
+    { message: {} },
+    {
+      message: {},
+      timestamp: Number.NaN, // serializes to null
+    },
+  ),
 );
 let sent = forwarded(out);
 assert.deepEqual(
@@ -352,6 +360,11 @@ assert.deepEqual(
   sent.events.map((e) => e.externalChatId),
   [null, null, null],
   "15. an event with no sender carries a null externalChatId, never a guess",
+);
+assert.deepEqual(
+  sent.events.map((e) => e.attachment),
+  [null, null, null],
+  "15. a message with no attachments carries a null attachment",
 );
 
 // 16. Multiple entries and multiple events per entry are counted correctly.
@@ -375,19 +388,28 @@ assert.deepEqual(
   "16. categories keep entry and event order",
 );
 
-// 17. THE forwarding contract: only the approved keys. The sender PSID is the
-// ONE identifier that travels — it names the conversation to answer, so
-// without it n8n has an event it cannot act on. Everything else that could
-// identify a Page or carry content stays stripped.
+// 17. THE forwarding contract: only the approved keys. Two values travel. The
+// sender PSID names the conversation to answer, so without it n8n has an event
+// it cannot act on; the first image URL IS the payment proof, so without it
+// there is nothing to review. Everything else that could identify a Page or
+// carry content stays stripped.
 out = await deliver(wrap(messageEvent, postbackEvent));
 sent = forwarded(out);
 assert.deepEqual(Object.keys(sent).sort(), APPROVED_KEYS, "17. only approved top-level keys");
 for (const event of sent.events) {
   assert.deepEqual(
     Object.keys(event).sort(),
-    ["category", "externalChatId", "timestamp"],
+    ["attachment", "category", "externalChatId", "timestamp"],
     "17. only approved per-event keys",
   );
+  if (event.attachment !== null) {
+    assert.deepEqual(
+      Object.keys(event.attachment).sort(),
+      ["type", "url"],
+      "17. an attachment carries type and url and nothing else",
+    );
+    assert.equal(event.attachment.type, "image", "17. only images are forwarded");
+  }
 }
 assert.equal(sent.object, "page", "17. the object type is carried");
 assert.equal(typeof sent.eventId, "string");
@@ -396,14 +418,14 @@ assert.ok(!Number.isNaN(Date.parse(sent.receivedAt)), "17. receivedAt is a times
 
 const wire = out.calls[0].body;
 assert.ok(wire.includes(PSID), "17. the sender PSID IS forwarded — a reply needs it");
-// Everything else sensitive is still absent. The PSID is excluded from this
-// list ON PURPOSE and is the only such exception in the whole file.
-for (const secretish of SENSITIVE.filter((s) => s !== HOOK && s !== PSID)) {
+assert.ok(wire.includes(ATTACHMENT_URL), "17. the image URL IS forwarded — the proof needs it");
+// Everything else sensitive is still absent. The PSID and the image URL are
+// excluded from this list ON PURPOSE and are the only such exceptions.
+for (const secretish of SENSITIVE.filter((s) => s !== HOOK && s !== PSID && s !== ATTACHMENT_URL)) {
   assert.ok(!wire.includes(secretish), `17. the forwarded body must not contain "${secretish}"`);
 }
 assert.ok(!wire.includes(PAGE_ID), "17. the recipient Page ID is never forwarded");
 assert.ok(!wire.includes(TEXT), "17. message text is never forwarded");
-assert.ok(!wire.includes(ATTACHMENT_URL), "17. attachments are never forwarded");
 assert.ok(!wire.includes("ORDER_START"), "17. a postback payload is never forwarded");
 for (const key of ["sender", "recipient", "mid", "attachments", "text", "psid", "payload"]) {
   assert.ok(!wire.includes(key), `17. the forwarded body must not contain the key "${key}"`);
@@ -512,6 +534,104 @@ for (const event of sent.events) {
 assert.ok(!out.calls[0].body.includes(PAGE_ID), "19b. still no Page ID on the wire");
 assert.ok(!out.calls[0].body.includes("bad/slash"), "19b. a rejected id is not forwarded either");
 
+/* ── 19c. The image attachment — the ONLY other value that travels ───────── */
+
+const SECOND_URL = "https://cdn.invalid/second-slip.jpg";
+const image = (...attachments) => ({ message: { text: TEXT, attachments } });
+const imageAt = (url) => ({ type: "image", payload: { url } });
+
+assert.deepEqual(
+  __test.imageAttachment(image(imageAt(ATTACHMENT_URL))),
+  { type: "image", url: ATTACHMENT_URL },
+  "19c. a valid image attachment is reduced to type and url",
+);
+assert.deepEqual(
+  __test.imageAttachment(image(imageAt(ATTACHMENT_URL), imageAt(SECOND_URL))),
+  { type: "image", url: ATTACHMENT_URL },
+  "19c. only the FIRST valid image travels, never a list",
+);
+assert.deepEqual(
+  __test.imageAttachment(
+    image({ type: "file", payload: { url: SECOND_URL } }, imageAt(ATTACHMENT_URL)),
+  ),
+  { type: "image", url: ATTACHMENT_URL },
+  "19c. a non-image before a valid image is skipped, not forwarded",
+);
+assert.deepEqual(
+  __test.imageAttachment(image(imageAt("http://cdn.invalid/x.jpg"), imageAt(ATTACHMENT_URL))),
+  { type: "image", url: ATTACHMENT_URL },
+  "19c. an invalid URL before a valid image is skipped",
+);
+
+// Everything that is not an image with a non-empty HTTPS URL yields null.
+for (const [event, why] of [
+  [{}, "no message at all"],
+  [{ message: null }, "a null message"],
+  [{ message: "hi" }, "a string message"],
+  [{ message: { text: TEXT } }, "a message with no attachments"],
+  [{ message: { attachments: null } }, "a null attachments field"],
+  [{ message: { attachments: {} } }, "an attachments object rather than an array"],
+  [image(), "an empty attachments array"],
+  [image(null), "a null attachment"],
+  [image("image"), "a string attachment"],
+  [image({ type: "file", payload: { url: ATTACHMENT_URL } }), "a file attachment"],
+  [image({ type: "video", payload: { url: ATTACHMENT_URL } }), "a video attachment"],
+  [image({ type: "audio", payload: { url: ATTACHMENT_URL } }), "an audio attachment"],
+  [image({ type: "location", payload: { coordinates: { lat: 1, long: 2 } } }), "a location"],
+  [image({ type: "fallback", payload: { url: ATTACHMENT_URL } }), "a fallback attachment"],
+  [image({ type: "Image", payload: { url: ATTACHMENT_URL } }), "a differently cased type"],
+  [image({ payload: { url: ATTACHMENT_URL } }), "an attachment with no type"],
+  [image({ type: "image" }), "an image with no payload"],
+  [image({ type: "image", payload: null }), "an image with a null payload"],
+  [image({ type: "image", payload: [{ url: ATTACHMENT_URL }] }), "an array payload"],
+  [image(imageAt(undefined)), "an image with no url"],
+  [image(imageAt(null)), "a null url"],
+  [image(imageAt("")), "an empty url"],
+  [image(imageAt("http://cdn.invalid/x.jpg")), "a plain http url"],
+  [image(imageAt("//cdn.invalid/x.jpg")), "a protocol-relative url"],
+  [image(imageAt("data:image/jpeg;base64,AAAA")), "a data url"],
+  [image(imageAt("https://")), "a scheme with no host"],
+  [image(imageAt("https://?token=x")), "a hostless URL with a query"],
+  [image(imageAt("https://user@example.invalid/x.jpg")), "a URL with a username"],
+  [image(imageAt("https://user:password@example.invalid/x.jpg")), "a URL with credentials"],
+  [image(imageAt("https:// cdn.invalid/x.jpg")), "a url with a space"],
+  [image(imageAt({ toString: () => ATTACHMENT_URL })), "an object pretending to be a url"],
+  [{ postback: { attachments: [imageAt(ATTACHMENT_URL)] } }, "an image on a postback"],
+  [{ delivery: { attachments: [imageAt(ATTACHMENT_URL)] } }, "an image on a delivery"],
+]) {
+  assert.equal(__test.imageAttachment(event), null, `19c. ${why} yields null`);
+}
+
+// End to end: the image URL travels, the text and mid beside it do not, and a
+// second image on the same message is not forwarded.
+out = await deliver(
+  wrap(
+    envelope({
+      message: {
+        mid: MID,
+        text: TEXT,
+        attachments: [imageAt(ATTACHMENT_URL), imageAt(SECOND_URL)],
+      },
+    }),
+    postbackEvent,
+  ),
+);
+sent = forwarded(out);
+assert.deepEqual(
+  sent.events.map((e) => e.attachment),
+  [{ type: "image", url: ATTACHMENT_URL }, null],
+  "19c. the first image is forwarded on the message event only",
+);
+assert.ok(!out.calls[0].body.includes(SECOND_URL), "19c. a second image is never forwarded");
+assert.ok(!out.calls[0].body.includes(TEXT), "19c. the text beside the image is still stripped");
+assert.ok(!out.calls[0].body.includes(MID), "19c. the mid beside the image is still stripped");
+
+// A non-image attachment forwards null, never a partial or coerced record.
+out = await deliver(wrap(envelope(image({ type: "file", payload: { url: SECOND_URL } }))));
+sent = forwarded(out);
+assert.equal(sent.events[0].attachment, null, "19c. a file attachment forwards null");
+assert.ok(!out.calls[0].body.includes(SECOND_URL), "19c. a non-image URL never reaches the wire");
+
 /* ══════════════════════════════════════════════════════════════════════════
    E. Forwarding behaviour (tests 20–22)
    ══════════════════════════════════════════════════════════════════════════ */
@@ -604,7 +724,12 @@ const source = (await import("node:fs")).readFileSync(
   "api/_lib/metaMessengerWebhook.server.ts",
   "utf8",
 );
-for (const forbidden of ["graph.facebook.com", "PAGE_ACCESS_TOKEN", "access_token", "/me/messages"]) {
+for (const forbidden of [
+  "graph.facebook.com",
+  "PAGE_ACCESS_TOKEN",
+  "access_token",
+  "/me/messages",
+]) {
   assert.ok(!source.includes(forbidden), `24. the module must not reference "${forbidden}"`);
 }
 
