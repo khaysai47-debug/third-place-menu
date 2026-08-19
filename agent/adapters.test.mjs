@@ -372,7 +372,11 @@ test(
     const originalPath = process.env.PATH;
     try {
       process.env.PATH = `${dir}${path.delimiter}${originalPath}`;
-      const prompt = builderPrompt({ task: TASK, repoRoot: process.cwd() });
+      const fullPrompt = builderPrompt({ task: TASK, repoRoot: process.cwd() });
+      // Exercise the cmd.exe boundary without crossing Windows' separate
+      // CreateProcess limit. Real adapters put the full prompt on stdin; this
+      // test is specifically about resolving a .cmd launcher to its real exe.
+      const prompt = fullPrompt.slice(0, 16_000);
       // cmd.exe caps a command line at 8191 characters, so a fallback through
       // cmd.exe could not carry this. The launcher must resolve to a real exe.
       assert.ok(prompt.length > 8191, `precondition: prompt is ${prompt.length} chars`);

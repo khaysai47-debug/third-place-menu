@@ -270,11 +270,18 @@ export function classifyResult({
       sessionId: payload.session_id ?? null,
     };
   }
+  // ATLAS-004: this ended a run as FAILED and its worktree was very nearly
+  // discarded — the implementation in it turned out to be correct, was reviewed
+  // by Codex and shipped as f42d5d0. A spent turn budget is not a verdict on the
+  // work; it is the clock running out mid-sentence. Classified as its own
+  // resumable outcome so the engine can preserve the worktree and continue the
+  // SAME session rather than starting over.
   if (payload?.subtype === "error_max_turns") {
     return {
-      outcome: "implementation_failure",
-      detail: "builder hit its turn limit",
+      outcome: "turn_limit",
+      detail: "builder hit its turn limit with work in progress",
       sessionId: payload.session_id ?? null,
+      numTurns: payload.num_turns ?? null,
     };
   }
   if (status !== 0) {

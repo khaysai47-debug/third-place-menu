@@ -1,0 +1,76 @@
+{
+  "lessonsVersion": 1,
+  "note": "Machine-readable guardrails, loaded at task start and handed to workers. Small on purpose: this is a checklist that survives between tasks, not a knowledge base. Add a lesson only when getting it wrong cost real time.",
+  "lessons": [
+    {
+      "id": "L-001",
+      "lesson": "Never assume browser Web APIs such as URL exist in the n8n Code-node sandbox. Parse with string operations or a documented node helper instead.",
+      "tags": ["n8n", "code-node", "sandbox", "runtime"],
+      "systems": ["n8n"],
+      "source": "Atlas n8n routing"
+    },
+    {
+      "id": "L-002",
+      "lesson": "Never choose an unpaid order by \"latest timestamp\" when an authoritative identity or mapping can exist. Resolve by identity (channel + external chat id), not by recency.",
+      "tags": ["orders", "payments", "identity", "supabase", "correctness"],
+      "systems": ["repo", "supabase", "n8n"],
+      "source": "Atlas payment intake"
+    },
+    {
+      "id": "L-003",
+      "lesson": "Validate the outbound payload shape against the RECEIVING API's contract before publishing anything that sends it.",
+      "tags": ["contract", "payload", "api", "n8n", "always"],
+      "systems": ["n8n", "repo"],
+      "source": "Atlas payment-proof intake"
+    },
+    {
+      "id": "L-004",
+      "lesson": "Production environment and configuration presence is part of feature completeness. Code that is correct and unconfigured is not done.",
+      "tags": ["vercel", "config", "env", "completeness"],
+      "systems": ["vercel"],
+      "source": "Atlas deploys"
+    },
+    {
+      "id": "L-005",
+      "lesson": "A workflow reporting \"Succeeded\" does not prove the business outcome succeeded. Verify the customer-facing effect, not the execution status.",
+      "tags": ["n8n", "verification", "always"],
+      "systems": ["n8n"],
+      "source": "Atlas Messenger routing"
+    },
+    {
+      "id": "L-006",
+      "lesson": "Inspect the existing backend contracts before inventing a new endpoint. The endpoint you need usually already exists under a different name.",
+      "tags": ["api", "contract", "method", "always"],
+      "systems": ["repo"],
+      "source": "Atlas payment-proof intake"
+    },
+    {
+      "id": "L-007",
+      "lesson": "Do not discard a worktree merely because a Builder invocation hit error_max_turns. Inspect the diff first — ATLAS-004's interrupted run held the implementation that shipped as f42d5d0.",
+      "tags": ["agent", "resume", "worktree", "always"],
+      "systems": ["repo"],
+      "source": "ATLAS-004"
+    },
+    {
+      "id": "L-008",
+      "lesson": "The repository worker must never bypass AGENTS.md to modify an external system. Route the problem to the worker that owns that system, or stop and ask.",
+      "tags": ["agent", "permissions", "safety", "always"],
+      "systems": ["repo", "n8n", "vercel"],
+      "source": "Atlas agent design"
+    },
+    {
+      "id": "L-009",
+      "lesson": "Prefer the smallest isolated change, then verify the NEXT boundary. Guess-change-guess-change is how a two-line bug costs a day.",
+      "tags": ["method", "always"],
+      "systems": ["repo", "n8n", "vercel"],
+      "source": "Atlas agent design"
+    },
+    {
+      "id": "L-010",
+      "lesson": "Do not declare a task done until the original success criteria are proven. Compiled, deployed and \"Succeeded\" are not the goal.",
+      "tags": ["verification", "method", "always"],
+      "systems": ["repo", "n8n", "vercel"],
+      "source": "Atlas agent design"
+    }
+  ]
+}

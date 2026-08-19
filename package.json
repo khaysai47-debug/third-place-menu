@@ -26,13 +26,19 @@
     "test:supabase-auth": "node scripts/test-supabase-auth.mjs",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "agent:test": "node --test agent/agent.test.mjs agent/engine.test.mjs agent/approval.test.mjs agent/adapters.test.mjs",
+    "agent:test": "node --test agent/agent.test.mjs agent/engine.test.mjs agent/approval.test.mjs agent/adapters.test.mjs agent/orchestrator.test.mjs agent/connectors.test.mjs",
     "agent:approve": "node agent/cli.mjs approve",
+    "agent:approve-action": "node agent/cli.mjs approve-action",
     "agent:test:engine": "node --test agent/engine.test.mjs",
+    "agent:test:orchestrator": "node --test agent/orchestrator.test.mjs",
     "agent:validate": "node agent/cli.mjs validate",
     "agent:dry-run": "node agent/cli.mjs dry-run",
     "agent:run": "node agent/cli.mjs run",
-    "agent:resume": "node agent/cli.mjs resume"
+    "agent:resume": "node agent/cli.mjs resume",
+    "agent:orchestrate": "node agent/cli.mjs orchestrate",
+    "agent:status": "node agent/cli.mjs status",
+    "agent:report": "node agent/cli.mjs report",
+    "agent:verify": "node agent/cli.mjs verify"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

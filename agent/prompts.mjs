@@ -83,6 +83,46 @@ ${projectMemory(repoRoot)}
 ${REPORT_CONTRACT}`;
 }
 
+/**
+ * Resume an interrupted implementation IN PLACE.
+ *
+ * The whole point is the first instruction: the worktree already contains work,
+ * and the expensive mistake — the one ATLAS-004 nearly made — is to treat an
+ * interruption as a blank page and implement everything a second time.
+ */
+export function resumePrompt({ task, repoRoot, filesChanged = [], blocker = null, notes = [] }) {
+  return `Resume task ${task.taskId}. This is a CONTINUATION, not a new attempt.
+
+You are in the SAME isolated git worktree as your previous, interrupted run. It
+already contains your work in progress.
+
+DO THIS FIRST, BEFORE EDITING ANYTHING:
+1. Read the files listed under WORK ALREADY IN THE WORKTREE below.
+2. Establish what is already done and what is actually left.
+3. Continue from there.
+
+DO NOT start the implementation over. DO NOT revert or rewrite work that is
+already correct. Finish the remaining part, and if it is already complete, say so
+and change nothing.
+
+===== WORK ALREADY IN THE WORKTREE =====
+${filesChanged.length ? filesChanged.map((f) => `- ${f}`).join("\n") : "- (no file changes recorded — inspect the worktree yourself before concluding it is empty)"}
+
+===== WHY THE PREVIOUS RUN STOPPED =====
+${blocker ? `${blocker.kind ?? "interrupted"} at ${blocker.boundary ?? "unknown boundary"}: ${blocker.detail ?? ""}` : "the Builder ran out of turns mid-implementation"}
+
+===== NOTES FROM THE ORCHESTRATOR =====
+${notes.length ? notes.map((n) => `- ${n}`).join("\n") : "- (none)"}
+
+===== TASK =====
+${taskBlock(task)}
+
+${RULES}
+${projectMemory(repoRoot)}
+
+${REPORT_CONTRACT}`;
+}
+
 /** Revision round: findings from checks and/or the Reviewer. */
 export function revisionPrompt({ task, findings, checkFailures = [], round }) {
   const findingText = findings.length

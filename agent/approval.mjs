@@ -26,18 +26,30 @@ export const APPROVAL_VERSION = 1;
 export const DEPRECATED_TASK_FIELDS = ["approved", "approvedAt", "approvedBy"];
 
 /**
+ * The external state root: everything the agent remembers that is NOT source
+ * code — approval receipts, orchestration task state, evidence. Beside the
+ * repository, never inside it.
+ *
+ * Precedence: ATLAS_AGENT_STATE_DIR → sibling directory. The sibling default
+ * means a fresh clone works with no configuration, and the path is derived from
+ * the repo name so two checkouts cannot share state.
+ */
+export function stateRoot({ repoRoot = process.cwd(), env = process.env } = {}) {
+  if (env.ATLAS_AGENT_STATE_DIR) return path.resolve(env.ATLAS_AGENT_STATE_DIR);
+  const root = path.resolve(repoRoot);
+  return path.join(path.dirname(root), `${path.basename(root)}-agent-state`);
+}
+
+/**
  * Where receipts live: beside the repository, never inside it.
  *
- * Precedence: explicit argument → ATLAS_AGENT_STATE_DIR → sibling directory.
- * The sibling default means a fresh clone works with no configuration, and the
- * path is derived from the repo name so two checkouts cannot share receipts.
+ * Precedence: explicit argument → the external state root. `stateDir` names the
+ * approvals directory ITSELF, which is what `--state-dir` has always meant; the
+ * V2 orchestrator's state root is a separate option (`--state-root`).
  */
 export function approvalsDir({ stateDir, repoRoot = process.cwd(), env = process.env } = {}) {
   if (stateDir) return path.resolve(stateDir);
-  if (env.ATLAS_AGENT_STATE_DIR)
-    return path.join(path.resolve(env.ATLAS_AGENT_STATE_DIR), "approvals");
-  const root = path.resolve(repoRoot);
-  return path.join(path.dirname(root), `${path.basename(root)}-agent-state`, "approvals");
+  return path.join(stateRoot({ repoRoot, env }), "approvals");
 }
 
 export const receiptPath = (taskId, dir) => path.join(dir, `${taskId}.json`);

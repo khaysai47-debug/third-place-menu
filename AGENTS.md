@@ -123,11 +123,19 @@ See `project/TEST_MATRIX.md` and decision D-009.
 
 ## Pauses
 
-Usage limits, expired credentials and network errors are **recoverable pauses**,
-not implementation failures. They consume no implementation or revision round,
-the worktree and checkpoint are preserved, and a resume revalidates through the
-full execution preflight rather than continuing on trust. The agent never
-switches to paid API usage on its own.
+Usage limits, expired credentials, network errors and **a spent Builder turn
+budget** are **recoverable pauses**, not implementation failures. They consume no
+implementation or revision round, the worktree and checkpoint are preserved, and
+a resume revalidates through the full execution preflight rather than continuing
+on trust. The agent never switches to paid API usage on its own.
+
+`PAUSED_BUILDER_BUDGET` exists because of ATLAS-004. That run ended
+`error_max_turns`, was recorded as `FAILED`, and its worktree was nearly thrown
+away — the implementation in it was correct, passed review, and shipped as
+`f42d5d0`. **A failed Builder invocation is not a failed task.** A turn limit is
+the clock running out mid-sentence, so the run pauses and the resume continues in
+the same worktree, with the same session, told explicitly to inspect what is
+already there before writing anything.
 
 States, checkpoint schema and the full rule set: `project/PAUSE_RESUME.md`.
 
@@ -161,6 +169,12 @@ Consequences worth stating plainly:
 
 ## Loop limits
 
+These are the **tactical** limits, inside one execution run (`agent:run`). The
+V2 orchestrator adds a **strategic** loop above them, with its own budget — see
+"V2 orchestration" below. Neither replaces the other: a run still stops after two
+revisions; the orchestrator decides whether a further attempt would be learning
+something or repeating itself.
+
 - **Maximum two planning rounds.** If the plan is not agreed after two, stop with
   `NEEDS_HUMAN`.
 - **Maximum two revision rounds.** If the Reviewer still finds blocking issues
@@ -190,21 +204,81 @@ Consequences worth stating plainly:
   configuration, secrets and environment values are not touched by the agent.
 - **Secrets are never printed.** Not in logs, not in reports, not in diffs.
 
+## V2 orchestration
+
+V1 owns **one Builder invocation**. V2 owns a **goal**, and stays responsible for
+it across as many worker steps as the goal survives — which is what stops the
+human being the message bus between Claude, Codex, n8n, Vercel and the terminal.
+
+```
+orchestrator  owns the goal, the budget and the state. Routes; never implements.
+  ├── repo    the whole V1 engine: worktree, Builder, checks, Reviewer, diff
+  ├── codex   independent read-only review, and the policy for when it is needed
+  ├── n8n     inspect / validate / propose. apply + publish are Class B.
+  └── vercel  inspect deployments, logs, config PRESENCE. deploy is Class C.
+```
+
+Rules that matter:
+
+- **Inspect before modify.** Every goal starts with a read-only preflight, and an
+  external blocker is investigated before anything is proposed.
+- **Route by the first proven failing boundary.** An n8n problem goes to the n8n
+  worker. The repo worker has no capability that touches an external system, so
+  "make the repo worker do it" is not available and AGENTS.md never has to bend.
+- **Progress, not counting.** A different blocker continues; the same blocker
+  with new evidence continues; the same failure twice with nothing new escalates.
+  Bounded by 30 total steps and 5 attempts per worker.
+- **Class B/C actions are queued, never performed** — commit, push, publish,
+  deploy, production config. There is no code path in the orchestrator that
+  performs one.
+- **A goal is not complete because it compiled.** Criteria with no automatic
+  verifier are marked `manual_verification_required`; a human records the
+  verification with `agent:verify`.
+- **No connector means `not_available`**, never a simulated success. The n8n and
+  Vercel read-only connectors auto-wire when their required environment
+  configuration exists, so read-only inspection runs through the real
+  worker/connector path; without that configuration every read answers
+  `not_available` rather than guessing.
+- **External mutations are default-deny.** A protected n8n or Vercel action needs
+  BOTH an exact action-specific approval receipt (`agent:approve-action`, bound
+  to the task, action, target and artefact hashes) AND explicit runtime mutation
+  enablement. Either gate closed means nothing is performed. See
+  `project/PERMISSIONS.md`.
+
+State lives outside the repository at
+`<repo>-agent-state/task-state/<TASK-ID>/` (`state.json`, `checkpoints/`,
+`evidence/`, `final-report.md`), written atomically.
+
+Guardrails carried between tasks: `agent/lessons.json`, loaded at task start and
+handed to the Builder on resume.
+
 ## Commands
 
 ```
 npm run agent:validate -- --task project/tasks/<TASK>.json   # structure only
 npm run agent:dry-run  -- --task project/tasks/<TASK>.json   # inspect, authorize nothing
 npm run agent:approve  -- --task project/tasks/<TASK>.json --by "Your Name"
-npm run agent:run      -- --task project/tasks/<TASK>.json   # execute an APPROVED task
-npm run agent:resume   -- --run <RUN_ID>                     # continue a paused run
+npm run agent:run      -- --task project/tasks/<TASK>.json   # execute an APPROVED task (V1)
+npm run agent:resume   -- --run <RUN_ID>                     # continue a paused run (V1)
 npm run agent:test                                           # all agent tests
 npm run agent:test:engine                                    # engine tests only
+npm run agent:test:orchestrator                              # V2 orchestration tests
+
+npm run agent:orchestrate -- --task project/tasks/<TASK>.json  # V2: own the goal
+npm run agent:resume      -- --task <TASK-ID>                  # V2: continue that goal
+npm run agent:status      -- --task <TASK-ID>                  # one consolidated block
+npm run agent:report      -- --task <TASK-ID>                  # the final report
+npm run agent:verify      -- --task <TASK-ID> --criteria C3,C4 --by "Your Name"
 ```
 
+`orchestrate` and `resume --task` are the same call: stored state decides whether
+it is a first run or a continuation, so a goal can never end up with two
+worktrees. `run` and `resume --run` are unchanged V1.
+
 Useful flags: `--runs-dir <dir>` (keep reports out of `project/runs`),
-`--state-dir <dir>` (where approval receipts live), `--no-auto-resume` (pause
-instead of scheduling a retry), `--max-retries <n>`, `--retry-ms <ms>`.
+`--state-dir <dir>` (where approval receipts live), `--state-root <dir>` (the
+external state root, for orchestration state), `--no-auto-resume` (pause instead
+of scheduling a retry), `--max-retries <n>`, `--retry-ms <ms>`.
 
 Approval receipts default to `<repo>-agent-state/approvals/`, outside the
 repository; `ATLAS_AGENT_STATE_DIR` overrides the root.

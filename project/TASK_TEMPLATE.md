@@ -21,6 +21,34 @@ schema; `agent/schemas.mjs` enforces it.
 | `permissions` | string[] | May be empty. Identifiers from `PERMISSIONS.md`. A protected permission blocks the dry run. |
 | `stoppingRules` | string[] | Non-empty. Conditions under which the agent must stop and escalate. |
 
+## Optional V2 fields
+
+Every field below is optional and defaulted. **A V1 task file needs no changes**
+— ATLAS-001…004 orchestrate unmodified — so add one only when the default is
+wrong for that task.
+
+| Field | Type | Default | Purpose |
+| --- | --- | --- | --- |
+| `goal` | string | `objective` | One sentence the orchestrator stays responsible for. |
+| `successCriteria` | object[] | derived from `acceptanceCriteria` | `{ id?, text, verifiedBy? }`. `verifiedBy` names the boundary that proves it, e.g. `repo.checks.typecheck`, `review.codex`, `n8n.execution`. Omit it and the criterion is a human's to verify. |
+| `budget` | object | `{ maxTotalSteps: 30, maxSameFailureWithoutNewEvidence: 2, maxPerWorkerAttempts: 5 }` | The strategic loop's limits. |
+| `reviewPolicy` | object | see `agent/workers/codex.mjs` | Which changed paths require an independent Codex review. |
+| `systems` | string[] | `[]` | Systems this goal touches (`repo`, `n8n`, `vercel`) — used to select relevant lessons. |
+| `systemTargets` | object | `{}` | Per-worker **public, non-secret** target arguments the router forwards to an external worker, e.g. `systemTargets.n8n.workflowId`, or the public Vercel arguments the connector accepts (`limit`, `requiredKeys`, `deploymentId`). |
+
+**`systemTargets` carries identifiers, never credentials.** A token, API key,
+password, authorization header or any other secret value placed there is refused
+before the worker is called, not redacted afterwards. Credentials reach an
+external system only from the connector's own environment.
+
+Without `successCriteria`, each `acceptanceCriteria` entry becomes a criterion
+and a small table decides whether the agent can prove it: mentions of typecheck,
+lint, build or a Codex review get an automatic verifier, and **everything else is
+marked `manual_verification_required`** rather than assumed. That is deliberate:
+"a customer taps the button and gets the right reply" is not something a
+typecheck can prove. A human records it with
+`npm run agent:verify -- --task <ID> --criteria C4 --by "Your Name"`.
+
 **There are no approval fields.** A task file is a pure specification: it says
 what should be done, never "yes, do it". `approved`, `approvedAt` and
 `approvedBy` are deprecated — present-but-false is tolerated with a warning,

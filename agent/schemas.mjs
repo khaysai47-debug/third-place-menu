@@ -16,6 +16,12 @@ export const PERMISSION_TIERS = {
     "inspect_local_logs",
     "review_local_diff",
     "prepare_reports",
+    // V2: READ-ONLY inspection of an external system through a configured
+    // connector — an n8n execution, a Vercel deployment log, the presence (not
+    // the value) of a required env var. Reads only. Every change to an external
+    // system stays Tier 2 or Tier 3, and a task that does not list this
+    // permission gets no external inspection at all.
+    "inspect_external_system",
   ],
   // Requires an explicit human approval, per action, per task.
   approval: [
@@ -92,11 +98,18 @@ export const EXECUTION_STATES = [
 /**
  * Recoverable pauses. A pause is NOT a failure: the run is intact and waiting
  * on something outside the agent's control. See project/PAUSE_RESUME.md.
+ *
+ * `PAUSED_BUILDER_BUDGET` is the ATLAS-004 lesson made structural: a Builder
+ * that spends its turn limit has not failed at the work, it has run out of
+ * turns mid-way through it. The worktree holds real, often correct changes.
+ * Throwing that away and starting again is the expensive wrong answer, so the
+ * state is a pause and the resume continues in the SAME worktree.
  */
 export const PAUSE_STATES = [
   "PAUSED_USAGE_LIMIT",
   "PAUSED_AUTH_REQUIRED",
   "PAUSED_NETWORK_ERROR",
+  "PAUSED_BUILDER_BUDGET",
   "RESUME_SCHEDULED",
   "RESUMING",
 ];
@@ -114,6 +127,7 @@ export const STATE_PHASE = {
   PAUSED_USAGE_LIMIT: "paused",
   PAUSED_AUTH_REQUIRED: "paused",
   PAUSED_NETWORK_ERROR: "paused",
+  PAUSED_BUILDER_BUDGET: "paused",
   RESUME_SCHEDULED: "paused",
 
   PASS: "terminal",
@@ -166,6 +180,10 @@ export const FINDING_SEVERITIES = ["blocker", "major", "minor"];
 export const BUILDER_OUTCOMES = [
   "success",
   "implementation_failure",
+  // Turn budget spent mid-implementation. NOT an implementation failure: the
+  // work in the worktree may be complete, correct, or nearly so (ATLAS-004 was
+  // all three). Resumable, and resumed in the same worktree.
+  "turn_limit",
   "usage_limit",
   "auth_failure",
   "network_failure",
@@ -199,6 +217,7 @@ export const PAUSE_REASONS = {
   usage_limit: "PAUSED_USAGE_LIMIT",
   auth_required: "PAUSED_AUTH_REQUIRED",
   network_error: "PAUSED_NETWORK_ERROR",
+  builder_budget_exhausted: "PAUSED_BUILDER_BUDGET",
 };
 
 /**
@@ -463,4 +482,241 @@ export function permissionTier(permission) {
     if (permissions.includes(permission)) return tier;
   }
   return "unknown";
+}
+
+/* ══ V2 orchestration vocabulary ═══════════════════════════════════════════ */
+//
+// V1 owns ONE Builder invocation. V2 owns a GOAL, and stays responsible for it
+// across however many worker steps that goal survives. Everything below is the
+// vocabulary that orchestration state is written in; the state itself lives
+// outside the repository (agent/taskstate.mjs).
+
+/**
+ * Orchestration status of a goal.
+ *
+ * The point of having nine of these instead of "ok / failed" is that an
+ * interruption is not an outcome. `paused` is resumable and expected;
+ * `escalated` means the agent stopped because continuing would be guessing;
+ * `failed` means the orchestration itself broke. ATLAS-004 was recorded as a
+ * failure when it was a `paused`, and that misclassification is what threw away
+ * a good implementation.
+ */
+export const ORCHESTRATION_STATUSES = [
+  "pending",
+  "investigating",
+  "implementing",
+  "validating",
+  "waiting_for_approval",
+  "paused",
+  "escalated",
+  "completed",
+  "failed",
+];
+
+/** Statuses at which the orchestrator stops and hands back to a human. */
+export const STOPPED_STATUSES = [
+  "waiting_for_approval",
+  "paused",
+  "escalated",
+  "completed",
+  "failed",
+];
+
+/** A goal is only `completed` when every criterion is proven. */
+export const CRITERION_STATUSES = [
+  "pending",
+  "verified",
+  "failed",
+  // Cannot be proven by this agent — a human must look. Never "assumed passed".
+  "manual_verification_required",
+];
+
+/** Known workers. The orchestrator owns the goal; workers own capabilities. */
+export const WORKERS = ["repo", "codex", "n8n", "vercel"];
+
+/**
+ * How a worker step ended. Structured, so the router never has to read prose.
+ *
+ * - `success`         — the action did what it said, evidence attached.
+ * - `blocked`         — a real boundary is in the way. Carries a blocker.
+ * - `paused`          — resumable interruption (usage limit, auth, budget).
+ * - `requires_approval` — the action is Class B/C. NOT performed.
+ * - `not_available`   — no connector wired. Never pretend it succeeded.
+ * - `not_permitted`   — the worker has no such capability, or the task did not
+ *                       grant its permission. A safety stop, not a retry.
+ * - `failed`          — the worker itself broke.
+ */
+export const WORKER_RESULT_STATUSES = [
+  "success",
+  "blocked",
+  "paused",
+  "requires_approval",
+  "not_available",
+  "not_permitted",
+  "failed",
+];
+
+/**
+ * Action classes. A is performed automatically; B and C are queued for a human
+ * and never executed by the orchestrator.
+ *
+ *   A — read-only or isolated (inspect, test, typecheck, edit a worktree)
+ *   B — change-set approval  (commit, push, publish an n8n draft, non-secret config)
+ *   C — high-risk approval   (production deploy, env/secret change, schema
+ *                             migration, deletion, customer message, payment)
+ */
+export const ACTION_CLASSES = ["A", "B", "C"];
+
+export const ACTION_CLASS_LABELS = {
+  A: "automatic (read-only or isolated)",
+  B: "change-set approval required",
+  C: "high-risk explicit approval required",
+};
+
+/** Permission tier → action class. Anything unrecognised is treated as C. */
+export const TIER_ACTION_CLASS = { automatic: "A", approval: "B", critical: "C" };
+
+/**
+ * Action class of a worker capability.
+ *
+ * A capability may name an explicit `actionClass` (for external actions that
+ * have no entry in the task permission vocabulary) or a `permission` from that
+ * vocabulary. If it names neither, or names something unknown, the answer is C:
+ * "if unsure, require approval" is a rule, not an aspiration.
+ */
+export function actionClassOf(capability) {
+  if (capability?.actionClass && ACTION_CLASSES.includes(capability.actionClass)) {
+    return capability.actionClass;
+  }
+  return TIER_ACTION_CLASS[permissionTier(capability?.permission)] ?? "C";
+}
+
+/**
+ * Progress budget. Bounded, never infinite; generous enough that a real
+ * multi-system debugging session is not cut off after two revisions.
+ */
+export const DEFAULT_BUDGET = {
+  maxTotalSteps: 30,
+  maxSameFailureWithoutNewEvidence: 2,
+  maxPerWorkerAttempts: 5,
+};
+
+const TASK_STATE_FIELDS = [
+  "taskId",
+  "goal",
+  "status",
+  "successCriteria",
+  "verifiedBoundaries",
+  "currentBlocker",
+  "activeWorker",
+  "attempts",
+  "evidence",
+  "nextAction",
+  "approvalsPending",
+  "lastProgressAt",
+  "stopReason",
+  "createdAt",
+  "updatedAt",
+];
+
+/**
+ * Validate orchestration state. Same contract as every other validator here:
+ * collect readable errors, never throw.
+ *
+ * @returns {{ valid: boolean, errors: string[] }}
+ */
+export function validateTaskState(state) {
+  const errors = [];
+  if (state === null || typeof state !== "object" || Array.isArray(state)) {
+    return { valid: false, errors: ["task state must be an object"] };
+  }
+
+  for (const field of TASK_STATE_FIELDS) {
+    if (!(field in state)) errors.push(`task state is missing ${field}`);
+  }
+
+  for (const field of ["taskId", "goal", "createdAt", "updatedAt"]) {
+    if (field in state && !isNonEmptyString(state[field])) {
+      errors.push(`${field} must be a non-empty string`);
+    }
+  }
+
+  if ("status" in state && !ORCHESTRATION_STATUSES.includes(state.status)) {
+    errors.push(`status must be one of: ${ORCHESTRATION_STATUSES.join(", ")}`);
+  }
+
+  for (const field of ["verifiedBoundaries", "evidence", "approvalsPending", "successCriteria"]) {
+    if (field in state && !Array.isArray(state[field])) errors.push(`${field} must be an array`);
+  }
+
+  if (
+    "activeWorker" in state &&
+    state.activeWorker !== null &&
+    !WORKERS.includes(state.activeWorker)
+  ) {
+    errors.push(`activeWorker must be null or one of: ${WORKERS.join(", ")}`);
+  }
+
+  (Array.isArray(state.successCriteria) ? state.successCriteria : []).forEach(
+    (criterion, index) => {
+      const at = `successCriteria[${index}]`;
+      if (criterion === null || typeof criterion !== "object") {
+        errors.push(`${at} must be an object`);
+        return;
+      }
+      if (!isNonEmptyString(criterion.id)) errors.push(`${at}.id must be a non-empty string`);
+      if (!isNonEmptyString(criterion.text)) errors.push(`${at}.text must be a non-empty string`);
+      if (!CRITERION_STATUSES.includes(criterion.status)) {
+        errors.push(`${at}.status must be one of: ${CRITERION_STATUSES.join(", ")}`);
+      }
+    },
+  );
+
+  if ("attempts" in state) {
+    const attempts = state.attempts;
+    if (attempts === null || typeof attempts !== "object") {
+      errors.push("attempts must be an object");
+    } else if (!Number.isInteger(attempts.total)) {
+      errors.push("attempts.total must be an integer");
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Validate a worker result. The router reads these instead of prose, so a
+ * malformed one must be caught at the boundary rather than routed on.
+ *
+ * @returns {{ valid: boolean, errors: string[] }}
+ */
+export function validateWorkerResult(result) {
+  const errors = [];
+  if (result === null || typeof result !== "object" || Array.isArray(result)) {
+    return { valid: false, errors: ["worker result must be an object"] };
+  }
+  if (!WORKERS.includes(result.worker)) {
+    errors.push(`worker must be one of: ${WORKERS.join(", ")}`);
+  }
+  if (!isNonEmptyString(result.action)) errors.push("action must be a non-empty string");
+  if (!WORKER_RESULT_STATUSES.includes(result.status)) {
+    errors.push(`status must be one of: ${WORKER_RESULT_STATUSES.join(", ")}`);
+  }
+  if (typeof result.changed !== "boolean") errors.push("changed must be a boolean");
+  if (!Array.isArray(result.evidence)) errors.push("evidence must be an array");
+  if (!Array.isArray(result.verifiedBoundariesAdded)) {
+    errors.push("verifiedBoundariesAdded must be an array");
+  }
+  if (result.blocker !== null && typeof result.blocker !== "object") {
+    errors.push("blocker must be null or an object");
+  }
+  if (result.blocker && !isNonEmptyString(result.blocker.boundary)) {
+    errors.push("blocker.boundary must be a non-empty string");
+  }
+  // A blocked result with no fingerprint cannot be compared against the next
+  // one, which is how "the same failure twice" would go undetected forever.
+  if (result.status === "blocked" && !isNonEmptyString(result.failureFingerprint)) {
+    errors.push("a blocked result must carry a failureFingerprint");
+  }
+  return { valid: errors.length === 0, errors };
 }

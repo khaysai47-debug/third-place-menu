@@ -17,6 +17,7 @@ import { dryRun, executionPreflight, OK_STATUSES, validate } from "./coordinator
 import {
   CHECK_RESULTS,
   PAUSE_STATES,
+  phaseOf,
   RUN_STATES,
   validateCheckpoint,
   validateTask,
@@ -209,10 +210,18 @@ test("check result model and run states are complete", () => {
     "PAUSED_USAGE_LIMIT",
     "PAUSED_AUTH_REQUIRED",
     "PAUSED_NETWORK_ERROR",
+    // V2: a Builder that spends its turn budget PAUSES with its worktree intact
+    // instead of failing and losing the work (ATLAS-004).
+    "PAUSED_BUILDER_BUDGET",
     "RESUME_SCHEDULED",
     "RESUMING",
   ]);
   for (const state of PAUSE_STATES) assert.ok(RUN_STATES.includes(state));
+  // Every pause must classify as a pause. A pause that reads as terminal would
+  // strand a resumable run with no way back.
+  for (const state of PAUSE_STATES) {
+    if (state !== "RESUMING") assert.equal(phaseOf(state), "paused", `${state} must be a pause`);
+  }
   assert.equal(hasNewFailure([{ result: "BASELINE_FAILURE" }, { result: "PASS" }]), false);
   assert.equal(hasNewFailure([{ result: "BASELINE_FAILURE" }, { result: "NEW_FAILURE" }]), true);
 });

@@ -26,6 +26,7 @@ import { buildReceipt, writeReceipt } from "./approval.mjs";
 import { liveGitAt } from "./coordinator.mjs";
 import { resumeRun, runTask } from "./engine.mjs";
 import { RunStore } from "./runstore.mjs";
+import { phaseOf } from "./schemas.mjs";
 import { checkScope } from "./scope.mjs";
 import { removeWorkspace } from "./workspace.mjs";
 
@@ -756,6 +757,133 @@ test("a terminal run cannot be resumed", async () => {
   assert.ok(run.notes.some((n) => n.includes("terminal")));
 });
 
+/* ── Builder turn budget: the ATLAS-004 lesson ───────────────────────────── */
+
+/** A Builder that does real work and is then cut off mid-implementation. */
+const interruptedBuilder = (files) => {
+  let call = 0;
+  return {
+    name: "interrupted-builder",
+    build: async ({ worktree, prompt }) => {
+      call += 1;
+      interruptedBuilder.lastPrompt = prompt;
+      for (const [file, content] of Object.entries(files)) {
+        const target = path.join(worktree, file);
+        mkdirSync(path.dirname(target), { recursive: true });
+        writeFileSync(target, content);
+      }
+      return {
+        outcome: "turn_limit",
+        detail: "builder hit its turn limit with work in progress",
+        sessionId: "session-interrupted",
+        stdout: "{}",
+        stderr: "",
+      };
+    },
+    get calls() {
+      return call;
+    },
+  };
+};
+
+test("a spent Builder turn budget PAUSES and preserves the worktree", async () => {
+  const box = sandbox();
+  const builder = interruptedBuilder({ "src/feature.ts": "export const half = 1;\n" });
+  const reviewer = fakeReviewer([{ review: PASS_REVIEW }]);
+
+  const { run } = await runTask(
+    box.taskFile,
+    engineOpts(box, { builder, reviewer, runChecks: passingChecks }),
+  );
+
+  // The V1 behaviour was FAILED, and ATLAS-004 proved that was wrong: the
+  // implementation sitting in that worktree was the one that shipped.
+  assert.equal(run.state, "PAUSED_BUILDER_BUDGET");
+  assert.equal(phaseOf(run.state), "paused", "a pause is not a failure");
+  assert.equal(run.pauseReason, "builder_budget_exhausted");
+  assert.deepEqual(run.filesChanged, ["src/feature.ts"], "the work is recorded, not discarded");
+  assert.ok(existsSync(path.join(run.worktree, "src", "feature.ts")), "the worktree survives");
+  assert.equal(run.builderSessionId, "session-interrupted", "the session is kept for the resume");
+  assert.equal(reviewer.calls, 0, "an unfinished implementation is not reviewed");
+  assert.match(readFileSync(path.join(run.worktree, "src", "feature.ts"), "utf8"), /half/);
+});
+
+test("an interrupted run resumes in the SAME worktree, with the resume prompt", async () => {
+  const box = sandbox();
+  const first = await runTask(
+    box.taskFile,
+    engineOpts(box, {
+      builder: interruptedBuilder({ "src/feature.ts": "export const half = 1;\n" }),
+      runChecks: passingChecks,
+    }),
+  );
+  assert.equal(first.run.state, "PAUSED_BUILDER_BUDGET");
+
+  // A paused run is NOT terminal, so the ordinary resume path picks it up.
+  const builder = fakeBuilder([{ files: { "src/feature.ts": "export const whole = 2;\n" } }]);
+  const reviewer = fakeReviewer([{ review: PASS_REVIEW }]);
+  const { run } = await resumeRun(
+    first.run.runId,
+    engineOpts(box, {
+      builder,
+      reviewer,
+      runChecks: passingChecks,
+      prompt: "Resume existing task/worktree. Inspect current changes first.",
+    }),
+  );
+
+  assert.equal(run.state, "READY_FOR_HUMAN_REVIEW");
+  assert.equal(run.worktree, first.run.worktree, "the same worktree, never a second one");
+  assert.equal(run.branch, first.run.branch);
+  assert.equal(run.revisionRound, 0, "resuming an interruption is not a revision");
+  assert.match(readFileSync(path.join(run.worktree, "src", "feature.ts"), "utf8"), /whole/);
+});
+
+test("the orchestrator may continue a retryable terminal run; nobody else may", async () => {
+  const box = sandbox();
+  let n = 0;
+  const runChecks = () => [
+    {
+      name: "typecheck",
+      result: "NEW_FAILURE",
+      exitCode: 1,
+      newFailures: [{ file: "src/feature.ts", line: ++n, message: `error ${n}` }],
+      baselineFailures: [],
+      log: "",
+    },
+  ];
+  const first = await runTask(
+    box.taskFile,
+    engineOpts(box, { builder: fakeBuilder([{ files: { "src/feature.ts": "x\n" } }]), runChecks }),
+  );
+  assert.equal(first.run.state, "CHECKS_FAILED");
+
+  // Default: refused, exactly as V1 always did.
+  const refused = fakeBuilder([{ files: { "src/feature.ts": "y\n" } }]);
+  const { run: unchanged } = await resumeRun(
+    first.run.runId,
+    engineOpts(box, { builder: refused }),
+  );
+  assert.equal(refused.calls, 0);
+  assert.ok(unchanged.notes.some((note) => note.includes("terminal")));
+
+  // Opt-in: the orchestrator continues the same worktree with a fresh tactical
+  // revision budget. The authorizing preflight still runs in full.
+  const builder = fakeBuilder([{ files: { "src/feature.ts": "export const fixed = 1;\n" } }]);
+  const reviewer = fakeReviewer([{ review: PASS_REVIEW }]);
+  const { run } = await resumeRun(
+    first.run.runId,
+    engineOpts(box, { builder, reviewer, runChecks: passingChecks, continueAfterTerminal: true }),
+  );
+
+  assert.equal(run.state, "READY_FOR_HUMAN_REVIEW");
+  assert.equal(run.worktree, first.run.worktree);
+  assert.equal(builder.calls, 1);
+  assert.ok(
+    run.notes.some((note) => note.includes("continuing after terminal state CHECKS_FAILED")),
+  );
+});
+
 /* ── Adapter command construction (no subprocess is spawned) ─────────────── */
 
 test("Claude command is non-interactive and never bypasses permissions", () => {
@@ -818,6 +946,15 @@ test("Builder output classification separates pauses from failures", () => {
     classifyResult({ status: 1, stdout: JSON.stringify({ is_error: true, subtype: "x" }) }).outcome,
     "implementation_failure",
   );
+  // ATLAS-004: a spent turn budget is its own resumable outcome, NOT an
+  // implementation failure, and it keeps the session id so the resume can
+  // continue the same conversation in the same worktree.
+  const interrupted = classifyResult({
+    status: 0,
+    stdout: JSON.stringify({ subtype: "error_max_turns", session_id: "s9", num_turns: 30 }),
+  });
+  assert.equal(interrupted.outcome, "turn_limit");
+  assert.equal(interrupted.sessionId, "s9");
   // A success payload without the required report block is malformed.
   assert.equal(
     classifyResult({ status: 0, stdout: JSON.stringify({ is_error: false, result: "no block" }) })

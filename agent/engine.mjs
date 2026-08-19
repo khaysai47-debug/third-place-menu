@@ -64,6 +64,12 @@ function options(given = {}) {
     maxRetries: given.maxRetries ?? MAX_RETRIES,
     retryMs: given.retryMs ?? DEFAULT_RETRY_MS,
     autoResume: given.autoResume ?? true,
+    // V2 only, and opt-in: the orchestrator may deliberately continue a goal
+    // whose previous run ended in a RETRYABLE terminal state (checks failed,
+    // revision budget spent). Default false, so `agent:resume` behaves exactly
+    // as it always has. Continuing still re-runs the full authorizing preflight;
+    // this flag skips a sanity check, never a safety gate.
+    continueAfterTerminal: given.continueAfterTerminal ?? false,
     sleep: given.sleep ?? defaultSleep,
     now: given.now ?? (() => new Date()),
     createWorkspace: given.createWorkspace ?? createWorkspace,
@@ -183,9 +189,18 @@ export async function resumeRun(runId, given = {}) {
   const run = store.loadRun();
 
   if (isTerminal(run.state)) {
-    run.notes.push(`refusing to resume a terminal run (${run.state})`);
-    persist(store, run);
-    return { run, store };
+    if (!opts.continueAfterTerminal) {
+      run.notes.push(`refusing to resume a terminal run (${run.state})`);
+      persist(store, run);
+      return { run, store };
+    }
+    // The orchestrator is continuing one goal across several attempts. Give the
+    // run a fresh REVISION budget (the strategic budget that bounds the whole
+    // thing lives in the orchestrator), but keep lastSignature: V1's "the same
+    // failure came back unchanged, stop" guard must survive the continuation.
+    run.notes.push(`orchestrator continuing after terminal state ${run.state}`);
+    run.revisionRound = 0;
+    run.endedAt = null;
   }
 
   run.state = "RESUMING";
@@ -207,15 +222,19 @@ export async function resumeRun(runId, given = {}) {
   }
 
   const task = preflight.task;
+  // The V2 orchestrator supplies its own prompt when it resumes an interrupted
+  // Builder ("inspect what is already there, do not start again"). Without one,
+  // the run rebuilds the prompt from where it stopped, exactly as before.
   const prompt =
-    run.revisionRound > 0
+    given.prompt ??
+    (run.revisionRound > 0
       ? revisionPrompt({
           task,
           findings: run.findings ?? [],
           checkFailures: (run.checkResults ?? []).filter((c) => c.result === "NEW_FAILURE"),
           round: run.revisionRound,
         })
-      : builderPrompt({ task, repoRoot: opts.repoRoot });
+      : builderPrompt({ task, repoRoot: opts.repoRoot }));
 
   return loop(store, run, task, opts, { prompt });
 }
@@ -248,6 +267,20 @@ async function loop(store, run, task, opts, { prompt }) {
     if (builderResult.outcome === "malformed_output") {
       run.notes.push(`Builder output was malformed: ${builderResult.detail}`);
       return finish(store, run, "FAILED", opts);
+    }
+    // A spent turn budget is a PAUSE, not a failure. The worktree holds real
+    // work; the run keeps its branch, its session id and its diff, and a resume
+    // continues in the same worktree instead of implementing it all again.
+    // See ATLAS-004 and schemas.mjs PAUSE_STATES.
+    if (builderResult.outcome === "turn_limit") {
+      run.pauseReason = "builder_budget_exhausted";
+      run.filesChanged = safeChangedFiles(run, opts);
+      run.notes.push(
+        `Builder turn budget exhausted with ${run.filesChanged.length} file(s) changed — ` +
+          "worktree preserved; resume continues the same session",
+      );
+      notify(run, "paused", "builder budget exhausted — resume to continue in the same worktree");
+      return finish(store, run, "PAUSED_BUILDER_BUDGET", opts);
     }
     if (builderResult.outcome !== "success") {
       run.notes.push(`Builder ${builderResult.outcome}: ${builderResult.detail}`);
@@ -507,6 +540,15 @@ export function safeMessage(error, limit = 300) {
     .replace(/\s+/g, " ")
     .trim();
   return raw.length > limit ? `${raw.slice(0, limit)}…` : raw;
+}
+
+/** Changed files, or [] if the worktree cannot be read. Never throws. */
+function safeChangedFiles(run, opts) {
+  try {
+    return run.worktree ? opts.changedFiles(run.worktree) : [];
+  } catch {
+    return [];
+  }
 }
 
 const pauseKey = (outcome) =>
