@@ -31,7 +31,7 @@ wrong for that task.
 | --- | --- | --- | --- |
 | `goal` | string | `objective` | One sentence the orchestrator stays responsible for. |
 | `successCriteria` | object[] | derived from `acceptanceCriteria` | `{ id?, text, verifiedBy? }`. `verifiedBy` names the boundary that proves it, e.g. `repo.checks.typecheck`, `review.codex`, `n8n.execution`. Omit it and the criterion is a human's to verify. |
-| `budget` | object | `{ maxTotalSteps: 30, maxSameFailureWithoutNewEvidence: 2, maxPerWorkerAttempts: 5 }` | The strategic loop's limits. |
+| `budget` | object | `{ maxTotalSteps: 30, maxSameFailureWithoutNewEvidence: 2, maxPerWorkerAttempts: 5 }` | The strategic loop's limits. `maxTotalSteps` counts real attempts only — an infrastructure pause (`auth_required`, `usage_limit`, a missing connector, a queued approval) stops the goal without spending one. |
 | `reviewPolicy` | object | see `agent/workers/codex.mjs` | Which changed paths require an independent Codex review. |
 | `systems` | string[] | `[]` | Systems this goal touches (`repo`, `n8n`, `vercel`) — used to select relevant lessons. |
 | `systemTargets` | object | `{}` | Per-worker **public, non-secret** target arguments the router forwards to an external worker, e.g. `systemTargets.n8n.workflowId`, or the public Vercel arguments the connector accepts (`limit`, `requiredKeys`, `deploymentId`). |
@@ -168,7 +168,7 @@ before any model is invoked when:
 | no receipt | `APPROVAL_MISSING` |
 | receipt unreadable, malformed, unknown version, wrong task id, missing approver, invalid or future timestamp | `APPROVAL_INVALID` |
 | task edited after approval, or approved against a different base | `APPROVAL_STALE` |
-| base commit moved with non-`project/` changes | `BASE_COMMIT_MISMATCH` |
+| base commit moved with changes outside the control plane (`agent/`, `project/`, `AGENTS.md`) | `BASE_COMMIT_MISMATCH` |
 | main repository dirty | `DIRTY_REPOSITORY` |
 | protected permission requested | `BLOCKED_PERMISSION` |
 | branch or worktree already exists | `BRANCH_EXISTS` / `WORKTREE_CONFLICT` |

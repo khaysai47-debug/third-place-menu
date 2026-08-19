@@ -101,7 +101,9 @@ export function createTaskState({ task, taskFile, now = new Date(), budget, less
     verifiedBoundaries: [],
     currentBlocker: null,
     activeWorker: null,
-    attempts: { total: 0, byWorker: {}, sameFailure: 0 },
+    // `total` is every worker result; `steps` is the strategic budget, which an
+    // infrastructure pause does not spend. See orchestrator.consumesStrategicStep.
+    attempts: { total: 0, steps: 0, byWorker: {}, sameFailure: 0 },
     evidence: [],
     nextAction: "read-only preflight",
     approvalsPending: [],

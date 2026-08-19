@@ -36,7 +36,7 @@ export function statusBlock(state) {
   return `TASK      ${state.taskId}
 GOAL      ${state.goal}
 STATUS    ${state.status}${state.stopReason ? ` (${state.stopReason})` : ""}
-STEPS     ${state.attempts?.total ?? 0} of ${state.budget?.maxTotalSteps ?? "?"}
+STEPS     ${state.attempts?.steps ?? state.attempts?.total ?? 0} of ${state.budget?.maxTotalSteps ?? "?"}
 
 VERIFIED
 ${bullets(state.verifiedBoundaries ?? [], "nothing proven yet")}
@@ -111,7 +111,7 @@ export function finalReportMarkdown(state, { task = null, lessons = [] } = {}) {
 | --- | --- |
 | Goal | ${state.goal} |
 | **Final status** | **${state.status}**${state.stopReason ? ` (${state.stopReason})` : ""} |
-| Steps taken | ${state.attempts?.total ?? 0} of ${state.budget?.maxTotalSteps ?? "?"} |
+| Steps taken | ${state.attempts?.steps ?? state.attempts?.total ?? 0} of ${state.budget?.maxTotalSteps ?? "?"} |
 | Workers used | ${systemsTouched(state).join(", ") || "(none)"} |
 | Branch | ${state.activeRun?.branch ?? "(none)"} |
 | Worktree | ${state.activeRun?.worktree ?? "(none)"} |

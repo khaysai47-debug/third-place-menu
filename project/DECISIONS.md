@@ -253,3 +253,35 @@ contains no application code, so a commit confined to it cannot change what the
 Builder would be working on. The worktree still branches from `baseCommit`, so
 the code the Builder sees is exactly the code that was approved. Committing one
 line of `src/` moves the code and is correctly refused.
+
+## D-018 — Control-plane drift is not product drift
+
+**Date:** 2026-08-19
+**Decision:** the safe set D-017 opened for `project/` is now stated explicitly
+as `CONTROL_PLANE_PATHS = ["agent/", "project/", "AGENTS.md"]` — exactly the
+paths `PERMISSIONS.md` has always called `project_rule_update`. HEAD may lead
+`task.baseCommit` by commits confined to that set; one file outside it anywhere
+in the range makes the whole range `BASE_COMMIT_MISMATCH`, with no partial
+credit. `executionPreflight()` now reports `approvedProductBase`, `runtimeHead`
+and `controlPlaneDrift` separately, and the repo worker writes the acceptance
+into evidence.
+**Why:** ATLAS-005 was approved at `ac5bdc1`, and while it was in flight a real
+Agent V2 adapter bug was found and fixed on main (`6159258`, touching only
+`agent/adapters/claude.mjs`, `agent/adapters/codex.mjs` and
+`agent/engine.test.mjs`). Resuming its preserved worktree then died at
+`BASE_COMMIT_MISMATCH` — a task blocked by a fix to the thing running it. Every
+alternative was worse: rewriting the approved task, recreating the worktree, or
+hand-rebasing product work nobody had reviewed.
+**Two things, kept apart:** the CONTROL-PLANE VERSION is which agent runtime the
+process is executing, and it may advance freely, because it changes how work is
+done and not what the work is. The APPROVED PRODUCT BASE is `task.baseCommit` —
+the code a human read, and the commit the worktree branches from. Nothing here
+moves it: no rebase, no reset, no stash, no recreated workspace. The product diff
+is exactly what it was.
+**Why approval is not weakened:** the receipt still binds one task hash to one
+product base, and `verifyApproval()` is untouched. Safe agent maintenance grants
+no new product scope, because it cannot change what the Builder is looking at.
+Product drift still invalidates execution and still waits for a human.
+**Why the set stays this small:** every entry is a path whose movement no longer
+invalidates approved work. "Docs" is not on it — `docs/` is product. Adding one
+needs its own entry here.

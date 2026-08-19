@@ -12,7 +12,12 @@ import path from "node:path";
 import { afterEach, test } from "node:test";
 import { loadLessons, relevantLessons, searchLessons } from "./lessons.mjs";
 import { evaluateProgress, failureFingerprint, workerExhausted } from "./progress.mjs";
-import { loadTaskState, orchestrate, verifyCriteria } from "./orchestrator.mjs";
+import {
+  consumesStrategicStep,
+  loadTaskState,
+  orchestrate,
+  verifyCriteria,
+} from "./orchestrator.mjs";
 import { redact } from "./redact.mjs";
 import { routeNext } from "./router.mjs";
 import {
@@ -29,7 +34,16 @@ import {
   successCriteriaFor,
   TaskStateStore,
 } from "./taskstate.mjs";
-import { blocked, evidence, guard, ok, paused } from "./workers/contract.mjs";
+import {
+  blocked,
+  evidence,
+  failed,
+  guard,
+  notAvailable,
+  ok,
+  paused,
+  requiresApproval,
+} from "./workers/contract.mjs";
 import { createN8nWorker, createVercelWorker, N8N_CAPABILITIES } from "./workers/external.mjs";
 import { createRepoWorker, resultFromRun } from "./workers/repo.mjs";
 import { DEFAULT_REVIEW_POLICY, resultFromReview, reviewRequired } from "./workers/codex.mjs";
@@ -541,6 +555,7 @@ test("new evidence keeps the loop going until the STEP BUDGET stops it", async (
   assert.equal(state.status, "escalated");
   assert.equal(state.stopReason, "step_budget_exhausted");
   assert.equal(state.attempts.total, 5, "bounded, never infinite");
+  assert.equal(state.attempts.steps, 5, "real work still spends the strategic budget");
   assert.ok(box.dir);
 });
 
@@ -598,6 +613,7 @@ test("waiting at a gate does not spend the worker's attempt budget", async () =>
   assert.equal(state.status, "waiting_for_approval");
   assert.equal(state.attempts.byWorker.repo ?? 0, 0, "a gate is not an attempt");
   assert.equal(state.attempts.total, 5, "the step count stays honest");
+  assert.equal(state.attempts.steps, 0, "and none of them was a strategic step");
   assert.equal(state.approvalsPending.length, 1, "the same approval is queued once");
 });
 
@@ -607,6 +623,126 @@ test("workerExhausted reads the per-worker counter", () => {
   assert.equal(workerExhausted(state, "repo"), true);
   assert.equal(workerExhausted(state, "n8n"), false);
   assert.equal(workerExhausted(state, "vercel"), false);
+});
+
+/* ══ 10b. Strategic step accounting ════════════════════════════════════════ */
+//
+// The 30-step budget is the goal's PROBLEM-SOLVING budget. Re-authenticating
+// three times is not three attempts at the engineering problem, and ATLAS-005
+// walked its budget 3 → 4 → 5 on nothing but auth pauses.
+
+const infraPause = (kind, worker = "repo", action = "implement") =>
+  paused(
+    worker,
+    action,
+    { boundary: `${worker}.implementation`, kind, detail: `PAUSED_${kind.toUpperCase()}` },
+    { data: { ...RUN_DATA, state: `PAUSED_${kind.toUpperCase()}` } },
+  );
+
+const preflightOk = () => ok("repo", "inspect", { verifiedBoundariesAdded: ["repo.preflight"] });
+
+test("a real attempt spends a strategic step; an infrastructure pause does not", () => {
+  const attempts = [
+    ok("repo", "inspect"), // investigation
+    ok("repo", "implement", { changed: true }), // code changed
+    ok("codex", "review", { verifiedBoundariesAdded: ["review.codex"] }), // a real review
+    blocked("repo", "implement", {
+      boundary: "repo.checks",
+      kind: "check_failure",
+      detail: "typecheck failed",
+    }), // a new blocker discovered
+    failed("repo", "implement", "the worker crashed"),
+  ];
+  for (const result of attempts) {
+    assert.equal(consumesStrategicStep(result), true, `${result.worker}.${result.action}`);
+  }
+
+  const pauses = [
+    infraPause("auth_required"),
+    infraPause("usage_limit"),
+    infraPause("network_error"),
+    infraPause("auth_required", "codex", "review"), // reviewer session pause
+    notAvailable("n8n", "inspect_workflow", "no connector is configured"),
+    requiresApproval("repo", "commit", { actionClass: "B", reason: "commit", detail: "queued" }),
+  ];
+  for (const result of pauses) {
+    assert.equal(
+      consumesStrategicStep(result),
+      false,
+      `${result.worker}.${result.action} ${result.status}`,
+    );
+  }
+});
+
+test("an infrastructure pause stops the goal without spending a strategic step", async () => {
+  for (const kind of ["auth_required", "usage_limit", "network_error"]) {
+    const box = workspace();
+    const repo = fakeWorker("repo", (call) => (call === 0 ? preflightOk() : infraPause(kind)));
+    const { state } = await run(box, { repo });
+
+    assert.equal(state.status, "paused", kind);
+    assert.equal(state.stopReason, kind);
+    assert.equal(state.attempts.total, 2, `${kind}: every result is still recorded`);
+    assert.equal(state.attempts.steps, 1, `${kind}: only the preflight was a real attempt`);
+    assert.equal(state.attempts.byWorker.repo, 1, kind);
+  }
+});
+
+test("repeated auth_required pauses never consume additional strategic steps", async () => {
+  const box = workspace();
+  const repo = fakeWorker("repo", (call) =>
+    call === 0 ? preflightOk() : infraPause("auth_required"),
+  );
+
+  // Exactly ATLAS-005: pause, human re-authenticates, resume, pause again.
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    const { state } = await run(box, { repo });
+    assert.equal(state.status, "paused", `resume ${attempt}`);
+    assert.equal(state.attempts.steps, 1, `resume ${attempt}: strategic budget untouched`);
+    assert.equal(state.attempts.total, attempt + 1, `resume ${attempt}: history still complete`);
+  }
+
+  // A pause is still a pause: the loop stopped every time and asked for a human.
+  const { state } = loadTaskState("ATLAS-TEST", { stateRoot: box.stateRoot });
+  assert.equal(state.stopReason, "auth_required");
+  assert.match(state.nextAction, /auth_required/);
+});
+
+test("a real attempt after a pause still counts, and still drives progress accounting", async () => {
+  const box = workspace();
+  const script = [
+    preflightOk(),
+    infraPause("auth_required"),
+    blocked(
+      "repo",
+      "implement",
+      { boundary: "repo.checks", kind: "check_failure", detail: "typecheck failed" },
+      {
+        resumable: true,
+        evidence: [
+          evidence({
+            worker: "repo",
+            action: "implement",
+            kind: "check",
+            summary: "typecheck failed once",
+          }),
+        ],
+        data: { ...RUN_DATA, state: "CHECKS_FAILED" },
+      },
+    ),
+  ];
+  const repo = fakeWorker("repo", (call) => script[Math.min(call, script.length - 1)]);
+
+  await run(box, { repo }); // preflight, then the auth pause
+  const { state } = await run(box, { repo }); // the human re-authenticated
+
+  assert.equal(state.attempts.total - state.attempts.steps, 1, "exactly one pause was free");
+  assert.equal(state.attempts.byWorker.repo, state.attempts.steps, "the two counters agree");
+  assert.ok(
+    state.evidence.some((e) => e.summary.includes("typecheck failed once")),
+    "the new evidence was recorded",
+  );
+  assert.equal(state.lastFingerprint, script[2].failureFingerprint, "the blocker is tracked");
 });
 
 /* ══ 11. Routing by failing boundary ═══════════════════════════════════════ */

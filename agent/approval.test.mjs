@@ -20,6 +20,7 @@ import {
 } from "./approval.mjs";
 import { approveTask, blockingDirt } from "./approve.mjs";
 import { executionPreflight, liveGitAt } from "./coordinator.mjs";
+import { createWorkspace, isControlPlanePath, planWorkspace, worktreeState } from "./workspace.mjs";
 import { runTask } from "./engine.mjs";
 import { validateTask } from "./schemas.mjs";
 
@@ -96,13 +97,24 @@ function sandbox({ task = {}, dirty = false, extraUntracked = null } = {}) {
         git: liveGitAt(repo),
         ...opts,
       }),
-    preflight: () =>
+    preflight: ({ expectWorktree = false } = {}) =>
       executionPreflight(taskFile, {
         git: liveGitAt(repo),
-        expectWorktree: false,
+        expectWorktree,
         stateDir: state,
         repoRoot: repo,
       }),
+    /** Move HEAD past the base commit by writing and committing files. */
+    commit: (files, message) => {
+      for (const [rel, content] of Object.entries(files)) {
+        const target = path.join(repo, rel);
+        mkdirSync(path.dirname(target), { recursive: true });
+        writeFileSync(target, content);
+      }
+      git("add", "-A");
+      git("commit", "--quiet", "-m", message);
+      return git("rev-parse", "HEAD");
+    },
     edit: (patch) => {
       const current = JSON.parse(readFileSync(taskFile, "utf8"));
       writeFileSync(taskFile, JSON.stringify({ ...current, ...patch }, null, 2));
@@ -231,6 +243,140 @@ test("committing the task file does not invalidate the base it names", () => {
   assert.notEqual(box.git("rev-parse", "HEAD"), box.baseCommit, "HEAD is ahead of the base");
   assert.equal(box.approve().ok, true);
   assert.equal(box.preflight().status, "READY_TO_RUN");
+});
+
+/* ── Control-plane drift vs. product drift ───────────────────────────────── */
+//
+// TWO DIFFERENT BASES. `task.baseCommit` is the APPROVED PRODUCT BASE — the code
+// a human read, and the commit the task worktree branches from. The agent
+// RUNTIME is separate, and fixing a bug in it must not invalidate work already
+// approved and in flight. Anything else that moves is product drift and still
+// fails closed.
+
+test("the safe control-plane set is explicit, minimal and testable", () => {
+  // project/PERMISSIONS.md `project_rule_update`: AGENTS.md, project/*.md, agent/**.
+  for (const safe of [
+    "agent/engine.mjs",
+    "agent/adapters/claude.mjs",
+    "agent/adapters/codex.mjs",
+    "agent/engine.test.mjs",
+    "project/DECISIONS.md",
+    "project/tasks/ATLAS-005.json",
+    "AGENTS.md",
+  ]) {
+    assert.equal(isControlPlanePath(safe), true, `${safe} is control plane`);
+  }
+
+  // Everything else is product, including docs and near-misses on the prefixes.
+  for (const product of [
+    "src/components/staff/OrderDetailDrawer.tsx",
+    "api/_lib/staffOrderWrites.server.ts",
+    "docs/sql/2026-08-19-staff-verified-transfer.sql",
+    "docs/AGENTS.md",
+    "scripts/test-status-transitions.mjs",
+    "package.json",
+    "vercel.json",
+    "README.md",
+    "agentic/thing.mjs",
+    "project.json",
+    "project",
+  ]) {
+    assert.equal(isControlPlanePath(product), false, `${product} is NOT control plane`);
+  }
+});
+
+test("safe control-plane drift resumes on the new runtime and never touches the worktree", () => {
+  const box = sandbox();
+  assert.equal(box.approve().ok, true);
+  const approvedProductBase = box.task.baseCommit;
+
+  // 1 + 3. The preserved task worktree, exactly as a real run leaves it:
+  // branched from the approved product base, with the Builder's product diff
+  // sitting in it uncommitted.
+  const plan = planWorkspace(box.task, box.repo);
+  createWorkspace({ ...plan, baseCommit: approvedProductBase, cwd: box.repo });
+  const inWorktree = (...args) =>
+    execFileSync("git", args, { cwd: plan.worktree, encoding: "utf8" }).trim();
+  const product = path.join(plan.worktree, "src", "builder-work.ts");
+  writeFileSync(product, "export const work = 1;\n");
+  const worktreeHead = inWorktree("rev-parse", "HEAD");
+  assert.equal(worktreeHead, approvedProductBase);
+
+  // 2. main advances with ONLY agent control-plane files — the real ATLAS-005
+  // situation: an adapter bug found and fixed while the task was in flight.
+  const runtimeHead = box.commit(
+    {
+      "agent/adapters/claude.mjs": "// fixed adapter\n",
+      "agent/adapters/codex.mjs": "// fixed adapter\n",
+      "agent/engine.test.mjs": "// covering test\n",
+    },
+    "fix(agent): trust successful adapter results before auth heuristics",
+  );
+  assert.notEqual(runtimeHead, approvedProductBase);
+
+  // 4. Resume is allowed, on the newer runtime.
+  const result = box.preflight({ expectWorktree: true });
+  assert.equal(result.status, "READY_TO_RUN");
+
+  // 5. The product base did not move — not in the result, not in the task file.
+  assert.equal(result.approvedProductBase, approvedProductBase);
+  assert.equal(result.runtimeHead, runtimeHead);
+  assert.equal(JSON.parse(readFileSync(box.taskFile, "utf8")).baseCommit, approvedProductBase);
+
+  // 7. The acceptance is recorded, with the files that justified it.
+  assert.equal(result.controlPlaneDrift.accepted, true);
+  assert.deepEqual(result.controlPlaneDrift.files, [
+    "agent/adapters/claude.mjs",
+    "agent/adapters/codex.mjs",
+    "agent/engine.test.mjs",
+    // The task specification commit itself — the original D-017 case, which is
+    // the same rule: agent memory is control plane, not product.
+    "project/tasks/TEST-APPROVAL.json",
+  ]);
+  assert.equal(result.gates.find((g) => g.name === "base_commit").ok, true);
+
+  // 6. The receipt still binds the approved specification and its product base.
+  const approval = verifyApproval({ task: box.task, dir: box.state });
+  assert.equal(approval.status, "APPROVED");
+  assert.equal(approval.receipt.baseCommit, approvedProductBase);
+
+  // 3 + 7. Nothing was rebased, reset, stashed, recreated or deleted.
+  assert.equal(inWorktree("rev-parse", "HEAD"), worktreeHead, "the worktree did not move");
+  assert.equal(worktreeState(plan.worktree, box.repo), "registered");
+  assert.equal(readFileSync(product, "utf8"), "export const work = 1;\n");
+  assert.match(inWorktree("status", "--short"), /builder-work\.ts/, "the diff is still there");
+});
+
+test("product drift past the approved base still fails closed", () => {
+  const cases = [
+    ["a src/ change", { "src/later.ts": "export const later = 1;\n" }],
+    ["an api/ change", { "api/_lib/staffOrderWrites.server.ts": "export const w = 1;\n" }],
+    ["a docs/sql/ change", { "docs/sql/2026-08-19-staff-verified-transfer.sql": "select 1;\n" }],
+    [
+      "agent and product mixed together",
+      { "agent/engine.mjs": "// tweak\n", "src/later.ts": "export const later = 1;\n" },
+    ],
+    ["an arbitrary unrelated file", { "README.md": "# hello\n" }],
+    ["an arbitrary doc", { "docs/notes.md": "notes\n" }],
+  ];
+
+  for (const [name, files] of cases) {
+    const box = sandbox();
+    assert.equal(box.approve().ok, true);
+    box.commit(files, `drift: ${name}`);
+
+    const result = box.preflight();
+    assert.equal(result.status, "BASE_COMMIT_MISMATCH", name);
+    assert.equal(result.controlPlaneDrift, null, `${name}: nothing was accepted`);
+    const gate = result.gates.find((g) => g.name === "base_commit");
+    assert.equal(gate.ok, false, name);
+    assert.match(gate.detail, /product changes/, name);
+
+    // And a human cannot approve their way around it either.
+    const reapproved = box.approve();
+    assert.equal(reapproved.ok, false, name);
+    assert.equal(reapproved.status, "BASE_COMMIT_MISMATCH", name);
+  }
 });
 
 test("approval refuses when HEAD is not the task's base commit", () => {

@@ -23,6 +23,25 @@ export const statusShort = (cwd) => git(["status", "--short"], cwd);
 export const isClean = (cwd) => statusShort(cwd) === "";
 
 /**
+ * The AGENT CONTROL PLANE: paths that describe how the agent works, never what
+ * the Atlas product does.
+ *
+ * The set is deliberately explicit, short and testable — it is NOT "docs" or
+ * "anything outside src". Its source of truth is project/PERMISSIONS.md, whose
+ * `project_rule_update` permission has always meant exactly "change AGENTS.md,
+ * project/*.md or agent/**". Nothing else belongs here without its own decision
+ * record: every entry is a path whose movement no longer invalidates an approved
+ * product baseline.
+ */
+export const CONTROL_PLANE_PATHS = ["agent/", "project/", "AGENTS.md"];
+
+/** Is one repo-relative path control plane? Exact file, or directory prefix. */
+export const isControlPlanePath = (file) =>
+  CONTROL_PLANE_PATHS.some((entry) =>
+    entry.endsWith("/") ? file.startsWith(entry) : file === entry,
+  );
+
+/**
  * Is `head` an acceptable current commit for a task based on `baseCommit`?
  *
  * THE REGRESS THIS SOLVES
@@ -37,15 +56,39 @@ export const isClean = (cwd) => statusShort(cwd) === "";
  * THE RULE
  *
  *   HEAD must be baseCommit, OR a descendant of it whose every changed file is
- *   under `project/` — the agent's own memory directory, which holds no
- *   application code. Committing a task specification, a decision record or a
- *   run report therefore does not invalidate the base it names. Committing a
- *   single line of `src/` does.
+ *   in the CONTROL PLANE above — the agent's own memory, rules and runtime,
+ *   which hold no application code. Committing a task specification, a decision
+ *   record, a run report or a fix to the agent runtime itself therefore does not
+ *   invalidate the base it names. Committing a single line of `src/`, `api/`,
+ *   `docs/sql/` or any other product path does.
  *
- * @returns {{ ok: boolean, reason: string, drifted: string[] }}
+ * TWO DIFFERENT THINGS, KEPT APART
+ *
+ *   The APPROVED PRODUCT BASE is `task.baseCommit`: the code a human read and
+ *   consented to, and the commit the task worktree branches from. Nothing here
+ *   moves it — this function rebases, resets and recreates nothing.
+ *
+ *   The CONTROL-PLANE VERSION is whichever agent runtime the current process is
+ *   running. It may advance independently, because it changes how the work is
+ *   done, not what the work is.
+ *
+ *   `drift` names which of the two moved, so a caller can RECORD the fact rather
+ *   than infer it: "none" (HEAD is the base), "control_plane" (accepted, and
+ *   worth evidence), "product" (refused — a human decides).
+ *
+ * @returns {{ ok: boolean, reason: string, drifted: string[],
+ *             drift: "none"|"control_plane"|"product", controlPlaneFiles: string[] }}
  */
 export function baseCommitAcceptable(baseCommit, head, cwd) {
-  if (baseCommit === head) return { ok: true, reason: "HEAD is the base commit", drifted: [] };
+  if (baseCommit === head) {
+    return {
+      ok: true,
+      reason: "HEAD is the base commit",
+      drifted: [],
+      drift: "none",
+      controlPlaneFiles: [],
+    };
+  }
 
   try {
     execFileSync("git", ["merge-base", "--is-ancestor", baseCommit, head], {
@@ -57,6 +100,8 @@ export function baseCommitAcceptable(baseCommit, head, cwd) {
       ok: false,
       reason: `base ${baseCommit} is not an ancestor of HEAD ${head}`,
       drifted: [],
+      drift: "product",
+      controlPlaneFiles: [],
     };
   }
 
@@ -64,19 +109,25 @@ export function baseCommitAcceptable(baseCommit, head, cwd) {
     .split("\n")
     .filter(Boolean)
     .map((f) => f.replace(/\\/g, "/"));
-  const drifted = changed.filter((f) => f !== "project" && !f.startsWith("project/"));
+  const drifted = changed.filter((f) => !isControlPlanePath(f));
 
+  // Fail closed: one product file anywhere in the range makes the whole range
+  // product drift, however much agent maintenance it is mixed with.
   if (drifted.length > 0) {
     return {
       ok: false,
-      reason: `HEAD has moved past the base with non-project changes: ${drifted.slice(0, 5).join(", ")}`,
+      reason: `HEAD has moved past the base with product changes: ${drifted.slice(0, 5).join(", ")}`,
       drifted,
+      drift: "product",
+      controlPlaneFiles: changed.filter(isControlPlanePath),
     };
   }
   return {
     ok: true,
-    reason: `HEAD is ${changed.length} project-only commit(s) ahead of the base`,
+    reason: `control-plane drift only (${changed.length} file(s)): ${changed.slice(0, 5).join(", ")}`,
     drifted: [],
+    drift: "control_plane",
+    controlPlaneFiles: changed,
   };
 }
 

@@ -182,6 +182,10 @@ export async function orchestrate(taskRef, given = {}) {
   } else {
     state.lessons = lessons.map((l) => l.id);
     state.taskFile = String(taskFile).replace(/\\/g, "/");
+    // State written before strategic steps existed counted every pause as a
+    // step. Carry that total forward rather than resetting to zero, so the
+    // ceiling stays conservative for a goal already in flight.
+    state.attempts.steps ??= state.attempts.total ?? 0;
   }
 
   if (state.status === "completed" && !opts.force) {
@@ -272,8 +276,21 @@ async function invoke(worker, call) {
   return result;
 }
 
-/** Result statuses that represent a genuine attempt at the work. */
+/**
+ * Result statuses that represent a genuine attempt at the work: something was
+ * investigated, changed, diagnosed, reviewed, or ran into a real wall.
+ *
+ * Everything NOT in this set is an infrastructure pause — `paused`
+ * (auth_required, usage_limit, network, an interrupted builder or reviewer
+ * session), `requires_approval` (a gate, not an attempt) and `not_available` (no
+ * connector, so nothing was attempted). Those stop the loop exactly as before;
+ * what they no longer do is spend the strategic problem-solving budget, because
+ * re-authenticating three times is not three attempts at the engineering goal.
+ */
 const ATTEMPT_STATUSES = new Set(["success", "blocked", "failed"]);
+
+/** Does this result spend one of the goal's `maxTotalSteps` strategic steps? */
+export const consumesStrategicStep = (result) => ATTEMPT_STATUSES.has(result.status);
 
 /**
  * Fold one worker result into the goal: counters, evidence, boundaries,
@@ -283,13 +300,17 @@ export function applyResult({ state, store, result, decision, opts }) {
   const now = opts.now();
   const at = now.toISOString();
 
+  // `total` counts every worker result, so checkpoints and history entries stay
+  // uniquely numbered. `steps` is the STRATEGIC budget: only a real ATTEMPT at
+  // the work spends one, and the same rule governs a worker's own attempt
+  // budget. Stopping at a gate — the task is not approved, the model is rate
+  // limited, the connector is missing — is not an attempt at anything, and must
+  // not burn the budget the actual work needs. Same rule V1 already applies to
+  // pauses and revision rounds.
   state.attempts.total += 1;
-  // Only a real ATTEMPT at the work spends a worker's attempt budget. Stopping
-  // at a gate — the task is not approved, the model is rate limited, the worker
-  // has no such capability — is not the worker failing at anything, and must not
-  // burn the budget it needs for the actual work. Same rule V1 already applies
-  // to pauses and revision rounds.
-  if (ATTEMPT_STATUSES.has(result.status)) {
+  state.attempts.steps ??= 0;
+  if (consumesStrategicStep(result)) {
+    state.attempts.steps += 1;
     state.attempts.byWorker[decision.worker] = (state.attempts.byWorker[decision.worker] ?? 0) + 1;
   }
 
@@ -319,7 +340,7 @@ export function applyResult({ state, store, result, decision, opts }) {
     previousFingerprint: state.lastFingerprint,
     sameFailureCount: state.attempts.sameFailure ?? 0,
     newEvidenceCount: added.length,
-    totalSteps: state.attempts.total,
+    totalSteps: state.attempts.steps,
     budget: state.budget,
   });
 

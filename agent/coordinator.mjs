@@ -110,6 +110,13 @@ export function executionPreflight(
     protectedActions: [],
     approval: null,
     approvalDir: null,
+    // The two bases, never conflated. `approvedProductBase` is the commit the
+    // receipt binds and the worktree branches from; `runtimeHead` is whatever
+    // agent runtime this process is executing. `controlPlaneDrift` is non-null
+    // only when the second legitimately moved past the first.
+    approvedProductBase: null,
+    runtimeHead: null,
+    controlPlaneDrift: null,
   };
 
   // 1. Task, re-read from disk. Not the object a caller happens to be holding.
@@ -145,9 +152,22 @@ export function executionPreflight(
   }
   out.repositoryClean = out.repositoryStatus === "";
 
+  // The approved PRODUCT base is the task's, always. Only the runtime is allowed
+  // to have moved, and only over control-plane paths; anything else fails closed
+  // as BASE_COMMIT_MISMATCH and waits for a human.
+  out.approvedProductBase = task.baseCommit;
+  out.runtimeHead = out.currentCommit;
   const onBase = git.baseCommitAcceptable
     ? git.baseCommitAcceptable(task.baseCommit, out.currentCommit)
     : { ok: out.currentCommit === task.baseCommit, reason: `HEAD ${out.currentCommit}` };
+  if (onBase.ok && onBase.drift === "control_plane") {
+    out.controlPlaneDrift = {
+      accepted: true,
+      approvedProductBase: task.baseCommit,
+      runtimeHead: out.currentCommit,
+      files: onBase.controlPlaneFiles ?? [],
+    };
+  }
   gates.push(gate("base_commit", onBase.ok, onBase.reason));
   if (!onBase.ok) return { ...out, status: "BASE_COMMIT_MISMATCH" };
 
@@ -230,6 +250,7 @@ export function dryRun(
     proposedBranch: null,
     proposedWorktree: null,
     worktreeState: null,
+    controlPlaneDrift: null,
     requiredChecks: [],
     checkResults: [],
     protectedActions: [],
@@ -301,6 +322,12 @@ export function dryRun(
   const preflight = executionPreflight(taskFile, { git, stateDir, repoRoot });
   report.executionGates = preflight.gates;
   report.worktreeState = preflight.worktreeState;
+  report.controlPlaneDrift = preflight.controlPlaneDrift;
+  if (preflight.controlPlaneDrift) {
+    report.notes.push(
+      `control-plane drift accepted: runtime is ${preflight.runtimeHead}, approved product base stays ${preflight.approvedProductBase}`,
+    );
+  }
   report.finalStatus = preflight.status;
   report.notes.push("execution preflight is advisory here — execution must re-run it");
   for (const failed of preflight.gates.filter((g) => !g.ok)) {

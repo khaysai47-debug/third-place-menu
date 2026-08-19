@@ -359,11 +359,34 @@ function inspect({ preflight, taskFile, task, opts }) {
     payload: { status: result.status, gates: result.gates ?? [] },
   });
 
+  // Accepting control-plane drift is a decision, so it is written down. The
+  // approved product base is repeated in the summary because that is the number
+  // a human checks: the runtime moved, the baseline did not.
+  const drift = result.controlPlaneDrift;
+  const driftEvidence = drift
+    ? [
+        evidence({
+          worker: "repo",
+          action: "inspect",
+          kind: "preflight",
+          summary:
+            `control-plane drift accepted: runtime advanced to ${drift.runtimeHead} over ` +
+            `${drift.files.length} control-plane file(s) (${drift.files.slice(0, 5).join(", ")}); ` +
+            `approved product base unchanged at ${drift.approvedProductBase}`,
+          payload: drift,
+        }),
+      ]
+    : [];
+
   if (result.status === "READY_TO_RUN") {
     return ok("repo", "inspect", {
-      evidence: [gateEvidence],
+      evidence: [gateEvidence, ...driftEvidence],
       verifiedBoundariesAdded: [BOUNDARIES.repoPreflight],
-      data: { workspace: result.workspace, worktreeState: result.worktreeState },
+      data: {
+        workspace: result.workspace,
+        worktreeState: result.worktreeState,
+        controlPlaneDrift: drift,
+      },
     });
   }
   // Reuse the run mapping so a preflight refusal and a run refusal are reported
