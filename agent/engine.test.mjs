@@ -20,6 +20,7 @@ import {
 import {
   assertSafeCommand as assertReviewerSafe,
   buildCommand as buildCodexCommand,
+  classifyResult as classifyReviewerResult,
   parseReview,
 } from "./adapters/codex.mjs";
 import { buildReceipt, writeReceipt } from "./approval.mjs";
@@ -924,6 +925,21 @@ test("Codex command is read-only and refuses write sandboxes", () => {
   assert.throws(() => assertReviewerSafe({ args: ["exec", "--full-auto", "read-only"] }));
 });
 
+test("successful Reviewer output is not reclassified from its progress text", () => {
+  const lastMessage = JSON.stringify({
+    verdict: "PASS",
+    summary: "authentication and HTTP 401 are ordinary review subjects",
+    findings: [],
+  });
+  const result = classifyReviewerResult({
+    status: 0,
+    stdout: "reviewed authentication handling and a 401 branch",
+    lastMessage,
+  });
+  assert.equal(result.outcome, "success");
+  assert.equal(result.review.verdict, "PASS");
+});
+
 test("Builder output classification separates pauses from failures", () => {
   const ok = JSON.stringify({
     is_error: false,
@@ -933,6 +949,19 @@ test("Builder output classification separates pauses from failures", () => {
   });
   assert.equal(classifyResult({ status: 0, stdout: ok }).outcome, "success");
   assert.equal(classifyResult({ status: 0, stdout: ok }).sessionId, "s1");
+
+  const authenticationIsTaskText = JSON.stringify({
+    is_error: false,
+    session_id: "s-auth-text",
+    num_turns: 1,
+    result:
+      'authentication and HTTP 401 are ordinary task text\n```json\n{"summary":"authentication wording","filesChanged":[],"notes":[]}\n```',
+  });
+  assert.equal(
+    classifyResult({ status: 0, stdout: authenticationIsTaskText }).outcome,
+    "success",
+    "successful model text must not be reclassified as an auth failure",
+  );
 
   assert.equal(
     classifyResult({ status: 1, stderr: "Claude AI usage limit reached|1754400000" }).outcome,

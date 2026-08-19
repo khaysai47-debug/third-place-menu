@@ -162,6 +162,38 @@ const AUTH = /not logged in|unauthori[sz]ed|authentication|invalid api key|pleas
 const NETWORK =
   /ENOTFOUND|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|fetch failed|socket hang up/i;
 
+/** Classify Reviewer process output without spawning, so ordering is testable. */
+export function classifyResult({
+  status,
+  stdout = "",
+  stderr = "",
+  lastMessage = "",
+  timedOut = false,
+  spawnError = null,
+} = {}) {
+  if (timedOut) return { outcome: "timeout", error: "Reviewer exceeded its timeout" };
+  if (spawnError) {
+    return {
+      outcome: "process_spawn_error",
+      category: spawnError.category,
+      error: spawnError.detail,
+    };
+  }
+
+  const parsed = parseReview(lastMessage);
+  // Codex stdout contains progress/reasoning text. When the CLI exited cleanly
+  // and wrote a valid verdict, that text is not an operational error channel;
+  // it may legitimately mention authentication or a 401 found in the diff.
+  if (status === 0 && parsed.ok) return { outcome: "success", review: parsed.value };
+
+  const text = `${stdout}\n${stderr}`;
+  if (USAGE.test(text)) return { outcome: "usage_limit", error: "usage limit reached" };
+  if (AUTH.test(text)) return { outcome: "auth_failure", error: "authentication required" };
+  if (NETWORK.test(text)) return { outcome: "network_failure", error: "network error" };
+  if (!parsed.ok) return { outcome: "malformed_output", error: parsed.error };
+  return { outcome: "success", review: parsed.value };
+}
+
 /**
  * Run one review. Returns `{ outcome, review?, error? }` where outcome is
  * "success", "malformed_output", "usage_limit", "auth_failure",
@@ -215,29 +247,18 @@ export function invokeReviewer({
     command: `${redactCommand(command, args)} <stdin:${(prompt ?? "").length} chars>`,
   };
 
-  if (proc.error?.code === "ETIMEDOUT" || proc.signal === "SIGTERM") {
-    return { ...base, outcome: "timeout", error: "Reviewer exceeded its timeout" };
-  }
-  // A Reviewer that never launched wrote no verdict. That is a runner fault,
-  // not an unreadable review, and must not be reported as malformed output.
   const launch = spawnFailure(proc);
-  if (launch) {
-    return {
-      ...base,
-      outcome: "process_spawn_error",
-      category: launch.category,
-      error: launch.detail,
-    };
-  }
-  if (USAGE.test(text)) return { ...base, outcome: "usage_limit", error: "usage limit reached" };
-  if (AUTH.test(text))
-    return { ...base, outcome: "auth_failure", error: "authentication required" };
-  if (NETWORK.test(text)) return { ...base, outcome: "network_failure", error: "network error" };
-
-  const parsed = parseReview(lastMessage);
-  if (!parsed.ok) return { ...base, outcome: "malformed_output", error: parsed.error };
-
-  return { ...base, outcome: "success", review: parsed.value };
+  return {
+    ...base,
+    ...classifyResult({
+      status: proc.status,
+      stdout,
+      stderr,
+      lastMessage,
+      timedOut: proc.error?.code === "ETIMEDOUT" || proc.signal === "SIGTERM",
+      spawnError: launch,
+    }),
+  };
 }
 
 /** The real adapter, in the shape the engine expects. */

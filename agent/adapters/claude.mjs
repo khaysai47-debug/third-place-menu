@@ -237,8 +237,6 @@ export function classifyResult({
   timedOut = false,
   spawnError = null,
 }) {
-  const text = `${stdout}\n${stderr}`;
-
   if (timedOut) return { outcome: "timeout", detail: "Builder exceeded its timeout" };
   // A process that never started produces no stdout. Falling through to the
   // JSON parse below would report that silence as malformed model output and
@@ -250,26 +248,13 @@ export function classifyResult({
       detail: spawnError.detail,
     };
   }
-  if (USAGE.test(text)) {
-    return { outcome: "usage_limit", detail: "usage limit reached", resetAt: parseResetAt(text) };
-  }
-  if (AUTH.test(text)) return { outcome: "auth_failure", detail: "authentication required" };
-  if (NETWORK.test(text)) return { outcome: "network_failure", detail: "network error" };
-
   let payload;
   try {
     payload = JSON.parse(stdout);
   } catch {
-    return { outcome: "malformed_output", detail: "stdout was not valid JSON" };
+    // Plain-text CLI failures still need operational classification below.
   }
 
-  if (payload?.is_error === true || payload?.subtype === "error_during_execution") {
-    return {
-      outcome: "implementation_failure",
-      detail: payload.subtype ?? "builder reported an error",
-      sessionId: payload.session_id ?? null,
-    };
-  }
   // ATLAS-004: this ended a run as FAILED and its worktree was very nearly
   // discarded — the implementation in it turned out to be correct, was reviewed
   // by Codex and shipped as f42d5d0. A spent turn budget is not a verdict on the
@@ -284,27 +269,49 @@ export function classifyResult({
       numTurns: payload.num_turns ?? null,
     };
   }
-  if (status !== 0) {
-    return { outcome: "implementation_failure", detail: `exit code ${status}` };
-  }
 
-  const report = parseBuilderReport(payload?.result ?? "");
-  if (!report.ok) {
+  // A structured, exit-0 Claude result is authoritative. Its `result` field is
+  // model-authored task text and may legitimately discuss authentication, a
+  // 401 response, network errors, or quotas. Scanning that successful payload
+  // as if it were CLI diagnostics caused live runs to pause as auth_required.
+  if (payload && status === 0 && payload.is_error !== true) {
+    const report = parseBuilderReport(payload.result ?? "");
+    if (!report.ok) {
+      return {
+        outcome: "malformed_output",
+        detail: report.error,
+        sessionId: payload.session_id ?? null,
+        raw: payload.result ?? "",
+      };
+    }
     return {
-      outcome: "malformed_output",
-      detail: report.error,
-      sessionId: payload?.session_id ?? null,
-      raw: payload?.result ?? "",
+      outcome: "success",
+      detail: "ok",
+      sessionId: payload.session_id ?? null,
+      numTurns: payload.num_turns ?? null,
+      report: report.value,
     };
   }
 
-  return {
-    outcome: "success",
-    detail: "ok",
-    sessionId: payload?.session_id ?? null,
-    numTurns: payload?.num_turns ?? null,
-    report: report.value,
-  };
+  const text = `${stdout}\n${stderr}`;
+  if (USAGE.test(text)) {
+    return { outcome: "usage_limit", detail: "usage limit reached", resetAt: parseResetAt(text) };
+  }
+  if (AUTH.test(text)) return { outcome: "auth_failure", detail: "authentication required" };
+  if (NETWORK.test(text)) return { outcome: "network_failure", detail: "network error" };
+
+  if (!payload) return { outcome: "malformed_output", detail: "stdout was not valid JSON" };
+  if (payload.is_error === true || payload.subtype === "error_during_execution") {
+    return {
+      outcome: "implementation_failure",
+      detail: payload.subtype ?? "builder reported an error",
+      sessionId: payload.session_id ?? null,
+    };
+  }
+  if (status !== 0) {
+    return { outcome: "implementation_failure", detail: `exit code ${status}` };
+  }
+  return { outcome: "implementation_failure", detail: "builder reported an unknown result" };
 }
 
 /**
