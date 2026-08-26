@@ -6,7 +6,9 @@
 //   - skipped / backward / repeated / terminal transitions are rejected;
 //   - "cancelled" is refused by update-status (cancel has its own route);
 //   - cancel-order refuses a completed order and is idempotent when cancelled;
-//   - mark-paid never re-stamps an already-paid order (paid_at is immutable).
+//   - mark-paid never re-stamps an already-paid order (paid_at is immutable);
+//   - mark-paid routes each method to its own locking RPC, and the staff
+//     QR / bank-transfer path is dine-in only and writes no payment proof.
 // All fetches are stubbed — no network, no real secrets.
 import assert from "node:assert/strict";
 import { execSync } from "node:child_process";
@@ -59,16 +61,41 @@ globalThis.fetch = async (url, init = {}) => {
       return Response.json([order]);
     }
   }
-  // mark-paid now delegates to the mark_order_paid_cash RPC (Cash only).
-  if (u.includes("/rest/v1/rpc/mark_order_paid_cash")) {
-    rpcLog.push({ url: u, body: JSON.parse(init.body) });
-    if (!order) return Response.json({ message: "ORDER_NOT_FOUND" }, { status: 400 });
-    if (order.status === "cancelled") return Response.json({ message: "ORDER_CANCELLED" }, { status: 400 });
+  // mark-paid delegates to ONE locking RPC per method: mark_order_paid_cash
+  // (any order type) or mark_order_paid_transfer (dine_in only). This stub
+  // mirrors both docs/sql functions — cancelled refusal, idempotent on
+  // already-paid, paid_at stamped exactly once — and, like them, never
+  // touches payment_proofs.
+  const rpc = u.match(/\/rest\/v1\/rpc\/(mark_order_paid_\w+)/)?.[1];
+  if (rpc) {
+    rpcLog.push({ rpc, body: JSON.parse(init.body) });
+    const fail = (message) => Response.json({ message }, { status: 400 });
+    const transfer = rpc === "mark_order_paid_transfer";
+    if (!order) return fail("ORDER_NOT_FOUND");
+    if (order.status === "cancelled") return fail("ORDER_CANCELLED");
+    if (transfer && order.order_type !== "dine_in") return fail("ORDER_NOT_DINE_IN");
+    // Like both real RPCs, the result carries the method the ROW holds — an
+    // already-paid order reports its ORIGINAL method, not the requested one.
     if (String(order.payment_status ?? "").toLowerCase() === "paid") {
-      return Response.json({ already_paid: true, changed: false, paid_at: order.paid_at });
+      return Response.json({
+        already_paid: true,
+        changed: false,
+        payment_method: order.payment_method,
+        paid_at: order.paid_at,
+      });
     }
-    order = { ...order, payment_status: "Paid", payment_method: "Cash", paid_at: order.paid_at ?? new Date().toISOString() };
-    return Response.json({ already_paid: false, changed: true, paid_at: order.paid_at });
+    order = {
+      ...order,
+      payment_status: "Paid",
+      payment_method: transfer ? "Transfer" : "Cash",
+      paid_at: order.paid_at ?? new Date().toISOString(),
+    };
+    return Response.json({
+      already_paid: false,
+      changed: true,
+      payment_method: order.payment_method,
+      paid_at: order.paid_at,
+    });
   }
   throw new Error(`unexpected fetch target: ${method} ${u}`);
 };
@@ -181,7 +208,7 @@ assert.equal(c.status, 200, "already-cancelled is idempotent");
 assert.equal(order.cancellation_reason, "First reason", "original cancel reason preserved");
 assert.equal(patchLog.length, 0, "idempotent cancel issues no PATCH");
 
-/* ── E. mark-paid: CASH ONLY, via RPC, idempotent (paid_at never re-stamped) ─ */
+/* ── E. mark-paid (Cash): via RPC, idempotent (paid_at never re-stamped) ──── */
 
 const paidReq = (method) =>
   new Request("https://app.invalid/api/staff/mark-paid", {
@@ -190,18 +217,12 @@ const paidReq = (method) =>
     body: JSON.stringify({ orderId: "TP-1", paymentMethod: method }),
   });
 
-// TRANSFER IS REFUSED server-side (Transfer only via approved proof review).
+// First Cash payment stamps paid_at via the Cash RPC. UNCHANGED behavior.
 order = { order_type: "pickup", status: "preparing", payment_status: "unpaid" };
 rpcLog = [];
-let p = await postMarkPaid(paidReq("Transfer"));
-assert.equal(p.status, 400, "manual Transfer is rejected by the server");
-assert.equal(rpcLog.length, 0, "rejected Transfer never calls the paid RPC");
-assert.equal(order.payment_status, "unpaid", "rejected Transfer leaves the order unpaid");
-
-// First Cash payment stamps paid_at via the RPC.
-order = { order_type: "pickup", status: "preparing", payment_status: "unpaid" };
-p = await postMarkPaid(paidReq("Cash"));
+let p = await postMarkPaid(paidReq("Cash"));
 assert.equal(p.status, 200, "first Cash mark-paid succeeds");
+assert.equal(rpcLog[0].rpc, "mark_order_paid_cash", "Cash uses the cash RPC");
 assert.equal(order.payment_status, "Paid", "order flips to Paid (Cash)");
 assert.equal(order.payment_method, "Cash", "method is Cash");
 assert.ok(order.paid_at, "paid_at stamped");
@@ -214,9 +235,91 @@ assert.equal(p.status, 200, "second Cash mark-paid is a safe no-op");
 assert.equal(pJson.alreadyPaid, true, "second mark-paid reports alreadyPaid");
 assert.equal(order.paid_at, firstPaidAt, "paid_at NOT re-stamped on replay");
 
-// Cancelled order cannot be paid.
+// Cancelled order cannot be paid — by either method.
 order = { order_type: "pickup", status: "cancelled", payment_status: "unpaid" };
 p = await postMarkPaid(paidReq("Cash"));
 assert.equal(p.status, 409, "a cancelled order cannot be marked paid");
+order = { order_type: "dine_in", status: "cancelled", payment_status: "unpaid" };
+p = await postMarkPaid(paidReq("Transfer"));
+assert.equal(p.status, 409, "a cancelled order cannot be marked paid by transfer");
+assert.equal(order.payment_status, "unpaid", "cancelled order is left unpaid");
+
+/* ── F. Staff-verified QR / bank transfer: dine-in only, no payment proof ─── */
+
+// A dine-in transfer records Transfer — never Cash — through its own RPC. The
+// single RPC call is the whole write: no proof row, no Messenger step.
+order = { order_type: "dine_in", status: "preparing", payment_status: "unpaid" };
+rpcLog = [];
+p = await postMarkPaid(paidReq("Transfer"));
+assert.equal(p.status, 200, "dine-in transfer succeeds");
+assert.equal(rpcLog.length, 1, "one RPC call and nothing else");
+assert.equal(rpcLog[0].rpc, "mark_order_paid_transfer", "Transfer uses the transfer RPC");
+assert.equal(order.payment_status, "Paid", "order flips to Paid (Transfer)");
+assert.equal(order.payment_method, "Transfer", "method is Transfer, never Cash");
+assert.ok(order.paid_at, "paid_at stamped");
+const transferPaidAt = order.paid_at;
+
+// Replay is idempotent: paid_at not re-stamped, method unchanged.
+p = await postMarkPaid(paidReq("Transfer"));
+assert.equal((await p.json()).alreadyPaid, true, "transfer replay reports alreadyPaid");
+assert.equal(order.paid_at, transferPaidAt, "transfer paid_at NOT re-stamped");
+assert.equal(order.payment_method, "Transfer", "transfer replay keeps the method");
+
+// PICKUP / DELIVERY transfers stay on the Messenger payment-proof flow: the
+// RPC refuses them under its row lock, and the route answers a stable 409.
+for (const type of ["pickup", "delivery"]) {
+  order = { order_type: type, status: "preparing", payment_status: "unpaid" };
+  p = await postMarkPaid(paidReq("Transfer"));
+  assert.equal(p.status, 409, `${type} transfer refused server-side`);
+  assert.equal(order.payment_status, "unpaid", `${type} transfer leaves the order unpaid`);
+  assert.equal(order.paid_at, undefined, `${type} transfer stamps no paid_at`);
+}
+
+// A recorded payment is never rewritten, and the route REPORTS the method the
+// row actually holds rather than the one that was requested. Both directions,
+// because either can happen: a mis-tap, or two devices racing on one order.
+order = { order_type: "dine_in", status: "preparing", payment_status: "unpaid" };
+await postMarkPaid(paidReq("Cash"));
+const cashFirstPaidAt = order.paid_at;
+let replay = await (await postMarkPaid(paidReq("Transfer"))).json();
+assert.equal(order.payment_method, "Cash", "Cash first wins — transfer never overwrites");
+assert.equal(replay.paymentMethod, "Cash", "transfer replay reports the stored Cash method");
+assert.equal(replay.alreadyPaid, true, "transfer replay on a Cash order reports alreadyPaid");
+assert.equal(order.paid_at, cashFirstPaidAt, "Cash paid_at NOT re-stamped by a transfer");
+
+order = { order_type: "dine_in", status: "preparing", payment_status: "unpaid" };
+await postMarkPaid(paidReq("Transfer"));
+const transferFirstPaidAt = order.paid_at;
+replay = await (await postMarkPaid(paidReq("Cash"))).json();
+assert.equal(order.payment_method, "Transfer", "Transfer first wins — cash never overwrites");
+assert.equal(replay.paymentMethod, "Transfer", "cash replay reports the stored Transfer method");
+assert.equal(replay.alreadyPaid, true, "cash replay on a Transfer order reports alreadyPaid");
+assert.equal(order.paid_at, transferFirstPaidAt, "Transfer paid_at NOT re-stamped by cash");
+
+// An unknown method is still rejected by the body schema, before any RPC.
+order = { order_type: "dine_in", status: "preparing", payment_status: "unpaid" };
+rpcLog = [];
+p = await postMarkPaid(paidReq("Crypto"));
+assert.equal(p.status, 400, "unknown payment method rejected");
+assert.equal(rpcLog.length, 0, "rejected method never calls a paid RPC");
+assert.equal(order.payment_status, "unpaid", "rejected method leaves the order unpaid");
+
+// The shared STAFF_WRITE_SECRET gate still guards this route. Transfer was
+// previously refused by the handler itself; now that it reaches an RPC, prove
+// the header is what stands between an anonymous caller and a paid order.
+order = { order_type: "dine_in", status: "preparing", payment_status: "unpaid" };
+rpcLog = [];
+for (const secret of [null, "wrong-secret"]) {
+  const headers = { "Content-Type": "application/json" };
+  if (secret !== null) headers["x-staff-secret"] = secret;
+  const unauthorised = new Request("https://app.invalid/api/staff/mark-paid", {
+    method: "POST",
+    headers,
+    body: JSON.stringify({ orderId: "TP-1", paymentMethod: "Transfer" }),
+  });
+  assert.equal((await postMarkPaid(unauthorised)).status, 401, "mark-paid needs the secret");
+}
+assert.equal(rpcLog.length, 0, "an unauthorised mark-paid never calls a paid RPC");
+assert.equal(order.payment_status, "unpaid", "an unauthorised mark-paid writes nothing");
 
 console.log("test-status-transitions: all assertions passed");

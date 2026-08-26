@@ -2,7 +2,22 @@ import { useEffect, useRef, useState } from "react";
 import { isCancellableStatus } from "@/lib/orderRules";
 import { fetchProofHistory, type ProofHistoryItem } from "@/lib/data/staffReadClient";
 import type { StaffOrder, StaffPaymentMethod } from "@/lib/staffOrders";
-import { AlertCircle, Banknote, Bike, Copy, CreditCard, Eye, ImageOff, MapPin, MoreHorizontal, PackageX, Phone, PhoneOff, User, UserX } from "lucide-react";
+import {
+  AlertCircle,
+  Banknote,
+  Bike,
+  Copy,
+  CreditCard,
+  Eye,
+  ImageOff,
+  MapPin,
+  MoreHorizontal,
+  PackageX,
+  Phone,
+  PhoneOff,
+  User,
+  UserX,
+} from "lucide-react";
 import { getNextAction, PAYMENT_META, STATUS_META } from "./orderStatus";
 import { PaymentSlipPreview } from "./PaymentSlipPreview";
 import { drawerHandlesDismiss, openPreview, type SlipPreviewState } from "./slipPreview";
@@ -37,13 +52,13 @@ interface Props {
 }
 
 const CANCEL_REASONS = [
-  { reason: "Customer cancelled",      icon: UserX          },
-  { reason: "No payment received",     icon: CreditCard     },
-  { reason: "Cannot contact customer", icon: PhoneOff       },
-  { reason: "Item unavailable",        icon: PackageX       },
-  { reason: "Duplicate order",         icon: Copy           },
-  { reason: "Wrong order",             icon: AlertCircle    },
-  { reason: "Other",                   icon: MoreHorizontal },
+  { reason: "Customer cancelled", icon: UserX },
+  { reason: "No payment received", icon: CreditCard },
+  { reason: "Cannot contact customer", icon: PhoneOff },
+  { reason: "Item unavailable", icon: PackageX },
+  { reason: "Duplicate order", icon: Copy },
+  { reason: "Wrong order", icon: AlertCircle },
+  { reason: "Other", icon: MoreHorizontal },
 ];
 
 // Icon per preset rejection reason. The reason STRINGS live in proofReview.ts
@@ -88,6 +103,12 @@ export function OrderDetailDrawer({
   const paid = order.paymentStatus === "paid";
   const paidAtLabel = order.paidAt ? formatPaidAt(order.paidAt) : null;
   const canTakePayment = !paid && !!order.airtableRecordId && order.status !== "cancelled";
+  // Staff-verified QR / bank transfer is DINE-IN ONLY: the customer scans the
+  // counter QR and staff watch it land in their banking app, so there is no
+  // slip and no Messenger step. A pickup/delivery transfer is still evidenced
+  // by the customer's slip, and mark_order_paid_transfer refuses those orders
+  // server-side — this flag only keeps staff from being offered a dead button.
+  const canTakeTransfer = canTakePayment && order.orderType === "dine_in";
   const canCancel = isCancellableStatus(order.status) && !!order.airtableRecordId;
   const displayDeliveryFee = order.deliveryFee && order.deliveryFee > 0 ? order.deliveryFee : 30;
 
@@ -245,36 +266,57 @@ export function OrderDetailDrawer({
                 {order.customerName && (
                   <div className="grid grid-cols-[16px_110px_1fr] items-center gap-2">
                     <User size={12} className="text-[var(--color-cream)]/40" />
-                    <span className="text-[var(--color-cream)]/50 uppercase tracking-[0.08em] text-[13px]">Name</span>
-                    <span className="text-[var(--color-cream)] text-right">{order.customerName}</span>
+                    <span className="text-[var(--color-cream)]/50 uppercase tracking-[0.08em] text-[13px]">
+                      Name
+                    </span>
+                    <span className="text-[var(--color-cream)] text-right">
+                      {order.customerName}
+                    </span>
                   </div>
                 )}
                 {order.customerPhone && (
                   <div className="grid grid-cols-[16px_110px_1fr] items-center gap-2">
                     <Phone size={12} className="text-[var(--color-cream)]/40" />
-                    <span className="text-[var(--color-cream)]/50 uppercase tracking-[0.08em] text-[13px]">Phone</span>
-                    <span className="staff-num text-[var(--color-cream)] text-right">{order.customerPhone}</span>
+                    <span className="text-[var(--color-cream)]/50 uppercase tracking-[0.08em] text-[13px]">
+                      Phone
+                    </span>
+                    <span className="staff-num text-[var(--color-cream)] text-right">
+                      {order.customerPhone}
+                    </span>
                   </div>
                 )}
                 {order.deliveryAddress && (
                   <div className="grid grid-cols-[16px_110px_1fr] items-center gap-2">
                     <MapPin size={12} className="text-[var(--color-cream)]/40" />
-                    <span className="text-[var(--color-cream)]/50 uppercase tracking-[0.08em] text-[13px]">Address</span>
-                    <span className="text-[var(--color-cream)] text-right">{order.deliveryAddress}</span>
+                    <span className="text-[var(--color-cream)]/50 uppercase tracking-[0.08em] text-[13px]">
+                      Address
+                    </span>
+                    <span className="text-[var(--color-cream)] text-right">
+                      {order.deliveryAddress}
+                    </span>
                   </div>
                 )}
                 <div className="border-t border-[var(--color-gold)]/10 pt-2 space-y-1.5">
                   <div className="flex justify-between gap-3">
                     <span className="text-[var(--color-cream)]/50">Subtotal</span>
-                    <span className="staff-num text-[var(--color-cream)]/75">฿{(order.subtotalPrice ?? 0).toLocaleString("en-US")}</span>
+                    <span className="staff-num text-[var(--color-cream)]/75">
+                      ฿{(order.subtotalPrice ?? 0).toLocaleString("en-US")}
+                    </span>
                   </div>
                   <div className="flex justify-between gap-3">
-                    <span className="flex items-center gap-1.5 text-[var(--color-cream)]/50"><Bike size={12} className="shrink-0" />Delivery fee</span>
-                    <span className="staff-num text-[var(--color-cream)]/75">฿{displayDeliveryFee.toLocaleString("en-US")}</span>
+                    <span className="flex items-center gap-1.5 text-[var(--color-cream)]/50">
+                      <Bike size={12} className="shrink-0" />
+                      Delivery fee
+                    </span>
+                    <span className="staff-num text-[var(--color-cream)]/75">
+                      ฿{displayDeliveryFee.toLocaleString("en-US")}
+                    </span>
                   </div>
                   <div className="flex justify-between gap-3">
                     <span className="text-[var(--color-cream)]/50">Total</span>
-                    <span className="staff-num text-[var(--color-vermillion)]">฿{order.totalPrice.toLocaleString("en-US")}</span>
+                    <span className="staff-num text-[var(--color-vermillion)]">
+                      ฿{order.totalPrice.toLocaleString("en-US")}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -539,7 +581,9 @@ export function OrderDetailDrawer({
               </span>
               <div className="text-right space-y-0.5">
                 {order.cancellationReason && (
-                  <p className="text-[13px] text-[var(--color-cream)]/80">{order.cancellationReason}</p>
+                  <p className="text-[13px] text-[var(--color-cream)]/80">
+                    {order.cancellationReason}
+                  </p>
                 )}
                 {order.cancelledAt && (
                   <p className="text-[11px] text-[var(--color-cream)]/45 tabular-nums">
@@ -556,9 +600,11 @@ export function OrderDetailDrawer({
           {updateError && (
             <p className="text-[13px] text-[var(--color-vermillion)] text-center">{updateError}</p>
           )}
-          {/* Manual payment is CASH ONLY. Transfer is confirmed by approving
-              the customer's payment slip (the proof section above) — there is
-              no manual Transfer button, and the server refuses one. */}
+          {/* Manual payment. Cash on any order; QR / bank transfer on DINE-IN
+              only, where staff verify the transfer themselves at the counter.
+              Neither button touches Messenger and neither creates a payment
+              proof — a slip the customer SENT is still confirmed by approving
+              it in the proof section above, which is unchanged. */}
           {canTakePayment && (
             <button
               onClick={() => onMarkPaid(order.orderId, "Cash")}
@@ -566,6 +612,15 @@ export function OrderDetailDrawer({
               className="w-full h-12 rounded-xl border border-emerald-500/35 bg-emerald-500/10 text-emerald-300 text-[15px] font-semibold tracking-[0.02em] active:scale-[0.98] transition hover:bg-emerald-500/20 disabled:opacity-60 disabled:cursor-wait disabled:active:scale-100"
             >
               {paying ? "更新中…" : `${METHOD_ZH.Cash}已付 · Paid Cash`}
+            </button>
+          )}
+          {canTakeTransfer && (
+            <button
+              onClick={() => onMarkPaid(order.orderId, "Transfer")}
+              disabled={paying}
+              className="w-full h-12 rounded-xl border border-teal-400/35 bg-teal-500/10 text-teal-200 text-[15px] font-semibold tracking-[0.02em] active:scale-[0.98] transition hover:bg-teal-500/20 disabled:opacity-60 disabled:cursor-wait disabled:active:scale-100"
+            >
+              {paying ? "更新中…" : `QR/${METHOD_ZH.Transfer}已付 · Paid by QR / Transfer`}
             </button>
           )}
           {action ? (
@@ -582,8 +637,8 @@ export function OrderDetailDrawer({
               {meta.labelZh} · {meta.labelEn}
             </p>
           )}
-          {canCancel && (
-            showCancelForm ? (
+          {canCancel &&
+            (showCancelForm ? (
               <div className="space-y-2 pt-1">
                 <p className="text-[11px] uppercase tracking-[0.14em] font-medium text-[var(--color-cream)]/40">
                   Select reason · 取消原因
@@ -608,13 +663,18 @@ export function OrderDetailDrawer({
                 </div>
                 <div className="flex gap-2 pt-0.5">
                   <button
-                    onClick={() => { setShowCancelForm(false); setCancelReason(""); }}
+                    onClick={() => {
+                      setShowCancelForm(false);
+                      setCancelReason("");
+                    }}
                     className="flex-1 h-11 rounded-xl border border-[var(--color-gold)]/20 text-[var(--color-cream)]/60 text-[14px] font-medium hover:border-[var(--color-gold)]/40 transition"
                   >
                     返回 · Back
                   </button>
                   <button
-                    onClick={() => { if (cancelReason) onCancelOrder(order.orderId, cancelReason); }}
+                    onClick={() => {
+                      if (cancelReason) onCancelOrder(order.orderId, cancelReason);
+                    }}
                     disabled={!cancelReason || cancelling}
                     className="flex-1 h-11 rounded-xl border border-[var(--color-vermillion)]/40 bg-[var(--color-vermillion)]/10 text-[var(--color-vermillion)] text-[14px] font-semibold hover:bg-[var(--color-vermillion)]/20 transition disabled:opacity-40 disabled:cursor-not-allowed"
                   >
@@ -630,8 +690,7 @@ export function OrderDetailDrawer({
               >
                 取消訂單 · Cancel Order
               </button>
-            )
-          )}
+            ))}
         </div>
       </div>
 

@@ -185,7 +185,14 @@ const patchOrderByNumber = (
   patch: Record<string, unknown>,
   guardQuery = "",
 ): Promise<number | Response> =>
-  patchRowsByColumn("orders", "order_number", orderNumber, patch, "Order update failed.", guardQuery);
+  patchRowsByColumn(
+    "orders",
+    "order_number",
+    orderNumber,
+    patch,
+    "Order update failed.",
+    guardQuery,
+  );
 
 /**
  * Reads a single order's guard-relevant columns by order_number (never by the
@@ -338,18 +345,37 @@ export async function postCancelOrder(request: Request): Promise<Response> {
 
 const markPaidBody = z.object({
   orderId: z.string().min(1),
-  // The schema still accepts the shape, but the handler refuses Transfer:
-  // Transfer can ONLY become paid via approved payment-proof review.
   paymentMethod: z.enum(["Cash", "Transfer"]),
 });
 
 /**
- * POST /api/staff/mark-paid — the manual CASH-ONLY path. Transfer is refused
- * here (server-side, not just hidden in the UI): a Transfer becomes paid only
- * inside review_payment_proof after an approved slip. Delegates to the
- * mark_order_paid_cash RPC, which locks the order, refuses cancelled orders,
- * and is idempotent — paid_at is stamped once and never rewritten. No route
- * PATCHes paid_at directly (the paid_at-immutability trigger backs this).
+ * The locking RPC that records each manual payment method. BOTH functions take
+ * only the order number, lock the row FOR UPDATE, refuse a cancelled order, and
+ * are idempotent on an already-paid one — paid_at is stamped on the unpaid →
+ * paid transition and never rewritten. No route PATCHes payment_status,
+ * payment_method or paid_at directly (the paid_at-immutability trigger, § 5 of
+ * docs/sql/2026-07-27-payment-proof-review.sql, backs this).
+ *
+ * "Transfer" here is a STAFF-VERIFIED QR / bank transfer: the customer scans
+ * the counter QR, staff see it arrive in their banking app, and NO payment
+ * proof is created. mark_order_paid_transfer refuses anything that is not a
+ * dine_in order (ORDER_NOT_DINE_IN), so the pickup/delivery money path is
+ * still review_payment_proof on an approved customer slip — unchanged.
+ *
+ * mark_order_paid_transfer ships in docs/sql/2026-08-19-staff-verified-transfer.sql
+ * and is NOT applied yet; until a human runs it, a Transfer request fails safe
+ * with a 502 and writes nothing. Cash is unaffected either way.
+ */
+const PAID_RPC = {
+  Cash: "mark_order_paid_cash",
+  Transfer: "mark_order_paid_transfer",
+} as const;
+
+/**
+ * POST /api/staff/mark-paid — records a manual payment against one order by
+ * delegating to the locking RPC for the requested method. The method decides
+ * the function name and nothing else; every guard lives in the RPC, under the
+ * row lock, where it cannot be raced or skipped.
  */
 export async function postMarkPaid(request: Request): Promise<Response> {
   const denied = checkStaffSecret(request);
@@ -358,9 +384,7 @@ export async function postMarkPaid(request: Request): Promise<Response> {
   const body = markPaidBody.safeParse(await request.json().catch(() => null));
   if (!body.success) return jsonError(400, "Invalid request body.");
   const { orderId, paymentMethod } = body.data;
-  if (paymentMethod === "Transfer") {
-    return jsonError(400, "Transfer must be confirmed by approving the customer's payment slip.");
-  }
+  const rpc = PAID_RPC[paymentMethod];
 
   const url = process.env.VITE_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -369,13 +393,13 @@ export async function postMarkPaid(request: Request): Promise<Response> {
 
   let response: globalThis.Response;
   try {
-    response = await fetch(`${base}/rest/v1/rpc/mark_order_paid_cash`, {
+    response = await fetch(`${base}/rest/v1/rpc/${rpc}`, {
       method: "POST",
       headers: supabaseAuthHeaders(key, { "Content-Type": "application/json" }),
       body: JSON.stringify({ p_order_number: orderId }),
     });
   } catch {
-    console.error("mark_order_paid_cash RPC unreachable");
+    console.error(`${rpc} RPC unreachable`);
     return jsonError(502, "Payment update failed.");
   }
 
@@ -383,17 +407,32 @@ export async function postMarkPaid(request: Request): Promise<Response> {
     const err = (await response.json().catch(() => null)) as { message?: string } | null;
     const message = err?.message ?? `HTTP ${response.status}`;
     if (message.includes("ORDER_NOT_FOUND")) return jsonError(404, "Order not found.");
-    if (message.includes("ORDER_CANCELLED")) return jsonError(409, "A cancelled order cannot be paid.");
-    console.error(`mark_order_paid_cash rejected: ${message}`);
+    if (message.includes("ORDER_CANCELLED"))
+      return jsonError(409, "A cancelled order cannot be paid.");
+    if (message.includes("ORDER_NOT_DINE_IN")) {
+      return jsonError(
+        409,
+        "QR / transfer on this order is confirmed by approving the customer's payment slip.",
+      );
+    }
+    console.error(`${rpc} rejected: ${message}`);
     return jsonError(502, "Payment update failed.");
   }
 
-  const result = (await response.json().catch(() => null)) as { already_paid?: boolean } | null;
+  const result = (await response.json().catch(() => null)) as {
+    already_paid?: boolean;
+    payment_method?: string | null;
+  } | null;
+  // Report the method the ROW actually holds, not the one that was requested.
+  // Both RPCs preserve an existing payment on an already-paid order, so a
+  // Transfer request against an order already paid in Cash changes nothing —
+  // echoing "Transfer" back would report money that was never taken that way.
+  // The fallback only covers a result missing the field; it never overrides one.
   return Response.json({
     ok: true,
     orderId,
     paymentStatus: "paid",
-    paymentMethod: "Cash",
+    paymentMethod: result?.payment_method ?? paymentMethod,
     alreadyPaid: result?.already_paid === true,
   });
 }
