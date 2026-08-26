@@ -1,0 +1,98 @@
+{
+  "taskId": "ATLAS-006",
+  "title": "Production Staff Pilot Readiness Test",
+  "objective": "Prove that a restaurant staff member can run a normal shift using the current production staff dashboard without owner intervention, fixing only a confirmed handover-blocking repository defect if the production-safe pilot exposes one.",
+  "goal": "The production staff dashboard is ready for a restaurant staff pilot: normal order, status, payment, cancellation, persistence, retry and tablet workflows work without owner intervention.",
+  "context": "ATLAS-005 is completed, merged and deployed at commit a6821eedc4b30265bffbe56d2b1f1bccc8affcf7. This task is QA-first, not feature expansion. Start from the current Production behavior and automated contracts. Use production-safe orders labelled as tests and never send a real customer message. Verify the customer-to-staff flow, dine-in and takeaway clarity, normal status progression, Cash, staff-verified dine-in Transfer, paid/cancelled guards, refresh persistence, duplicate/repeated actions, understandable network/error behavior, and tablet usability. If every criterion is already satisfied, make no product change. If and only if a handover-blocking repository defect is proven, fix the smallest defect inside allowedPaths, extend the closest existing regression test, re-run required checks and continue the pilot. Do not alter Messenger payment-proof behavior, Supabase schema, n8n, Vercel configuration, owner features, menu design, analytics or reconciliation.",
+  "owner": "Shan Chin",
+  "riskLevel": "high",
+  "baseCommit": "a6821eedc4b30265bffbe56d2b1f1bccc8affcf7",
+  "allowedPaths": [
+    "api/_lib/staffOrderWrites.server.ts",
+    "src/components/staff/",
+    "src/lib/staffOrders.ts",
+    "src/routes/staff.tsx",
+    "scripts/test-staff-dashboard.mjs",
+    "scripts/test-status-transitions.mjs",
+    "scripts/test-order-details.mjs",
+    "package.json"
+  ],
+  "forbiddenPaths": [
+    "agent/",
+    "project/",
+    "api/_lib/paymentProof.server.ts",
+    "api/_lib/paymentReviewNotify.server.ts",
+    "api/_lib/chatMessaging.server.ts",
+    "api/_lib/botSession.server.ts",
+    "docs/sql/",
+    ".env",
+    ".env.local",
+    ".env.example",
+    "vercel.json",
+    "src/routes/owner.tsx"
+  ],
+  "acceptanceCriteria": [
+    "The current Production deployment for main is ready and serves the staff dashboard.",
+    "A production-safe customer test order appears on the staff dashboard with correct items, totals and identity.",
+    "Dine-in table details and takeaway details are clear without owner assistance.",
+    "Staff can progress an eligible order through the normal status flow and terminal guards prevent invalid backward or repeated transitions.",
+    "Paid Cash marks an eligible order Paid with method Cash and a stable paid_at value.",
+    "Paid by QR / Transfer marks an eligible dine-in order Paid with method Transfer, creates no proof row and preserves the Messenger proof flow.",
+    "Cancelled orders cannot be progressed or paid, and paid orders are not corrupted by cancellation or payment replays.",
+    "Refreshing or reopening the production staff dashboard preserves server state and displays it accurately.",
+    "Duplicate or repeated status, payment and cancellation actions are idempotent or fail safely without corrupting state.",
+    "Basic failed-request, retry and recovery states are understandable to staff and do not falsely report success.",
+    "The production staff dashboard remains readable and operable at a tablet-sized viewport.",
+    "No owner intervention, real customer message, unrelated product change, schema change or configuration change is required for the pilot."
+  ],
+  "successCriteria": [
+    { "id": "C1", "text": "The current Production deployment for main is ready and serves the staff dashboard.", "verifiedBy": "vercel.deployment" },
+    { "id": "C2", "text": "A production-safe customer test order appears on the staff dashboard with correct items, totals and identity.", "verifiedBy": null },
+    { "id": "C3", "text": "Dine-in table details and takeaway details are clear without owner assistance.", "verifiedBy": null },
+    { "id": "C4", "text": "Staff can progress an eligible order through the normal status flow and terminal guards prevent invalid backward or repeated transitions.", "verifiedBy": null },
+    { "id": "C5", "text": "Paid Cash marks an eligible order Paid with method Cash and a stable paid_at value.", "verifiedBy": null },
+    { "id": "C6", "text": "Paid by QR / Transfer marks an eligible dine-in order Paid with method Transfer, creates no proof row and preserves the Messenger proof flow.", "verifiedBy": null },
+    { "id": "C7", "text": "Cancelled orders cannot be progressed or paid, and paid orders are not corrupted by cancellation or payment replays.", "verifiedBy": null },
+    { "id": "C8", "text": "Refreshing or reopening the production staff dashboard preserves server state and displays it accurately.", "verifiedBy": null },
+    { "id": "C9", "text": "Duplicate or repeated status, payment and cancellation actions are idempotent or fail safely without corrupting state.", "verifiedBy": null },
+    { "id": "C10", "text": "Basic failed-request, retry and recovery states are understandable to staff and do not falsely report success.", "verifiedBy": null },
+    { "id": "C11", "text": "The production staff dashboard remains readable and operable at a tablet-sized viewport.", "verifiedBy": null },
+    { "id": "C12", "text": "No owner intervention, real customer message, unrelated product change, schema change or configuration change is required for the pilot.", "verifiedBy": null },
+    { "id": "C13", "text": "typecheck passes", "verifiedBy": "repo.checks.typecheck" },
+    { "id": "C14", "text": "lint introduces no new failure in changed files", "verifiedBy": "repo.checks.lint" },
+    { "id": "C15", "text": "build passes", "verifiedBy": "repo.checks.build" },
+    { "id": "C16", "text": "Any repository change receives an independent Codex review.", "verifiedBy": "review.codex" }
+  ],
+  "requiredChecks": ["typecheck", "lint", "build"],
+  "permissions": [
+    "read_repository",
+    "plan_workspace",
+    "edit_task_workspace",
+    "run_checks",
+    "inspect_local_logs",
+    "review_local_diff",
+    "prepare_reports",
+    "inspect_external_system"
+  ],
+  "systems": ["repo", "vercel"],
+  "systemTargets": {
+    "vercel": { "limit": 5 }
+  },
+  "stoppingRules": [
+    "Do not change product code unless a production pilot observation proves a handover-blocking defect.",
+    "Fix only the smallest proven defect and only inside allowedPaths.",
+    "Stop if a fix would require changing Messenger payment-proof implementation, database schema, n8n, Vercel configuration, secrets, owner features or menu behavior.",
+    "Stop before sending any real customer message or using a real customer identity.",
+    "Use only clearly labelled production-safe test orders; do not repurpose a real order.",
+    "Do not delete Production data.",
+    "Stop if success depends on an owner-only action during a normal staff shift.",
+    "Stop for a genuine human usability decision when evidence cannot distinguish PASS from NOT READY.",
+    "Stop if the same failure repeats twice without new evidence.",
+    "Stop and escalate after two unsuccessful revision rounds."
+  ],
+  "budget": {
+    "maxTotalSteps": 30,
+    "maxSameFailureWithoutNewEvidence": 2,
+    "maxPerWorkerAttempts": 5
+  }
+}
