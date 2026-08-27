@@ -195,6 +195,38 @@ function CheckoutForm({
     if (confirmed) successRef.current?.scrollTo(0, 0);
   }, [confirmed]);
 
+  // iOS Safari does not shrink the LAYOUT viewport when the keyboard opens —
+  // only the visual one — and vaul resizes the sheet from that same event.
+  // Safari's own scroll-into-view has already run by then, against the taller
+  // sheet, so the field the customer just tapped can end up below the
+  // shortened scroll area: the reported "table number / notes hidden behind
+  // the keyboard". Re-running it once the sheet has settled is the whole fix,
+  // and doing it on the container covers every field rather than the two that
+  // happened to be reported.
+  //
+  // ponytail: one rAF is enough because vaul writes the new height
+  // synchronously inside its own resize listener. If a future vaul animates
+  // that height instead, wait for transitionend here.
+  const fieldsRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    let previousHeight = viewport.height;
+    const onResize = () => {
+      const shrank = viewport.height < previousHeight;
+      previousHeight = viewport.height;
+      const field = document.activeElement;
+      // Only a viewport that got SMALLER (a keyboard opening), and only for a
+      // field inside this form. A desktop or tablet window resize with nothing
+      // focused must not move the scroll position at all.
+      if (!shrank || !(field instanceof HTMLElement)) return;
+      if (!fieldsRef.current?.contains(field)) return;
+      requestAnimationFrame(() => field.scrollIntoView({ block: "center" }));
+    };
+    viewport.addEventListener("resize", onResize);
+    return () => viewport.removeEventListener("resize", onResize);
+  }, []);
+
   const deliveryFee = orderType === "delivery" ? DELIVERY_FEE : 0;
   const finalTotal = total + deliveryFee;
 
@@ -302,6 +334,12 @@ function CheckoutForm({
       // Only after the snapshots: an order that succeeded must not stay in the
       // cart, or reopening the sheet offers to place it again.
       onClear();
+      // The order is stored, so the sheet is no longer mid-flight and the
+      // header ✕ and drag-to-dismiss must come back — otherwise the
+      // confirmation can only be left through its own Close button, which is
+      // exactly the reported defect. This cannot re-arm "Place order": the
+      // confirmation screen renders instead of the form from here on.
+      setIsSubmitting(false);
     } else {
       // Cart and form state stay intact — the customer can fix and retry.
       setSubmitError(result.error);
@@ -460,7 +498,7 @@ function CheckoutForm({
 
   return (
     <>
-      <div className="flex-1 overflow-y-auto px-5 pb-6">
+      <div ref={fieldsRef} className="flex-1 overflow-y-auto px-5 pb-6">
         {/* ── Order lines ─────────────────────────────────────────────── */}
         <section>
           <div className="flex items-baseline justify-between">

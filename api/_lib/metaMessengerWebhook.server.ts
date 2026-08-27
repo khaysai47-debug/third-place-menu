@@ -35,12 +35,12 @@ import { secretMatches } from "./staffOrderWrites.server.js";
 // PRIVACY RULE — THE POINT OF THIS MODULE. A Messenger payload is customer
 // data: message text, attachments, the sender PSID and the recipient Page ID.
 // NONE of it is logged or persisted, and the only parts ever forwarded are the
-// sender PSID, as `externalChatId` on each event, and the first image
-// attachment's URL, as `attachment` on a message event. The raw body exists
-// only long enough to verify its signature and read its structure, and what
-// leaves this file is the SanitizedMessengerPayload below: counts, categories,
-// timestamps, and those two values. If a field is not on that type, it does not
-// exist downstream.
+// sender PSID, as `externalChatId` on each event, the first image attachment's
+// URL, as `attachment` on a message event, and an allowlisted Atlas action, as
+// `action`. The raw body exists only long enough to verify its signature and
+// read its structure, and what leaves this file is the SanitizedMessengerPayload
+// below: counts, categories, timestamps, and those three values. If a field is
+// not on that type, it does not exist downstream.
 //
 // WHY THE PSID IS AN EXCEPTION: it names the conversation to answer, so without
 // it n8n receives an event it cannot act on. It is opaque and Page-scoped
@@ -51,9 +51,18 @@ import { secretMatches } from "./staffOrderWrites.server.js";
 // WHY THE IMAGE URL IS THE OTHER EXCEPTION: a payment proof IS the image, so
 // without its URL the proof cannot be fetched and reviewed. Only the FIRST
 // valid image attachment travels, and only as { type, url } — one HTTPS URL,
-// nothing else from the attachment. Message text, the recipient Page id,
-// non-image attachments and postback payloads remain stripped unconditionally —
-// they are not needed to reply or to review a proof.
+// nothing else from the attachment.
+//
+// WHY AN ALLOWLISTED ACTION IS THE THIRD: a tap on a button or quick reply the
+// APP ITSELF composed carries no customer content — the payload is Atlas
+// vocabulary we put there. Forwarding it is what lets the receiver route a tap
+// deterministically ("the customer asked for Location") instead of re-reading
+// the message and replaying the welcome over somebody's payment slip. It is a
+// CLOSED allowlist (MESSENGER_ACTIONS): a payload that is not one of ours is
+// null, exactly like arbitrary text, so nothing free-form can ride in on it.
+//
+// Message text, the recipient Page id and non-image attachments remain
+// stripped unconditionally — they are not needed to reply or to review a proof.
 
 /** Meta's verification query fields. */
 const HUB_MODE = "hub.mode";
@@ -81,15 +90,36 @@ export const EVENT_CATEGORIES = ["message", "postback", "delivery", "read", "oth
 export type MessengerEventCategory = (typeof EVENT_CATEGORIES)[number];
 
 /**
+ * The CLOSED set of actions a customer can trigger from a control the app
+ * itself composed — the four welcome options. These are the ONLY payload
+ * values that may leave this module; anything else is customer-controlled
+ * input and is stripped like message text.
+ *
+ * The charset matches POSTBACK_PAYLOAD_PATTERN in chatMessaging.server.ts, the
+ * module that puts these payloads on the buttons and quick replies in the
+ * first place. Adding a value here is a deliberate contract change on BOTH
+ * sides — a new option is composed there and admitted here, never one without
+ * the other.
+ */
+export const MESSENGER_ACTIONS = [
+  "ORDER_START",
+  "SHOW_MENU",
+  "SHOW_LOCATION",
+  "SHOW_OPENING_HOURS",
+] as const;
+export type MessengerAction = (typeof MESSENGER_ACTIONS)[number];
+
+/**
  * The one image reference that may leave this module: type and URL, nothing
  * else. No file name, no size, no sticker or thumbnail metadata.
  */
 export type SanitizedMessengerAttachment = { type: "image"; url: string };
 
 /**
- * One messaging event, reduced to shape plus the identifier a reply needs and
- * the image a payment proof consists of. No recipient Page id, no message text,
- * no non-image attachment, no postback payload.
+ * One messaging event, reduced to shape plus the identifier a reply needs, the
+ * image a payment proof consists of, and the allowlisted action a tap means. No
+ * recipient Page id, no message text, no non-image attachment, and no payload
+ * this app did not itself author.
  */
 export type SanitizedMessengerEvent = {
   category: MessengerEventCategory;
@@ -115,13 +145,26 @@ export type SanitizedMessengerEvent = {
    * travels ONLY to N8N_MESSENGER_EVENTS_WEBHOOK_URL and is never logged.
    */
   attachment: SanitizedMessengerAttachment | null;
+  /**
+   * The Atlas action the customer tapped — a postback button's payload, or a
+   * quick reply's — but ONLY when it is one of MESSENGER_ACTIONS. Every other
+   * payload, and every event that is not a tap, is null. Always present, so
+   * the event shape stays fixed.
+   *
+   * WHY THIS IS NOT STRIPPED: it is the receiver's routing key. An event with
+   * an `action` is a menu choice; an event with an `attachment` is a payment
+   * slip; an event with neither is ordinary text. Those three are disjoint, so
+   * a slip can no longer take the same branch as a greeting.
+   */
+  action: MessengerAction | null;
 };
 
 /**
  * THE ONLY shape that leaves this module. Everything is structural except
- * externalChatId and attachment above: the opaque identifier a reply requires,
- * and the one image URL a payment proof consists of. Nothing here carries
- * message text, a Page id, or any other attachment.
+ * externalChatId, attachment and action above: the opaque identifier a reply
+ * requires, the one image URL a payment proof consists of, and the closed
+ * action vocabulary this app authored. Nothing here carries message text, a
+ * Page id, any other attachment, or any payload we did not put there.
  */
 export type SanitizedMessengerPayload = {
   eventId: string;
@@ -254,17 +297,51 @@ function imageAttachment(event: Record<string, unknown>): SanitizedMessengerAtta
 }
 
 /**
+ * A payload is an action ONLY if it is one of ours, verbatim. Case-sensitive
+ * and whole-string: no prefix match, no normalization, no trimming — a value
+ * that is nearly one of ours is not one of ours.
+ */
+const allowedAction = (value: unknown): MessengerAction | null =>
+  typeof value === "string" && (MESSENGER_ACTIONS as readonly string[]).includes(value)
+    ? (value as MessengerAction)
+    : null;
+
+/**
+ * The allowlisted action this event represents, else null.
+ *
+ * Two sources, because Meta delivers the two controls differently: a button
+ * template's postback arrives as `postback.payload` on a postback event, and a
+ * quick reply arrives as `message.quick_reply.payload` on a MESSAGE event. Both
+ * are taps on something this app composed, so both resolve through the same
+ * allowlist rather than through two rules that could drift apart.
+ *
+ * Nothing else on the event is read. A quick-reply message's `text` — which
+ * Meta echoes as the title the customer tapped — is still stripped.
+ */
+function messengerAction(event: Record<string, unknown>): MessengerAction | null {
+  const postback = event.postback;
+  if (isRecord(postback)) return allowedAction(postback.payload);
+  const message = event.message;
+  if (isRecord(message) && isRecord(message.quick_reply)) {
+    return allowedAction(message.quick_reply.payload);
+  }
+  return null;
+}
+
+/**
  * Reduces the parsed payload to structure plus the one identifier a reply
- * needs and the first image a message carries. Returns null for anything that is not a `page` object — the only
+ * needs, the first image a message carries, and any allowlisted action it
+ * represents. Returns null for anything that is not a `page` object — the only
  * object type this endpoint accepts.
  *
  * Deliberately tolerant BELOW the object check: a missing or malformed entry /
  * messaging array counts as zero rather than throwing, because the signature
  * already proved the sender. Deliberately strict ABOUT what it emits: it reads
- * array lengths, the four discriminating keys, a numeric timestamp, `sender.id`
- * and one image URL — and nothing else. It never touches `recipient`,
- * `message.text`, `message.mid` or `postback.payload`, so no Page id and no
- * message content can reach the returned object even by accident.
+ * array lengths, the four discriminating keys, a numeric timestamp, `sender.id`,
+ * one image URL, and a payload that is already on the closed allowlist — and
+ * nothing else. It never touches `recipient`, `message.text` or `message.mid`,
+ * so no Page id and no message content can reach the returned object even by
+ * accident; a payload that is not one of ours is discarded the same way.
  */
 function sanitize(payload: unknown, eventId: string): SanitizedMessengerPayload | null {
   if (!isRecord(payload) || payload.object !== "page") return null;
@@ -275,7 +352,13 @@ function sanitize(payload: unknown, eventId: string): SanitizedMessengerPayload 
     const messaging = isRecord(entry) && Array.isArray(entry.messaging) ? entry.messaging : [];
     for (const event of messaging) {
       if (!isRecord(event)) {
-        events.push({ category: "other", timestamp: null, externalChatId: null, attachment: null });
+        events.push({
+          category: "other",
+          timestamp: null,
+          externalChatId: null,
+          attachment: null,
+          action: null,
+        });
         continue;
       }
       const at = event.timestamp;
@@ -284,6 +367,7 @@ function sanitize(payload: unknown, eventId: string): SanitizedMessengerPayload 
         timestamp: typeof at === "number" && Number.isFinite(at) ? at : null,
         externalChatId: senderChatId(event),
         attachment: imageAttachment(event),
+        action: messengerAction(event),
       });
     }
   }
@@ -426,10 +510,12 @@ export async function postMetaMessengerWebhook(request: Request): Promise<Respon
 export const __test = {
   categorize,
   imageAttachment,
+  messengerAction,
   sanitize,
   senderChatId,
   SIGNATURE_HEADER,
   MAX_BODY_BYTES,
   FORWARD_TIMEOUT_MS,
   EVENT_CATEGORIES,
+  MESSENGER_ACTIONS,
 };

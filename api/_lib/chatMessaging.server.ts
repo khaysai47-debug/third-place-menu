@@ -39,10 +39,12 @@ import { supabaseAuthHeaders } from "./supabaseAuth.js";
 //
 // THE CALLER COMPOSES THE MESSAGE. This module never builds, translates, or
 // decorates one — it validates, claims, dispatches, and records. That keeps
-// reply wording in one place (the caller) instead of two. Buttons are no
-// exception: their titles, payloads and URLs all come from the caller, and
-// this module transports them without knowing what any of them mean. Nothing
-// here interprets a postback payload — handling one is a separate change.
+// reply wording in one place (the caller) instead of two. Buttons, quick
+// replies and images are no exception: their titles, payloads and URLs all
+// come from the caller, and this module transports them without knowing what
+// any of them mean. Nothing here interprets a payload — the closed action
+// vocabulary that gives one meaning lives on the INBOUND side, in
+// metaMessengerWebhook.server.ts.
 //
 // NO AUTOMATIC RESEND, EVER. A failed or ambiguous send ends as needs_review
 // and waits for a human. Retrying a send whose outcome is unknown is the one
@@ -72,6 +74,22 @@ const MAX_MESSAGE_CHARS = 1_000;
 const MAX_BUTTON_TEXT_CHARS = 640;
 const MAX_BUTTON_TITLE_CHARS = 20;
 const MAX_BUTTONS = 3;
+
+/**
+ * Meta's quick-reply maximum — its own number, like the three above, and NOT
+ * raised here. A button template permits only three buttons, so a welcome that
+ * must visibly offer four options is quick replies rather than a fourth button
+ * the provider would reject. Titles share MAX_BUTTON_TITLE_CHARS: 20 is Meta's
+ * cap for both controls.
+ */
+const MAX_QUICK_REPLIES = 13;
+
+/**
+ * The message variants Meta implements for MESSENGER only. Instagram has a
+ * different mechanism entirely, so either of these on another channel is a
+ * contract error rather than something to attempt.
+ */
+const MESSENGER_ONLY_MESSAGES = ["buttons", "quick_replies"];
 
 /** URLs are foreign data even when the caller is trusted — bound the length. */
 const MAX_BUTTON_URL_CHARS = 2_000;
@@ -126,13 +144,29 @@ export type ChatButton =
   | { type: "web_url"; title: string; url: string };
 
 /**
+ * One quick reply. Meta also requires `content_type: "text"` on every entry;
+ * graphMessage adds that constant rather than demanding it from the caller,
+ * because a value that is always the same is a value a caller can only get
+ * wrong. Payloads use the SAME closed vocabulary as a postback button — a tap
+ * on either comes back through the webhook's allowlist.
+ */
+export type ChatQuickReply = { title: string; payload: string };
+
+/**
  * What to say, as a discriminated union. "text" is a plain message; "buttons"
- * is a Messenger button template. The tag is required on BOTH — there is no
- * untagged form, so a caller can never be ambiguous about which it meant.
+ * is a Messenger button template (3 maximum); "quick_replies" is the reply bar
+ * beneath a message (13 maximum), which is how a four-option welcome stays
+ * inside the provider's limits without inventing a fourth button; "image"
+ * sends one public HTTPS image, which is how the payment QR can follow the
+ * authoritative total as its own message. The tag is required on ALL of them —
+ * there is no untagged form, so a caller can never be ambiguous about which it
+ * meant.
  */
 export type ChatMessage =
   | { type: "text"; text: string }
-  | { type: "buttons"; text: string; buttons: ChatButton[] };
+  | { type: "buttons"; text: string; buttons: ChatButton[] }
+  | { type: "quick_replies"; text: string; quickReplies: ChatQuickReply[] }
+  | { type: "image"; url: string };
 
 /** Exactly what a provider needs, and nothing else. No Supabase ids, no money. */
 export type ChatSendInput = {
@@ -259,17 +293,41 @@ function classifyGraphError(
 }
 
 /**
- * The Meta `message` object for one ChatMessage — the ONLY place the two
- * variants diverge. A text message is a plain `{ text }`; buttons become the
- * button template attachment.
+ * The Meta `message` object for one ChatMessage — the ONLY place the variants
+ * diverge. Text is a plain `{ text }`; an image is an attachment carrying one
+ * URL; quick replies ride alongside the text; buttons become the button
+ * template attachment.
  *
  * The buttons are passed through because ChatButton is already byte-identical
  * to Meta's button shape and both members were parsed with .strict(), so no
  * unknown key can exist on one. Re-mapping them here would be a second place
- * to get the same thing wrong.
+ * to get the same thing wrong. Quick replies DO take the one-line map, because
+ * Meta requires a `content_type` constant the caller has no reason to supply.
+ *
+ * `is_reusable: false` on the image: the QR is a public URL re-sent per order,
+ * and a reusable upload would have Meta mint an attachment id nothing here
+ * stores or could ever use again.
  */
 function graphMessage(message: ChatMessage): Record<string, unknown> {
   if (message.type === "text") return { text: message.text };
+  if (message.type === "image") {
+    return {
+      attachment: {
+        type: "image",
+        payload: { url: message.url, is_reusable: false },
+      },
+    };
+  }
+  if (message.type === "quick_replies") {
+    return {
+      text: message.text,
+      quick_replies: message.quickReplies.map((reply) => ({
+        content_type: "text",
+        title: reply.title,
+        payload: reply.payload,
+      })),
+    };
+  }
   return {
     attachment: {
       type: "template",
@@ -406,18 +464,35 @@ const postbackButton = z
   })
   .strict();
 
+/**
+ * HTTPS ONLY, and bounded. A plain-http link in a customer thread is a
+ * downgrade we will not ship, and the scheme check blocks javascript:/data:
+ * outright. Shared by the web_url button and the image message so the two can
+ * never disagree about what a safe URL is.
+ */
+const httpsUrl = () => z.string().max(MAX_BUTTON_URL_CHARS).url().startsWith("https://");
+
 const urlButton = z
   .object({
     type: z.literal("web_url"),
     title: filled(MAX_BUTTON_TITLE_CHARS),
-    // HTTPS ONLY. A plain-http button in a customer thread is a downgrade we
-    // will not ship, and it also blocks javascript:/data: outright.
-    url: z.string().max(MAX_BUTTON_URL_CHARS).url().startsWith("https://"),
+    url: httpsUrl(),
+  })
+  .strict();
+
+// The same closed vocabulary as a postback button: a quick reply's payload
+// comes back on the webhook exactly like one, so it is validated exactly like
+// one rather than under a second, looser rule.
+const quickReply = z
+  .object({
+    title: filled(MAX_BUTTON_TITLE_CHARS),
+    payload: z.string().regex(POSTBACK_PAYLOAD_PATTERN),
   })
   .strict();
 
 const chatMessage = z.discriminatedUnion("type", [
   z.object({ type: z.literal("text"), text: filled(MAX_MESSAGE_CHARS) }).strict(),
+  z.object({ type: z.literal("image"), url: httpsUrl() }).strict(),
   z
     .object({
       type: z.literal("buttons"),
@@ -426,6 +501,13 @@ const chatMessage = z.discriminatedUnion("type", [
         .array(z.discriminatedUnion("type", [postbackButton, urlButton]))
         .min(1)
         .max(MAX_BUTTONS),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("quick_replies"),
+      text: filled(MAX_MESSAGE_CHARS),
+      quickReplies: z.array(quickReply).min(1).max(MAX_QUICK_REPLIES),
     })
     .strict(),
 ]);
@@ -439,11 +521,13 @@ const sendBody = z
     message: chatMessage,
   })
   .strict()
-  // Button templates are a MESSENGER feature. Instagram has a different
-  // mechanism entirely, so a buttons message on any other channel is a
-  // contract error (400) — caught here rather than becoming a provider outcome
-  // that would consume an eventId.
-  .refine((body) => body.message.type !== "buttons" || body.channel === "messenger");
+  // Button templates and quick replies are MESSENGER features. Instagram has a
+  // different mechanism entirely, so either on any other channel is a contract
+  // error (400) — caught here rather than becoming a provider outcome that
+  // would consume an eventId.
+  .refine(
+    (body) => !MESSENGER_ONLY_MESSAGES.includes(body.message.type) || body.channel === "messenger",
+  );
 
 /**
  * Rebuilds the validated message field by field, for the same reason the rest
@@ -454,6 +538,17 @@ const sendBody = z
  */
 function toChatMessage(parsed: z.infer<typeof chatMessage>): ChatMessage {
   if (parsed.type === "text") return { type: "text", text: parsed.text };
+  if (parsed.type === "image") return { type: "image", url: parsed.url };
+  if (parsed.type === "quick_replies") {
+    return {
+      type: "quick_replies",
+      text: parsed.text,
+      quickReplies: parsed.quickReplies.map((reply) => ({
+        title: reply.title,
+        payload: reply.payload,
+      })),
+    };
+  }
   return {
     type: "buttons",
     text: parsed.text,
@@ -620,7 +715,13 @@ function fromExistingRow(row: DispatchRow | null): ChatSendResult {
     };
   }
   if (state === "processing") {
-    return { ok: true, provider: "meta", messageRef: null, errorClass: null, status: "in_progress" };
+    return {
+      ok: true,
+      provider: "meta",
+      messageRef: null,
+      errorClass: null,
+      status: "in_progress",
+    };
   }
   if (state === "needs_review") {
     const stored = row?.error_class;
@@ -802,6 +903,7 @@ export const __test = {
   MAX_BUTTONS,
   MAX_BUTTON_TEXT_CHARS,
   MAX_BUTTON_TITLE_CHARS,
+  MAX_QUICK_REPLIES,
   POSTBACK_PAYLOAD_PATTERN,
   DISPATCH_STATES,
   SECRET_HEADER,

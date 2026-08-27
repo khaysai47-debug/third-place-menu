@@ -577,6 +577,44 @@ assert.equal(nullFee.data.order.deliveryFee, 0, "null delivery_fee maps to 0");
 assert.equal(nullFee.data.order.total, 180, "rest of the order unaffected");
 orderRowOverride = null;
 
+/* ── The payment QR contract: HTTPS only, verbatim, never invented ───────── */
+
+// paymentQrUrl is what a customer is asked to pay against, so a malformed or
+// plain-http value must answer null — a visible handover blocker — rather than
+// travel into a chat beside an authoritative total.
+for (const bad of [
+  "http://qr.invalid/promptpay.png",
+  "//qr.invalid/promptpay.png",
+  "javascript:alert(1)",
+  "data:image/png;base64,AAAA",
+  "ftp://qr.invalid/promptpay.png",
+  "https://",
+  "https://user:pass@qr.invalid/promptpay.png",
+  "https://qr.invalid/pro mptpay.png",
+  "not a url",
+  " ",
+  `https://qr.invalid/${"x".repeat(2001)}.png`,
+]) {
+  process.env.PAYMENT_QR_URL = bad;
+  const label = `QR ${bad.slice(0, 24)}`;
+  const answered = await expectStatus(200, { auth: `Bearer ${makeJwt()}` }, label);
+  trackCalls();
+  assert.equal(answered.data.paymentQrUrl, null, `unsafe PAYMENT_QR_URL is null: ${label}`);
+}
+
+// A safe HTTPS URL travels VERBATIM — never rewritten, never normalized.
+const QR_URL = "https://qr.invalid/atlas-temporary-test-qr.png";
+process.env.PAYMENT_QR_URL = QR_URL;
+const withQr = await expectStatus(200, { auth: `Bearer ${makeJwt()}` }, "approved QR configured");
+trackCalls();
+assert.equal(withQr.data.paymentQrUrl, QR_URL, "a safe HTTPS QR is carried verbatim");
+
+// Unset is the handover-blocker state, and it is null rather than a guess.
+delete process.env.PAYMENT_QR_URL;
+const noQr = await expectStatus(200, { auth: `Bearer ${makeJwt()}` }, "no QR configured");
+trackCalls();
+assert.equal(noQr.data.paymentQrUrl, null, "an unset PAYMENT_QR_URL is null, never invented");
+
 /* ── Missing server secret → safe 500 before anything else ───────────────── */
 
 delete process.env.N8N_AUTOMATION_SECRET;

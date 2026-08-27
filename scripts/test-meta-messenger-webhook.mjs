@@ -10,10 +10,13 @@
 //   - the four event categories are counted across multiple entries;
 //   - the forward carries ONLY the approved sanitized keys: structure, plus
 //     the sender PSID as externalChatId (the one identifier a reply needs,
-//     validated against EXTERNAL_CHAT_ID_PATTERN and null when it fails) and
-//     the first valid image attachment as { type, url } on a message event —
-//     never message text, a Page ID, a non-image attachment, a postback
-//     payload, a mid, or any raw array;
+//     validated against EXTERNAL_CHAT_ID_PATTERN and null when it fails), the
+//     first valid image attachment as { type, url } on a message event, and an
+//     ALLOWLISTED Atlas action as `action` — never message text, a Page ID, a
+//     non-image attachment, an unlisted payload, a mid, or any raw array;
+//   - a postback payload and a quick-reply payload resolve through the SAME
+//     closed allowlist, and an event's action and attachment are disjoint, so
+//     a payment slip can never take the same branch as the welcome;
 //   - forwarding is skipped with no external request when the URL is unset, and
 //     a forward that fails, 500s, or times out still leaves Meta its 200;
 //   - no request ever reaches the Graph API and no customer message is sent;
@@ -321,12 +324,12 @@ const APPROVED_KEYS = [
   "receivedAt",
 ];
 
-for (const [event, category, attachment] of [
-  [messageEvent, "message", { type: "image", url: ATTACHMENT_URL }],
-  [postbackEvent, "postback", null],
-  [deliveryEvent, "delivery", null],
-  [readEvent, "read", null],
-  [envelope({ optin: { ref: "x" } }), "other", null],
+for (const [event, category, attachment, action] of [
+  [messageEvent, "message", { type: "image", url: ATTACHMENT_URL }, null],
+  [postbackEvent, "postback", null, "ORDER_START"],
+  [deliveryEvent, "delivery", null, null],
+  [readEvent, "read", null, null],
+  [envelope({ optin: { ref: "x" } }), "other", null, null],
 ]) {
   out = await deliver(wrap(event));
   assert.equal(out.status, 200, `14. a ${category} event is accepted`);
@@ -334,8 +337,8 @@ for (const [event, category, attachment] of [
   assert.equal(sent.messagingEventCount, 1, `14. one ${category} event counted`);
   assert.deepEqual(
     sent.events,
-    [{ category, timestamp: event.timestamp, externalChatId: PSID, attachment }],
-    `14. a ${category} event is categorized with its timestamp, sender and image`,
+    [{ category, timestamp: event.timestamp, externalChatId: PSID, attachment, action }],
+    `14. a ${category} event carries its timestamp, sender, image and action`,
   );
 }
 
@@ -365,6 +368,11 @@ assert.deepEqual(
   sent.events.map((e) => e.attachment),
   [null, null, null],
   "15. a message with no attachments carries a null attachment",
+);
+assert.deepEqual(
+  sent.events.map((e) => e.action),
+  [null, null, null],
+  "15. a message that is not a tap carries a null action",
 );
 
 // 16. Multiple entries and multiple events per entry are counted correctly.
@@ -399,7 +407,7 @@ assert.deepEqual(Object.keys(sent).sort(), APPROVED_KEYS, "17. only approved top
 for (const event of sent.events) {
   assert.deepEqual(
     Object.keys(event).sort(),
-    ["attachment", "category", "externalChatId", "timestamp"],
+    ["action", "attachment", "category", "externalChatId", "timestamp"],
     "17. only approved per-event keys",
   );
   if (event.attachment !== null) {
@@ -426,7 +434,10 @@ for (const secretish of SENSITIVE.filter((s) => s !== HOOK && s !== PSID && s !=
 }
 assert.ok(!wire.includes(PAGE_ID), "17. the recipient Page ID is never forwarded");
 assert.ok(!wire.includes(TEXT), "17. message text is never forwarded");
-assert.ok(!wire.includes("ORDER_START"), "17. a postback payload is never forwarded");
+// The ALLOWLISTED action IS forwarded — it is the receiver's routing key, and
+// it is Atlas vocabulary this app put on the button, not customer content. An
+// unlisted payload is still stripped (19d).
+assert.ok(wire.includes('"action":"ORDER_START"'), "17. an allowlisted action is forwarded");
 for (const key of ["sender", "recipient", "mid", "attachments", "text", "psid", "payload"]) {
   assert.ok(!wire.includes(key), `17. the forwarded body must not contain the key "${key}"`);
 }
@@ -631,6 +642,102 @@ out = await deliver(wrap(envelope(image({ type: "file", payload: { url: SECOND_U
 sent = forwarded(out);
 assert.equal(sent.events[0].attachment, null, "19c. a file attachment forwards null");
 assert.ok(!out.calls[0].body.includes(SECOND_URL), "19c. a non-image URL never reaches the wire");
+
+/* ── 19d. The action allowlist — the third and last value that travels ───── */
+
+const quickReplyEvent = (payload) =>
+  envelope({ message: { mid: MID, text: TEXT, quick_reply: { payload } } });
+
+// Both controls resolve through ONE allowlist: a button template's postback and
+// a quick reply's tap are the same question wearing two Meta shapes.
+for (const action of __test.MESSENGER_ACTIONS) {
+  assert.equal(
+    __test.messengerAction({ postback: { payload: action } }),
+    action,
+    `19d. an allowlisted postback payload travels: ${action}`,
+  );
+  assert.equal(
+    __test.messengerAction({ message: { quick_reply: { payload: action } } }),
+    action,
+    `19d. an allowlisted quick-reply payload travels: ${action}`,
+  );
+}
+
+// The four welcome options ARE the closed vocabulary — no more, no fewer.
+assert.deepEqual(
+  [...__test.MESSENGER_ACTIONS],
+  ["ORDER_START", "SHOW_MENU", "SHOW_LOCATION", "SHOW_OPENING_HOURS"],
+  "19d. Place an Order, Menu, Location and Opening Time, and nothing else",
+);
+
+// Anything NOT on the list is customer-controlled input and is stripped like
+// message text: no prefix match, no case folding, no trimming, no coercion.
+for (const [event, why] of [
+  [{}, "no postback and no quick reply"],
+  [{ postback: { payload: "DROP TABLE ORDERS" } }, "an unlisted payload"],
+  [{ postback: { payload: "order_start" } }, "a lower-cased action"],
+  [{ postback: { payload: "ORDER_START_EXTRA" } }, "an action with a suffix"],
+  [{ postback: { payload: " ORDER_START" } }, "a padded action"],
+  [{ postback: { payload: "" } }, "an empty payload"],
+  [{ postback: { payload: 7 } }, "a numeric payload"],
+  [{ postback: { payload: null } }, "a null payload"],
+  [{ postback: { payload: ["ORDER_START"] } }, "an array payload"],
+  [{ postback: { payload: { toString: () => "ORDER_START" } } }, "an object payload"],
+  [{ postback: null }, "a null postback"],
+  [{ postback: "ORDER_START" }, "a string postback"],
+  [{ message: { text: TEXT } }, "an ordinary text message"],
+  [{ message: { quick_reply: { payload: "SOMETHING_ELSE" } } }, "an unlisted quick reply"],
+  [{ message: { quick_reply: null } }, "a null quick reply"],
+  [{ message: { quick_reply: "SHOW_MENU" } }, "a string quick reply"],
+  [{ delivery: { payload: "ORDER_START" } }, "a payload on a delivery event"],
+  [{ read: { payload: "ORDER_START" } }, "a payload on a read event"],
+]) {
+  assert.equal(__test.messengerAction(event), null, `19d. ${why} yields null`);
+}
+
+// End to end: a quick-reply tap routes by action, and the title Meta echoes as
+// message text — the words the customer tapped — is still stripped.
+out = await deliver(wrap(quickReplyEvent("SHOW_LOCATION"), quickReplyEvent("SHOW_OPENING_HOURS")));
+sent = forwarded(out);
+assert.deepEqual(
+  sent.events.map((e) => e.action),
+  ["SHOW_LOCATION", "SHOW_OPENING_HOURS"],
+  "19d. Location and Opening Time arrive as their own distinct actions",
+);
+assert.deepEqual(
+  sent.events.map((e) => e.category),
+  ["message", "message"],
+  "19d. a quick reply is a MESSAGE event, which is why it needs its own read",
+);
+assert.ok(!out.calls[0].body.includes(TEXT), "19d. the echoed quick-reply title is still stripped");
+assert.ok(!out.calls[0].body.includes(MID), "19d. and so is the mid beside it");
+
+// THE ROUTING GUARANTEE. A slip, a tap and plain text are three disjoint
+// shapes, so the receiver can no longer take the welcome branch for a payment
+// slip the way the parallel branches did.
+out = await deliver(
+  wrap(
+    envelope(image(imageAt(ATTACHMENT_URL))),
+    quickReplyEvent("ORDER_START"),
+    envelope({ message: { mid: MID, text: TEXT } }),
+  ),
+);
+sent = forwarded(out);
+assert.deepEqual(
+  sent.events.map((e) => [e.attachment !== null, e.action]),
+  [
+    [true, null],
+    [false, "ORDER_START"],
+    [false, null],
+  ],
+  "19d. slip / tap / plain text are three disjoint shapes",
+);
+for (const event of sent.events) {
+  assert.ok(
+    event.attachment === null || event.action === null,
+    "19d. no event can be both a payment slip and a menu tap",
+  );
+}
 
 /* ══════════════════════════════════════════════════════════════════════════
    E. Forwarding behaviour (tests 20–22)

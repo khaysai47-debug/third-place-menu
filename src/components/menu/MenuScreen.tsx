@@ -32,7 +32,17 @@ const CATEGORY_ZH: Record<MenuCategoryId, string> = {
   soup: "湯品",
 };
 
-export function MenuScreen({ session }: { session?: MenuSessionContext }) {
+export function MenuScreen({
+  session,
+  browseOnly = false,
+}: {
+  session?: MenuSessionContext;
+  /** Read-only mode for the Messenger "Menu" option: the SAME screen and the
+   *  SAME src/data/menu.ts, with ordering switched off. Nothing is copied —
+   *  the cart bar, the checkout sheet and the add controls simply are not
+   *  mounted, so there is no second ordering path to keep in step. */
+  browseOnly?: boolean;
+}) {
   const [active, setActive] = useState<MenuCategoryId>("signature");
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   // Incremented on every open so the checkout form remounts: one drawer
@@ -223,13 +233,27 @@ export function MenuScreen({ session }: { session?: MenuSessionContext }) {
       <main className="relative z-10 mx-auto max-w-[680px] pb-32">
         <Hero />
 
-        <div className="mt-2">
-          <ServiceRail
-            orderType={orderType}
-            onOrderTypeChange={setOrderType}
-            onPopularClick={handlePopularClick}
-          />
-        </div>
+        {/* The order-type tray answers "how are you eating", which is not a
+            question this mode can act on — a dead selector is worse than none.
+            The label below says plainly what this page is and where ordering
+            lives instead. */}
+        {browseOnly ? (
+          <p className="tp-rise-sm mx-5 mt-4 rounded-xl border border-[var(--color-gold)]/25 bg-[var(--color-charcoal-soft)]/60 px-4 py-2.5 text-center text-[12px] leading-relaxed text-[var(--color-gold-soft)]/80">
+            瀏覽菜單 · Browse only — you can read the full menu here, but ordering is not available
+            on this page.
+            <span className="mt-1 block text-[11px] text-[var(--color-gold-soft)]/60">
+              Go back to the chat and choose “Place an Order”.
+            </span>
+          </p>
+        ) : (
+          <div className="mt-2">
+            <ServiceRail
+              orderType={orderType}
+              onOrderTypeChange={setOrderType}
+              onPopularClick={handlePopularClick}
+            />
+          </div>
+        )}
 
         {availabilityWarning && (
           <p className="tp-rise-sm mx-5 mt-4 rounded-xl border border-[var(--color-gold)]/25 bg-[var(--color-charcoal-soft)]/60 px-4 py-2.5 text-center text-[12px] leading-relaxed text-[var(--color-gold-soft)]/80">
@@ -281,6 +305,7 @@ export function MenuScreen({ session }: { session?: MenuSessionContext }) {
                     onAdd={addToCart}
                     onIncrease={increaseQty}
                     onDecrease={decreaseQty}
+                    browseOnly={browseOnly}
                   />
                 </div>
               ))}
@@ -306,23 +331,29 @@ export function MenuScreen({ session }: { session?: MenuSessionContext }) {
         </footer>
       </main>
 
-      {/* No total here on purpose: prices stay on the cards while browsing
-          and the full breakdown lives in the checkout sheet. */}
-      <CartTray count={cartCount} hasSoldOut={cartHasSoldOut} onOpen={openCheckout} />
+      {/* Browse-only mounts NEITHER: "cart and checkout unavailable" is a fact
+          about the tree, not a disabled button someone could re-enable.
+          No total on the bar on purpose — prices stay on the cards while
+          browsing and the full breakdown lives in the checkout sheet. */}
+      {!browseOnly && (
+        <>
+          <CartTray count={cartCount} hasSoldOut={cartHasSoldOut} onOpen={openCheckout} />
 
-      <CheckoutSheet
-        open={checkoutOpen}
-        onOpenChange={setCheckoutOpen}
-        sessionKey={checkoutSession}
-        items={cartItems}
-        total={total}
-        onIncrease={increaseQty}
-        onDecrease={decreaseQty}
-        onRemove={removeItem}
-        onClear={clearCart}
-        initialOrderType={orderType}
-        session={session}
-      />
+          <CheckoutSheet
+            open={checkoutOpen}
+            onOpenChange={setCheckoutOpen}
+            sessionKey={checkoutSession}
+            items={cartItems}
+            total={total}
+            onIncrease={increaseQty}
+            onDecrease={decreaseQty}
+            onRemove={removeItem}
+            onClear={clearCart}
+            initialOrderType={orderType}
+            session={session}
+          />
+        </>
+      )}
     </div>
   );
 }

@@ -95,6 +95,34 @@ const SOURCE_TO_CHANNEL: Record<string, OrderEventChannel> = {
 /** Meta PSID/IGSID charset — mirrors the authoritative bot_sessions CHECK. */
 const EXTERNAL_CHAT_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
 
+/**
+ * The public payment QR image URL from server config (PAYMENT_QR_URL).
+ *
+ * HTTPS ONLY, bounded, and with no embedded credentials — whatever comes back
+ * from here is what a customer is asked to pay against, so a bot that repeats
+ * a malformed or plain-http value has just made an authoritative total
+ * untrustworthy. Anything that does not pass is answered as null, which means
+ * exactly "no approved QR is configured" and nothing else. No value is ever
+ * invented, defaulted, or repaired.
+ *
+ * ponytail: a second small validator rather than importing the webhook's
+ * isValidImageUrl — that module pulls in @vercel/functions, and this one is
+ * compiled standalone by scripts/test-order-details.mjs. Share them if a third
+ * caller appears.
+ */
+function approvedPaymentQrUrl(): string | null {
+  const value = process.env.PAYMENT_QR_URL;
+  if (!value || value.length > 2_000 || /\s/.test(value)) return null;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:") return null;
+    if (url.hostname === "" || url.username !== "" || url.password !== "") return null;
+  } catch {
+    return null;
+  }
+  return value;
+}
+
 // Explicit column lists — the response contract starts at the SELECT. No
 // select=*, no client-supplied columns, ever.
 const ORDER_COLUMNS =
@@ -259,7 +287,12 @@ export async function postOrderDetails(request: Request): Promise<Response> {
     });
   }
 
-  console.log(`ORDER_DETAILS ${orderNumber} event=${eventId} items=${items.length}`);
+  // qr= is PRESENCE only, never the value: an absent approved QR is a handover
+  // blocker a human has to see, and a URL is not something to park in a log.
+  const paymentQrUrl = approvedPaymentQrUrl();
+  console.log(
+    `ORDER_DETAILS ${orderNumber} event=${eventId} items=${items.length} qr=${paymentQrUrl ? "configured" : "missing"}`,
+  );
 
   // The safe response contract — versioned by shape, mapped field by field.
   // Adding a field here is a deliberate contract change, never an accident.
@@ -268,13 +301,15 @@ export async function postOrderDetails(request: Request): Promise<Response> {
   // order number, channel, lines (name/qty/unit price/line total), subtotal,
   // delivery fee, total, order type, table number, payment status — plus the
   // static payment QR. paymentQrUrl is a PUBLIC image URL from server config
-  // (PAYMENT_QR_URL), never a secret and never per-order; null when unset, in
-  // which case n8n supplies its own QR.
+  // (PAYMENT_QR_URL), never a secret and never per-order; null when unset OR
+  // when the configured value is not a safe HTTPS URL — see
+  // approvedPaymentQrUrl. A null here means the caller has no approved QR to
+  // send, which is a blocker to surface, never a gap to fill with a guess.
   return Response.json({
     ok: true,
     data: {
       eventId,
-      paymentQrUrl: process.env.PAYMENT_QR_URL || null,
+      paymentQrUrl,
       order: {
         orderNumber,
         channel,

@@ -10,6 +10,9 @@ interface Props {
   onAdd: (item: MenuItem) => void;
   onIncrease: (id: string) => void;
   onDecrease: (id: string) => void;
+  /** Read-only menu (the Messenger "Menu" option): prices and availability
+   *  only, with no way to order from this card. */
+  browseOnly?: boolean;
 }
 
 const tagColor = (tag: string) => {
@@ -52,7 +55,13 @@ function Price({ value }: { value?: number }) {
  * Both states are 36px tall — the same height as the original add button —
  * so a card does not change height when an item enters the order.
  */
-function AddControl({ item, qty, onAdd, onIncrease, onDecrease }: Omit<Props, "variant">) {
+function AddControl({
+  item,
+  qty,
+  onAdd,
+  onIncrease,
+  onDecrease,
+}: Omit<Props, "variant" | "browseOnly">) {
   if (!item.available) {
     return (
       <span className="flex h-9 shrink-0 items-center justify-center rounded-full border border-[var(--color-ink)]/15 bg-[var(--color-ink)]/15 px-2.5 text-[10px] uppercase tracking-[0.18em] text-[var(--color-ink)]/55">
@@ -124,6 +133,7 @@ export function MenuItemCard({
   onAdd,
   onIncrease,
   onDecrease,
+  browseOnly = false,
 }: Props) {
   const pulsing = useAddPulse(qty);
   const soldOutClass = item.available ? "" : " opacity-70 saturate-[0.85]";
@@ -147,7 +157,11 @@ export function MenuItemCard({
         }`
       : "";
 
-  const control = (
+  // Browse-only is a read of the menu: what is on it, what it costs, and what
+  // has sold out. Only the working add control disappears — the Sold out badge
+  // is information a browsing customer still wants, and AddControl renders it.
+  const showControl = !browseOnly || !item.available;
+  const control = showControl ? (
     <AddControl
       item={item}
       qty={qty}
@@ -155,7 +169,7 @@ export function MenuItemCard({
       onIncrease={onIncrease}
       onDecrease={onDecrease}
     />
-  );
+  ) : null;
 
   if (variant === "feature") {
     return (
