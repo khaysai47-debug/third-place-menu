@@ -40,9 +40,16 @@ export function MenuScreen({
   /** Read-only mode for the Messenger "Menu" option: the SAME screen and the
    *  SAME src/data/menu.ts, with ordering switched off. Nothing is copied —
    *  the cart bar, the checkout sheet and the add controls simply are not
-   *  mounted, so there is no second ordering path to keep in step. */
+   *  mounted, so there is no second ordering path to keep in step.
+   *
+   *  It is the ENTRY state, not a permanent one: Order Now takes the customer
+   *  out of it into this same screen's ordinary ordering tree. */
   browseOnly?: boolean;
 }) {
+  // Seeded by the prop, left ONLY by Order Now. Until that intentional tap
+  // this is exactly the browse-only tree it was before: no add control, no
+  // cart bar, no checkout sheet is mounted, so nothing is merely "disabled".
+  const [browsing, setBrowsing] = useState(browseOnly);
   const [active, setActive] = useState<MenuCategoryId>("signature");
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   // Incremented on every open so the checkout form remounts: one drawer
@@ -235,14 +242,14 @@ export function MenuScreen({
 
         {/* The order-type tray answers "how are you eating", which is not a
             question this mode can act on — a dead selector is worse than none.
-            The label below says plainly what this page is and where ordering
-            lives instead. */}
-        {browseOnly ? (
+            The label below says plainly what this page is, and the bar at the
+            bottom is the one way out of it. */}
+        {browsing ? (
           <p className="tp-rise-sm mx-5 mt-4 rounded-xl border border-[var(--color-gold)]/25 bg-[var(--color-charcoal-soft)]/60 px-4 py-2.5 text-center text-[12px] leading-relaxed text-[var(--color-gold-soft)]/80">
-            瀏覽菜單 · Browse only — you can read the full menu here, but ordering is not available
-            on this page.
+            瀏覽菜單 · Browse only — read the full menu here. Ordering stays off until you ask for
+            it.
             <span className="mt-1 block text-[11px] text-[var(--color-gold-soft)]/60">
-              Go back to the chat and choose “Place an Order”.
+              Tap “Order Now” below when you are ready.
             </span>
           </p>
         ) : (
@@ -305,7 +312,7 @@ export function MenuScreen({
                     onAdd={addToCart}
                     onIncrease={increaseQty}
                     onDecrease={decreaseQty}
-                    browseOnly={browseOnly}
+                    browseOnly={browsing}
                   />
                 </div>
               ))}
@@ -335,7 +342,21 @@ export function MenuScreen({
           about the tree, not a disabled button someone could re-enable.
           No total on the bar on purpose — prices stay on the cards while
           browsing and the full breakdown lives in the checkout sheet. */}
-      {!browseOnly && (
+      {browsing ? (
+        /* The way OUT of browse mode, in the slot the cart bar will occupy. A
+           customer who decides to order at the bottom of a long menu should
+           not have to find their way back to the chat to do it. This button
+           mounts the ordering tree below and nothing else — it cannot add an
+           item, and it never reaches checkout on its own. */
+        <div className="fixed inset-x-0 bottom-0 z-40 mx-auto max-w-[680px] px-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+          <button
+            onClick={() => setBrowsing(false)}
+            className="flex w-full items-center justify-center gap-3 rounded-2xl border border-[var(--color-vermillion-deep)] bg-[var(--color-vermillion)] px-4 py-3 text-[15px] text-[var(--color-cream)] shadow-[0_20px_40px_-18px_oklch(0.45_0.18_27/0.7)] transition-transform duration-150 ease-[var(--ease-fluid)] active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-gold)]"
+          >
+            開始點餐 · Order Now
+          </button>
+        </div>
+      ) : (
         <>
           <CartTray count={cartCount} hasSoldOut={cartHasSoldOut} onOpen={openCheckout} />
 

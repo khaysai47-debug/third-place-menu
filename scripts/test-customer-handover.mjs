@@ -23,12 +23,19 @@
 //     mapping fails closed;
 //   - a payment-slip image routes to proof handling and CANNOT reach the
 //     welcome branch, because action / attachment / plain text are disjoint;
-//   - a retried event sends nothing twice and claims no second row.
+//   - a retried event sends nothing twice and claims no second row;
+//   - the browse-mode menu mounts NO ordering control until the customer taps
+//     Order Now, which leaves browse mode in the one shared screen rather than
+//     opening a second menu;
+//   - Location and Opening Hours are read by EXECUTING the frozen workflow
+//     artifact's Code node against real webhook output, then sending what it
+//     returns through the real endpoint — the destination, the hours and the
+//     provider validity are observed, not restated.
 //
 // SCOPE — repository handlers plus the immutable n8n proposal contracts. It
-// proves the three modules fit each other and that the corrected workflow
-// helpers produce IDs accepted by those handlers. It does not execute, update
-// or publish n8n; external Class B changes still require approval.
+// proves the three modules fit each other, and it runs the corrected workflow
+// node in-process against stubbed n8n accessors. It does not reach, update or
+// publish n8n; external Class B changes still require approval.
 //
 // THE QR FIXTURE. The user-approved temporary test QR is an EXTERNAL file and
 // stays external. Its bytes are read only to calculate the recorded SHA-256;
@@ -91,9 +98,66 @@ assert.ok(
     menuRouteSource.includes("browseOnly={browseOnly}"),
   "the exact /?browse=1 URL enables browse-only mode without router coercion",
 );
+
+/* Browse mode is the ENTRY state and Order Now is the ONLY way out of it.
+   These are source contracts because the assertion is about what the React
+   tree does and does not MOUNT: a disabled control would still be a control. */
+
 assert.ok(
-  menuSource.includes("!browseOnly") && menuSource.includes("browseOnly={browseOnly}"),
-  "browse-only mode removes ordering surfaces from the shared menu tree",
+  menuSource.includes("const [browsing, setBrowsing] = useState(browseOnly);"),
+  "browse-only seeds a state the customer can leave, not a permanent mode",
+);
+// Ordering lives in the FALSE arm of `browsing ? … : …`, so on first render of
+// a browse link there is no add control, no cart bar and no checkout sheet in
+// the tree at all — nothing that could "accidentally become active".
+const browseTernary = menuSource.slice(menuSource.lastIndexOf("{browsing ? ("));
+const [browseArm, orderArm] = browseTernary.split("      ) : (");
+assert.ok(orderArm, "the browse bar and the ordering tree are the two arms of one ternary");
+for (const mounted of ["<CartTray", "<CheckoutSheet"]) {
+  assert.ok(!browseArm.includes(mounted), `browse mode does not mount ${mounted}`);
+  assert.ok(orderArm.includes(mounted), `leaving browse mode mounts ${mounted}`);
+  assert.equal(
+    menuSource.split(mounted).length - 1,
+    1,
+    `${mounted} is mounted in exactly one place — no parallel ordering path`,
+  );
+}
+assert.ok(
+  menuSource.includes("browseOnly={browsing}"),
+  "the cards read the live browse state, so add controls appear with the cart",
+);
+assert.ok(browseArm.includes("Order Now"), "browse mode exposes a customer-facing Order Now");
+assert.ok(
+  browseArm.includes("onClick={() => setBrowsing(false)}"),
+  "Order Now enters the existing ordering path by leaving browse mode in place",
+);
+// Exactly two mentions: the declaration and that one deliberate call. Nothing
+// else in the screen — no effect, no URL, no availability refresh — can drop
+// the customer into ordering without the tap.
+assert.equal(
+  menuSource.split("setBrowsing").length - 1,
+  2,
+  "only the Order Now tap leaves browse mode",
+);
+
+// ONE menu implementation. Both entry points render the same screen, and the
+// item data has a single module behind it.
+assert.ok(
+  menuRouteSource.includes("<MenuScreen browseOnly={browseOnly} />"),
+  "/ renders the shared screen",
+);
+assert.ok(
+  readFileSync("src/routes/m.tsx", "utf8").includes("<MenuScreen session={{ token: token! }} />"),
+  "/m renders that same shared screen",
+);
+const menuDataModules = execSync("git ls-files", { encoding: "utf8" })
+  .trim()
+  .split(/\r?\n/)
+  .filter((file) => /\.tsx?$/.test(file) && /export const MENU\b/.test(readFileSync(file, "utf8")));
+assert.deepEqual(
+  menuDataModules,
+  ["src/data/menu.ts"],
+  "exactly one menu data module — browse and ordering cannot drift apart",
 );
 
 /* ── Production-safe identities. Nothing here names a real person. ───────── */
@@ -165,8 +229,22 @@ function workflowUuidHelper(artifact, nodeName) {
   });
 }
 
+// The PENDING presentation revision for Location and Opening Hours. It is
+// derived from the published node code above, so it must satisfy the same UUID
+// contract; section B2 then EXECUTES it rather than restating what it says.
+const presentationArtifact = JSON.parse(
+  readFileSync(
+    path.join(R3_WORKFLOW_ARTIFACT_DIR, "messenger-receiver.location-hours.update.json"),
+    "utf8",
+  ),
+);
+
 const greetingUuid = workflowUuidHelper(messengerUuidArtifact, "Prepare Greeting Event");
 const directUuid = workflowUuidHelper(messengerUuidArtifact, "Prepare Messenger Direct Response");
+const presentationUuid = workflowUuidHelper(
+  presentationArtifact,
+  "Prepare Messenger Direct Response",
+);
 const orderMessageUuid = workflowUuidHelper(orderUuidArtifact, "Prepare Customer Messages");
 const deterministicIdPaths = [
   [greetingUuid, "inbound:bot-session", "bot session"],
@@ -175,6 +253,8 @@ const deterministicIdPaths = [
   [directUuid, "inbound:menu", "menu response"],
   [directUuid, "inbound:location", "location response"],
   [directUuid, "inbound:opening-hours", "opening-time response"],
+  [presentationUuid, "inbound:location", "revised location response"],
+  [presentationUuid, "inbound:opening-hours", "revised opening-hours response"],
   [orderMessageUuid, "order-event:authoritative-total", "authoritative total"],
   [orderMessageUuid, "order-event:payment-qr", "QR message"],
 ];
@@ -182,6 +262,16 @@ for (const [uuidFrom, seed, label] of deterministicIdPaths) {
   const id = uuidFrom(seed);
   assert.match(id, UUID_V4_CONTRACT, `${label} ID satisfies UUID_V4_PATTERN`);
   assert.equal(uuidFrom(seed), id, `${label} ID remains deterministic`);
+}
+// Wording changed; the route seeds did not. The same inbound delivery still
+// derives the same event ID, so the existing dedupe/retry protection carries
+// across the revision instead of being reset by it.
+for (const seed of ["inbound:location", "inbound:opening-hours", "inbound:menu"]) {
+  assert.equal(
+    presentationUuid(seed),
+    directUuid(seed),
+    `the revision does not move the deterministic ID for ${seed}`,
+  );
 }
 
 const ORDER_EVENT_ID = "33333333-3333-4333-8333-333333333333";
@@ -582,6 +672,165 @@ for (const option of WELCOME_OPTIONS) {
   assert.ok(
     !JSON.stringify(forwarded).includes(option.title),
     `5. the echoed title is still stripped for "${option.title}"`,
+  );
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   B2. Location and Opening Hours, EXECUTED from the frozen workflow artifact
+
+   Not a restatement of what the artifact file says. The real webhook output is
+   fed to the artifact's real Code node, and the message it returns is then put
+   through the real send endpoint — so the wording, the destination and the
+   provider validity are all observed rather than asserted about a string.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/** The approved destination. One constant; nothing composes or shortens it. */
+const APPROVED_MAPS_URL = "https://maps.app.goo.gl/SaDkrUaBhUXxAHEj8";
+
+/**
+ * The artifact's node, run the way n8n runs it: `$` reaches the webhook item
+ * and `require` reaches node crypto. Nothing else is in scope, which is itself
+ * part of the contract — the node cannot read an order, a clock or a network.
+ */
+function runDirectResponse(forwardedBody) {
+  const operation = presentationArtifact.operations.find(
+    (candidate) => candidate.nodeName === "Prepare Messenger Direct Response",
+  );
+  assert.ok(operation, "5b. the revision carries the direct-response node");
+  const accessor = (node) => {
+    assert.equal(node, "Messenger Events POST", "5b. the node reads only the webhook item");
+    return { first: () => ({ json: { body: forwardedBody } }) };
+  };
+  return new Function("require", "$", operation.parameters.jsCode)((moduleName) => {
+    assert.equal(moduleName, "crypto");
+    return { createHash };
+  }, accessor);
+}
+
+const answered = {};
+for (const option of WELCOME_OPTIONS) {
+  answered[option.payload] = runDirectResponse(await deliver(tapEvent(option)));
+}
+
+// CHANGE 2 — Location. A native button template, and the approved destination
+// carried verbatim rather than printed at the customer as a raw link.
+assert.equal(answered.SHOW_LOCATION.length, 1, "6b. Location answers with exactly one message");
+const locationMessage = answered.SHOW_LOCATION[0].json.message;
+assert.equal(locationMessage.type, "buttons", "6b. Location uses a Messenger button template");
+assert.equal(locationMessage.text, "📍 The Third Place", "6b. and the approved heading");
+assert.deepEqual(
+  locationMessage.buttons,
+  [{ type: "web_url", title: "Open in Google Maps", url: APPROVED_MAPS_URL }],
+  "6b. one action button, on the EXACT approved Google Maps destination",
+);
+assert.ok(!locationMessage.text.includes("http"), "6b. no raw URL is left in the wording");
+assert.ok(
+  locationMessage.buttons[0].title.length <= chat.MAX_BUTTON_TITLE_CHARS,
+  "6b. the button title fits Meta's cap",
+);
+
+// CHANGE 3 — Opening hours. Wording only; the hours are the same figures.
+assert.equal(answered.SHOW_OPENING_HOURS.length, 1, "6b. Opening Hours answers once");
+assert.deepEqual(
+  answered.SHOW_OPENING_HOURS[0].json.message,
+  { type: "text", text: "🕐 Opening Hours\nDaily · 11:00–23:00" },
+  "6b. the approved opening-hours presentation",
+);
+assert.ok(
+  answered.SHOW_OPENING_HOURS[0].json.message.text.includes("11:00–23:00"),
+  "6b. the business hours are unchanged",
+);
+
+// Everything else this node answers is untouched by the revision.
+assert.deepEqual(
+  answered.SHOW_MENU[0].json.message,
+  {
+    type: "buttons",
+    text: "Browse our current menu.",
+    buttons: [
+      {
+        type: "web_url",
+        title: "Open Menu",
+        url: "https://third-place-menu.vercel.app/?browse=1",
+      },
+    ],
+  },
+  "6b. the Menu option still opens the shared browse-mode menu",
+);
+assert.deepEqual(
+  answered.ORDER_START,
+  [],
+  "6b. ORDER_START still belongs to the bot-session branch alone",
+);
+
+// The four welcome payloads, read off the executable artifact rather than a
+// local constant — this is the same list the webhook allowlists in section B.
+const executedWelcome = runDirectResponse(
+  await deliver(envelope({ message: { mid: "m_hi", text: "Hi" } })),
+);
+assert.equal(executedWelcome.length, 1, "6b. a plain message still answers with the welcome");
+assert.deepEqual(
+  executedWelcome[0].json.message.quickReplies,
+  WELCOME_OPTIONS,
+  "6b. the four welcome options and payloads are unchanged",
+);
+
+// A payment slip still reaches NO response branch — the revision does not
+// reopen the replay the `action` field was introduced to close.
+const slipBody = await deliver(
+  envelope({
+    message: {
+      mid: "m_slip_artifact",
+      attachments: [
+        { type: "image", payload: { url: "https://cdn.invalid/slip-artifact-check.jpg" } },
+      ],
+    },
+  }),
+);
+assert.deepEqual(
+  runDirectResponse(slipBody),
+  [],
+  "6b. an image event cannot reach the welcome or any other reply",
+);
+
+// Provider validity, proved by sending both through the REAL endpoint and the
+// REAL Meta adapter — not by reasoning about what Messenger accepts.
+for (const [label, message, expected] of [
+  [
+    "location",
+    locationMessage,
+    {
+      attachment: {
+        type: "template",
+        payload: {
+          template_type: "button",
+          text: "📍 The Third Place",
+          buttons: [{ type: "web_url", title: "Open in Google Maps", url: APPROVED_MAPS_URL }],
+        },
+      },
+    },
+  ],
+  [
+    "opening-hours",
+    answered.SHOW_OPENING_HOURS[0].json.message,
+    { text: "🕐 Opening Hours\nDaily · 11:00–23:00" },
+  ],
+]) {
+  graphCalls = [];
+  out = await send({
+    eventId: presentationUuid(`handover-verify:${label}`),
+    orderNumber: "TP-MS-GREETING",
+    channel: "messenger",
+    externalChatId: CHAT_ID,
+    message,
+  });
+  assert.equal(out.status, 200, `6b. the ${label} message is accepted`);
+  assert.equal(out.json.status, "sent", `6b. and dispatches`);
+  assert.equal(graphCalls.length, 1, `6b. as exactly ONE provider message`);
+  assert.deepEqual(
+    graphCalls[0].body,
+    { recipient: { id: CHAT_ID }, messaging_type: "RESPONSE", message: expected },
+    `6b. the ${label} reply is Meta's exact shape`,
   );
 }
 
