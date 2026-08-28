@@ -62,6 +62,14 @@ execSync(
     " --lib es2022,dom --skipLibCheck",
   { stdio: "inherit" },
 );
+// Compiled into its own directory so the api/_lib output paths above keep
+// their shape — tsc would otherwise re-root everything on the common ancestor.
+execSync(
+  `npx tsc src/components/menu/keyboardInset.ts --outDir ${outDir}/menu` +
+    " --module nodenext --moduleResolution nodenext --target es2022" +
+    " --lib es2022,dom --skipLibCheck",
+  { stdio: "inherit" },
+);
 writeFileSync(path.join(outDir, "package.json"), '{"type":"module"}\n');
 
 const load = (file) => import(pathToFileURL(path.resolve(outDir, file)).href);
@@ -94,48 +102,358 @@ assert.ok(
   "the top-right X uses the drawer close transition and only the active request can disable it",
 );
 
-/* iPhone Safari keyboard.
+/* ── iPhone Safari keyboard, driven rather than described ───────────────────
 
-   The first attempt watched only `visualViewport.resize` and corrected once,
-   on a single animation frame, with `scrollIntoView`. On a real device that
-   failed three ways: moving between fields while the keyboard is already open
-   fires no resize at all; one frame lands mid-animation; and at the bottom of
-   the list there is no room left to scroll into. These are source contracts
-   because the behaviour needs a physical iPhone to observe. */
-assert.ok(
-  checkoutSource.includes('container.addEventListener("focusin", schedule)'),
-  "a focus change while the keyboard is already open still re-reveals the field",
-);
-assert.ok(
-  checkoutSource.includes('viewport?.addEventListener("resize", schedule)') &&
-    checkoutSource.includes('viewport?.addEventListener("scroll", schedule)'),
-  "the keyboard opening, closing or moving the visual viewport also re-reveals",
-);
+   The behaviour needs a physical iPhone to OBSERVE, which is why the first
+   attempt shipped broken past a green suite: it was asserted about as source
+   text. So the logic takes its platform as an argument, and everything below
+   drives it with a fake visual viewport, a fake clock and fake geometry.
+
+   The sheet is a fixed 92dvh panel and iOS shrinks only the VISUAL viewport,
+   so the keyboard covers the bottom of it. Coordinates here are screen-space:
+   the container occupies 100..800 and a field's rect moves as it scrolls. */
+const { attachKeyboardInset, CORRECTION_DELAYS } = await load("menu/keyboardInset.js");
+
+function keyboardHarness({ innerHeight = 800, hasViewport = true } = {}) {
+  const listeners = { focusin: [], resize: [], scroll: [] };
+  const on = (type, fn) => listeners[type].push(fn);
+  const off = (type, fn) => {
+    const at = listeners[type].indexOf(fn);
+    if (at >= 0) listeners[type].splice(at, 1);
+  };
+
+  const viewport = hasViewport
+    ? { height: innerHeight, offsetTop: 0, addEventListener: on, removeEventListener: off }
+    : null;
+
+  const fields = [];
+  const container = {
+    top: 100,
+    scrollTop: 0,
+    getBoundingClientRect: () => ({ top: container.top, bottom: 800 }),
+    contains: (node) => fields.includes(node),
+    addEventListener: on,
+    removeEventListener: off,
+  };
+  const field = (layoutTop, height = 44) => {
+    const self = {
+      layoutTop,
+      getBoundingClientRect() {
+        const top = container.top + self.layoutTop - container.scrollTop;
+        return { top, bottom: top + height };
+      },
+    };
+    fields.push(self);
+    return self;
+  };
+
+  const frames = new Map();
+  const timers = new Map();
+  let nextHandle = 1;
+  const state = { active: null };
+  const insets = [];
+
+  const host = {
+    get innerHeight() {
+      return innerHeight;
+    },
+    get activeElement() {
+      return state.active;
+    },
+    get viewport() {
+      return viewport;
+    },
+    requestAnimationFrame(callback) {
+      const handle = nextHandle++;
+      frames.set(handle, callback);
+      return handle;
+    },
+    cancelAnimationFrame: (handle) => frames.delete(handle),
+    setTimeout(callback, delay) {
+      const handle = nextHandle++;
+      timers.set(handle, { callback, delay });
+      return handle;
+    },
+    clearTimeout: (handle) => timers.delete(handle),
+  };
+
+  const emit = (type) => [...listeners[type]].forEach((fn) => fn());
+  return {
+    container,
+    viewport,
+    field,
+    insets,
+    host,
+    inset: () => insets.at(-1),
+    listenerCount: () => Object.values(listeners).reduce((n, list) => n + list.length, 0),
+    pending: () => ({ frames: frames.size, timers: timers.size }),
+    /** Run the animation-frame corrections only. */
+    flushFrames() {
+      const due = [...frames.values()];
+      frames.clear();
+      due.forEach((fn) => fn());
+    },
+    /** Run the delayed corrections, soonest first, as a real clock would. */
+    runTimers() {
+      const due = [...timers.values()].sort((a, b) => a.delay - b.delay);
+      timers.clear();
+      due.forEach(({ callback }) => callback());
+    },
+    settle() {
+      this.flushFrames();
+      this.runTimers();
+    },
+    focus(target) {
+      state.active = target;
+      emit("focusin");
+    },
+    blur() {
+      state.active = null;
+    },
+    /** The keyboard covering `height` px of the screen. */
+    keyboard(height) {
+      viewport.height = innerHeight - height;
+      emit("resize");
+    },
+    scrollViewport(offsetTop) {
+      viewport.offsetTop = offsetTop;
+      emit("scroll");
+    },
+    attach: (delays = CORRECTION_DELAYS) =>
+      attachKeyboardInset(container, (value) => insets.push(value), host, delays),
+  };
+}
+
+/** The field is fully above the keyboard, with the 16px gap honoured. */
+const isClear = (box, visibleBottom) => box.bottom + 16 <= visibleBottom + 0.5;
+
+{
+  // 1. The keyboard opens under a focused field near the bottom of the list.
+  const h = keyboardHarness();
+  const detach = h.attach();
+  const table = h.field(560);
+  h.focus(table);
+  h.keyboard(340);
+  h.settle();
+
+  assert.equal(h.inset(), 340, "the inset is exactly what the keyboard covers");
+  assert.ok(h.container.scrollTop > 0, "the container scrolled to lift the field");
+  assert.ok(
+    isClear(table.getBoundingClientRect(), h.viewport.height),
+    "the focused field ends up above the keyboard",
+  );
+  detach();
+}
+
+{
+  // 2. THE REGRESSION. Table number → notes while the keyboard is ALREADY
+  //    open. No viewport changes, so no resize fires; only `focusin` can save
+  //    this, and the first implementation did not listen for it.
+  const h = keyboardHarness();
+  const detach = h.attach();
+  const table = h.field(300);
+  const notes = h.field(620, 90);
+  h.focus(table);
+  h.keyboard(340);
+  h.settle();
+  const afterTable = h.container.scrollTop;
+
+  h.focus(notes); // no keyboard event of any kind
+  h.settle();
+
+  assert.ok(h.container.scrollTop > afterTable, "moving to notes scrolled further");
+  assert.ok(
+    isClear(notes.getBoundingClientRect(), h.viewport.height),
+    "notes is above the keyboard although no viewport event fired",
+  );
+  assert.equal(h.inset(), 340, "the inset did not change, because the keyboard did not");
+  detach();
+}
+
+{
+  // 3. The keyboard ANIMATES. iOS reports intermediate heights and keeps
+  //    firing resize; a correction computed on the first frame is against a
+  //    viewport still in motion. The delayed corrections are what land.
+  const h = keyboardHarness();
+  const detach = h.attach();
+  const notes = h.field(600, 90);
+  h.focus(notes);
+
+  h.keyboard(120); // the keyboard is a fifth of the way up
+  h.flushFrames();
+  const midAnimation = h.container.scrollTop;
+  assert.ok(
+    isClear(notes.getBoundingClientRect(), h.viewport.height),
+    "the immediate correction is right for the viewport it could see",
+  );
+
+  // The keyboard finishes rising. iOS does not necessarily fire again, and the
+  // correction that looked right a moment ago now leaves the field covered —
+  // which is precisely what a single requestAnimationFrame shipped.
+  h.viewport.height = 800 - 340;
+  assert.ok(
+    !isClear(notes.getBoundingClientRect(), h.viewport.height),
+    "one early correction alone would have left the field under the keyboard",
+  );
+
+  h.runTimers();
+
+  assert.notEqual(h.container.scrollTop, midAnimation, "a later correction moved it again");
+  assert.ok(
+    isClear(notes.getBoundingClientRect(), h.viewport.height),
+    "the settled keyboard leaves the field clear",
+  );
+  assert.deepEqual([...CORRECTION_DELAYS], [120, 280, 450], "corrections span the animation");
+  detach();
+}
+
+{
+  // 4. Dismissal returns the inset, so the padding collapses again.
+  const h = keyboardHarness();
+  const detach = h.attach();
+  const table = h.field(560);
+  h.focus(table);
+  h.keyboard(340);
+  h.settle();
+  assert.equal(h.inset(), 340);
+
+  h.blur();
+  h.keyboard(0);
+  h.settle();
+  assert.equal(h.inset(), 0, "dismissing the keyboard removes the inset");
+  detach();
+}
+
+{
+  // 5. A visual-viewport scroll re-runs the correction against the new offset.
+  const h = keyboardHarness();
+  const detach = h.attach();
+  const table = h.field(560);
+  h.focus(table);
+  h.keyboard(340);
+  h.settle();
+  h.scrollViewport(40);
+  h.settle();
+  assert.equal(h.inset(), 300, "offsetTop counts against what the keyboard covers");
+  assert.ok(
+    isClear(table.getBoundingClientRect(), h.viewport.height + 40),
+    "the field is clear of the moved viewport",
+  );
+  detach();
+}
+
+{
+  // 6. Submit → confirmation → close → reopen must not accumulate anything,
+  //    and a timer that fires after close must not touch a detached container.
+  const h = keyboardHarness();
+  const detach = h.attach();
+  const attached = h.listenerCount();
+  assert.equal(attached, 3, "focusin, resize and scroll");
+
+  const table = h.field(560);
+  h.focus(table);
+  h.keyboard(340); // corrections pending, exactly as a close mid-typing leaves them
+  assert.ok(h.pending().timers > 0 && h.pending().frames > 0, "work is queued");
+
+  detach();
+  assert.equal(h.listenerCount(), 0, "every listener is removed");
+  assert.deepEqual(h.pending(), { frames: 0, timers: 0 }, "every pending correction is cancelled");
+
+  const settled = h.container.scrollTop;
+  const insetCount = h.insets.length;
+  h.focus(table);
+  h.keyboard(340);
+  h.settle();
+  assert.equal(h.container.scrollTop, settled, "a detached controller moves nothing");
+  assert.equal(h.insets.length, insetCount, "a detached controller reports nothing");
+
+  const again = h.attach();
+  assert.equal(h.listenerCount(), attached, "reopening attaches the same three, not six");
+  again();
+  assert.equal(h.listenerCount(), 0);
+}
+
+{
+  // 7. Rapid events coalesce instead of queueing a correction per event.
+  const h = keyboardHarness();
+  const detach = h.attach();
+  const table = h.field(560);
+  h.focus(table);
+  h.keyboard(200);
+  h.keyboard(340);
+  h.scrollViewport(0);
+  assert.deepEqual(
+    h.pending(),
+    { frames: 1, timers: CORRECTION_DELAYS.length },
+    "one pending set survives, however many events arrived",
+  );
+  detach();
+}
+
+{
+  // 8. DESKTOP: no visual viewport at all. Nothing is padded and nothing moves.
+  const h = keyboardHarness({ hasViewport: false });
+  const detach = h.attach();
+  const name = h.field(300);
+  h.focus(name);
+  h.settle();
+  assert.equal(h.inset(), 0, "no software keyboard means no inset");
+  assert.equal(h.container.scrollTop, 0, "and no scrolling");
+  detach();
+}
+
+{
+  // 9. TABLET: a visual viewport that never shrinks. A window resize with a
+  //    field focused must not drag the form around.
+  const h = keyboardHarness();
+  const detach = h.attach();
+  const name = h.field(200);
+  h.focus(name);
+  h.keyboard(0); // a resize that is not a keyboard
+  h.settle();
+  assert.equal(h.inset(), 0, "an unshrunk viewport covers nothing");
+  assert.equal(h.container.scrollTop, 0, "an already-visible field is left alone");
+
+  // And with nothing focused at all.
+  h.blur();
+  h.keyboard(340);
+  h.settle();
+  assert.equal(h.container.scrollTop, 0, "a keyboard with no focused field scrolls nothing");
+  assert.equal(h.inset(), 340, "but the inset still reflects the covered screen");
+  detach();
+}
+
+{
+  // 10. A field scrolled off the TOP is brought back down, not pushed further.
+  const h = keyboardHarness();
+  const detach = h.attach();
+  const table = h.field(120);
+  h.container.scrollTop = 300; // the customer scrolled past it
+  h.focus(table);
+  h.settle();
+  assert.ok(h.container.scrollTop < 300, "the container scrolled back up to the field");
+  assert.ok(
+    table.getBoundingClientRect().top >= h.container.top,
+    "the field is inside the container again",
+  );
+  detach();
+}
+
+// ONE owner for input repositioning. Vaul's own version listens to the same
+// visualViewport events and rewrites the drawer height; two of them fighting
+// over one field is what made this look flaky on a real device.
 assert.match(
   checkoutSource,
-  /\[120, 280, 450\]\.map\(\(delay\) => window\.setTimeout\(reveal, delay\)\)/,
-  "the correction is re-run across the iOS keyboard animation, not once on one frame",
+  /repositionInputs=\{false\}/,
+  "vaul's competing input repositioning is off, so ./keyboardInset owns it alone",
 );
 assert.ok(
-  checkoutSource.includes("viewport.height + viewport.offsetTop") &&
-    !/\.scrollIntoView\(/.test(checkoutSource),
-  "the field is measured against the visual viewport and this container is scrolled, " +
-    "rather than asking every ancestor to scroll",
+  checkoutSource.includes("attachKeyboardInset(container, setKeyboardInset)"),
+  "the sheet delegates to the tested controller rather than re-implementing it",
 );
 assert.ok(
-  checkoutSource.includes("window.innerHeight - viewport.height - viewport.offsetTop") &&
-    checkoutSource.includes("paddingBottom: keyboardInset + 24"),
-  "the keyboard's height becomes real scroll room, so the last field can reach the top",
-);
-assert.match(
-  checkoutSource,
-  /if \(!\(field instanceof HTMLElement\) \|\| !container\.contains\(field\)\) return;/,
-  "nothing moves unless a field inside this form is focused — desktop and tablet are untouched",
-);
-assert.match(
-  checkoutSource,
-  /if \(below > 0\) container\.scrollTop \+= below;\s*else if \(above > 0\) container\.scrollTop -= above;/,
-  "an already-visible field is left exactly where it is",
+  checkoutSource.includes("paddingBottom: keyboardInset + 24"),
+  "the reported inset becomes real scroll room under the last field",
 );
 
 assert.ok(

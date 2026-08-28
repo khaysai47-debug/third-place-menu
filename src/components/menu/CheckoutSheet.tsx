@@ -3,6 +3,7 @@ import { Drawer } from "vaul";
 import { type OrderPayload, submitOrder, submitSessionOrder } from "@/lib/orders";
 import type { MenuSessionContext } from "./MenuScreen";
 import { MinusIcon, PlusIcon } from "./Icons";
+import { attachKeyboardInset } from "./keyboardInset";
 import { OrderTypeRail } from "./OrderTypeRail";
 import type { OrderType } from "./orderType";
 
@@ -195,74 +196,18 @@ function CheckoutForm({
     if (confirmed) successRef.current?.scrollTo(0, 0);
   }, [confirmed]);
 
-  // iOS Safari does not shrink the LAYOUT viewport when the keyboard opens,
-  // only the visual one. The sheet is `fixed` and 92dvh tall, so it keeps its
-  // full height while the keyboard covers its bottom — including the last
-  // fields and the submit button. Three separate things were wrong before:
-  //
-  //   1. Only `resize` was watched. Moving from table number to notes while
-  //      the keyboard is ALREADY open changes no viewport at all, so nothing
-  //      ran and the second field stayed covered.
-  //   2. One `requestAnimationFrame` (~16ms) lands in the middle of the iOS
-  //      keyboard animation (~300ms), which keeps firing `resize` as it goes.
-  //      The correction was computed against a viewport still in motion.
-  //   3. `scrollIntoView` walks every scrollable ancestor and asks iOS to move
-  //      the layout viewport too, which it then animates back. And at the
-  //      bottom of the list there was simply nowhere left to scroll.
-  //
-  // So: measure against the visual viewport and scroll THIS container, re-run
-  // across the whole animation, and open up real scroll room underneath.
+  // Keeping the focused field above the iOS keyboard is its own concern, and
+  // it lives in ./keyboardInset so it can be tested against a fake viewport
+  // and a fake clock instead of asserted about as source text. The inset it
+  // reports is how much of the screen the keyboard covers, which becomes the
+  // bottom padding that gives the LAST field somewhere to scroll to. It is 0
+  // on any device without a software keyboard.
   const fieldsRef = useRef<HTMLDivElement>(null);
   const [keyboardInset, setKeyboardInset] = useState(0);
   useEffect(() => {
     const container = fieldsRef.current;
     if (!container) return;
-    const viewport = window.visualViewport;
-
-    const reveal = () => {
-      // How much of the layout viewport the keyboard is covering. Zero on
-      // desktop and tablet, where this whole effect is a no-op.
-      const covered = viewport
-        ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
-        : 0;
-      setKeyboardInset(covered);
-
-      const field = document.activeElement;
-      if (!(field instanceof HTMLElement) || !container.contains(field)) return;
-      const visibleBottom = viewport ? viewport.height + viewport.offsetTop : window.innerHeight;
-      const box = field.getBoundingClientRect();
-      const gap = 16;
-      const below = box.bottom + gap - visibleBottom;
-      const above = container.getBoundingClientRect().top + gap - box.top;
-      // Already fully visible is the common case and moves nothing.
-      if (below > 0) container.scrollTop += below;
-      else if (above > 0) container.scrollTop -= above;
-    };
-
-    // The last correction is the one that sticks, so run one immediately and
-    // again across the keyboard animation rather than betting on a single
-    // frame. Re-scheduling on every event keeps it to one pending set.
-    let frame = 0;
-    let timers: number[] = [];
-    const schedule = () => {
-      cancelAnimationFrame(frame);
-      timers.forEach(window.clearTimeout);
-      frame = requestAnimationFrame(reveal);
-      timers = [120, 280, 450].map((delay) => window.setTimeout(reveal, delay));
-    };
-
-    // `focusin` is what covers a focus change while the keyboard is already
-    // open; `resize`/`scroll` cover the keyboard opening, closing or moving.
-    container.addEventListener("focusin", schedule);
-    viewport?.addEventListener("resize", schedule);
-    viewport?.addEventListener("scroll", schedule);
-    return () => {
-      container.removeEventListener("focusin", schedule);
-      viewport?.removeEventListener("resize", schedule);
-      viewport?.removeEventListener("scroll", schedule);
-      cancelAnimationFrame(frame);
-      timers.forEach(window.clearTimeout);
-    };
+    return attachKeyboardInset(container, setKeyboardInset);
   }, []);
 
   const deliveryFee = orderType === "delivery" ? DELIVERY_FEE : 0;
@@ -809,7 +754,13 @@ export function CheckoutSheet({
       // While the order is in flight the sheet cannot be dragged, escaped or
       // dismissed by tapping away.
       dismissible={!submitting}
-      repositionInputs
+      // ONE owner for input repositioning, and it is ./keyboardInset. Vaul's
+      // own version listens to the same visualViewport events and rewrites the
+      // drawer's height; two of them fighting over the same field is what made
+      // the fix look flaky on a real iPhone. Vaul couples this flag to
+      // usePreventScroll, so turning it off also drops that — harmless here,
+      // because usePositionFixed still pins the body for a modal drawer.
+      repositionInputs={false}
     >
       <Drawer.Portal>
         <Drawer.Overlay className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm" />
