@@ -93,6 +93,51 @@ assert.ok(
     checkoutSource.includes("disabled={submitting}"),
   "the top-right X uses the drawer close transition and only the active request can disable it",
 );
+
+/* iPhone Safari keyboard.
+
+   The first attempt watched only `visualViewport.resize` and corrected once,
+   on a single animation frame, with `scrollIntoView`. On a real device that
+   failed three ways: moving between fields while the keyboard is already open
+   fires no resize at all; one frame lands mid-animation; and at the bottom of
+   the list there is no room left to scroll into. These are source contracts
+   because the behaviour needs a physical iPhone to observe. */
+assert.ok(
+  checkoutSource.includes('container.addEventListener("focusin", schedule)'),
+  "a focus change while the keyboard is already open still re-reveals the field",
+);
+assert.ok(
+  checkoutSource.includes('viewport?.addEventListener("resize", schedule)') &&
+    checkoutSource.includes('viewport?.addEventListener("scroll", schedule)'),
+  "the keyboard opening, closing or moving the visual viewport also re-reveals",
+);
+assert.match(
+  checkoutSource,
+  /\[120, 280, 450\]\.map\(\(delay\) => window\.setTimeout\(reveal, delay\)\)/,
+  "the correction is re-run across the iOS keyboard animation, not once on one frame",
+);
+assert.ok(
+  checkoutSource.includes("viewport.height + viewport.offsetTop") &&
+    !/\.scrollIntoView\(/.test(checkoutSource),
+  "the field is measured against the visual viewport and this container is scrolled, " +
+    "rather than asking every ancestor to scroll",
+);
+assert.ok(
+  checkoutSource.includes("window.innerHeight - viewport.height - viewport.offsetTop") &&
+    checkoutSource.includes("paddingBottom: keyboardInset + 24"),
+  "the keyboard's height becomes real scroll room, so the last field can reach the top",
+);
+assert.match(
+  checkoutSource,
+  /if \(!\(field instanceof HTMLElement\) \|\| !container\.contains\(field\)\) return;/,
+  "nothing moves unless a field inside this form is focused — desktop and tablet are untouched",
+);
+assert.match(
+  checkoutSource,
+  /if \(below > 0\) container\.scrollTop \+= below;\s*else if \(above > 0\) container\.scrollTop -= above;/,
+  "an already-visible field is left exactly where it is",
+);
+
 assert.ok(
   menuRouteSource.includes('.get("browse") === "1"') &&
     menuRouteSource.includes("browseOnly={browseOnly}"),
@@ -238,6 +283,115 @@ const presentationArtifact = JSON.parse(
     "utf8",
   ),
 );
+
+/* ── The order-mapping node, executed from its artifact ──────────────────────
+
+   A live Messenger order reached order-details (200, items=1 qr=configured) and
+   then nothing: no send-chat-message call and no n8n error. "Require
+   Authoritative Order Mapping" returns [] on every rejection, so a dropped real
+   order and a correctly ignored staff order looked identical — an invisible
+   stop. It read `$json.data.order`, which only exists when the HTTP node
+   answers as the bare body; with `fullResponse` on, the payload is under
+   `.body`, and both shapes are already in use in this same workflow.
+
+   This runs the EXACT jsCode that will be applied, against both shapes. */
+const mappingArtifact = JSON.parse(
+  readFileSync(
+    path.join(R3_WORKFLOW_ARTIFACT_DIR, "order-receiver.order-mapping-shape.update.json"),
+    "utf8",
+  ),
+);
+
+function runMappingNode(response) {
+  const operation = mappingArtifact.operations.find(
+    (candidate) => candidate.nodeName === "Require Authoritative Order Mapping",
+  );
+  assert.ok(operation, "the artifact updates the mapping node");
+  const logged = [];
+  const run = new Function("$input", "console", `${operation.parameters.jsCode}`);
+  return {
+    items: run({ first: () => ({ json: response }) }, { log: (line) => logged.push(String(line)) }),
+    logged,
+  };
+}
+
+const AUTHORITATIVE_ORDER = {
+  ok: true,
+  data: {
+    paymentQrUrl: "https://store.public.blob.vercel-storage.com/qr-Xk39fQ.jpg",
+    order: {
+      orderNumber: "TP-MS-20260828-162111",
+      channel: "messenger",
+      externalChatId: "9876543210",
+      total: 185,
+    },
+  },
+};
+
+{
+  const expected = {
+    channel: "messenger",
+    external_chat_id: "9876543210",
+    order_number: "TP-MS-20260828-162111",
+    total: 185,
+    payment_qr_url: AUTHORITATIVE_ORDER.data.paymentQrUrl,
+  };
+
+  // The bare-body shape, which is what the node already handled.
+  const bare = runMappingNode(AUTHORITATIVE_ORDER);
+  assert.deepEqual(bare.items, [{ json: expected }], "a bare JSON body maps to the order");
+  assert.deepEqual(bare.logged, [], "a good order logs no rejection");
+
+  // The fullResponse shape, which is what silently stopped the customer flow.
+  const wrapped = runMappingNode({
+    statusCode: 200,
+    headers: { "content-type": "application/json" },
+    body: AUTHORITATIVE_ORDER,
+  });
+  assert.deepEqual(
+    wrapped.items,
+    [{ json: expected }],
+    "a fullResponse envelope maps to exactly the same order",
+  );
+
+  // Supabase can hand a numeric back as a string; that is still authoritative.
+  const asString = structuredClone(AUTHORITATIVE_ORDER);
+  asString.data.order.total = "185.00";
+  assert.equal(runMappingNode(asString).items[0].json.total, 185, "a numeric string is accepted");
+
+  // Every rejection still drops the event — and now says which one it was.
+  const rejections = [
+    ["order-details returned no order object", (o) => delete o.data.order],
+    ["orderNumber is missing", (o) => (o.data.order.orderNumber = "  ")],
+    ["channel is missing", (o) => (o.data.order.channel = "")],
+    ["externalChatId is missing", (o) => delete o.data.order.externalChatId],
+    ["total is not an authoritative number", (o) => (o.data.order.total = "not-a-number")],
+  ];
+  for (const [reason, mutate] of rejections) {
+    const broken = structuredClone(AUTHORITATIVE_ORDER);
+    mutate(broken);
+    const result = runMappingNode(broken);
+    assert.deepEqual(result.items, [], `${reason} still drops the event`);
+    assert.deepEqual(
+      result.logged,
+      [`ORDER_MAPPING dropped: ${reason}`],
+      "a dropped event names its reason instead of vanishing",
+    );
+  }
+
+  // A negative total is refused rather than messaged to a customer.
+  const negative = structuredClone(AUTHORITATIVE_ORDER);
+  negative.data.order.total = -1;
+  assert.deepEqual(runMappingNode(negative).items, [], "a negative total is never authoritative");
+
+  // The node composes no message and reaches nothing outside itself.
+  const code = mappingArtifact.operations[0].parameters.jsCode;
+  assert.ok(
+    !/send-chat-message|fetch\(|\$http|helpers\.request/i.test(code),
+    "the mapping node sends nothing",
+  );
+  assert.ok(!/order_id|created_at|limit=1|order=/.test(code), "no order is selected by recency");
+}
 
 const greetingUuid = workflowUuidHelper(messengerUuidArtifact, "Prepare Greeting Event");
 const directUuid = workflowUuidHelper(messengerUuidArtifact, "Prepare Messenger Direct Response");

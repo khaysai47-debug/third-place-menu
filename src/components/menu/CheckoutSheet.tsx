@@ -195,36 +195,74 @@ function CheckoutForm({
     if (confirmed) successRef.current?.scrollTo(0, 0);
   }, [confirmed]);
 
-  // iOS Safari does not shrink the LAYOUT viewport when the keyboard opens —
-  // only the visual one — and vaul resizes the sheet from that same event.
-  // Safari's own scroll-into-view has already run by then, against the taller
-  // sheet, so the field the customer just tapped can end up below the
-  // shortened scroll area: the reported "table number / notes hidden behind
-  // the keyboard". Re-running it once the sheet has settled is the whole fix,
-  // and doing it on the container covers every field rather than the two that
-  // happened to be reported.
+  // iOS Safari does not shrink the LAYOUT viewport when the keyboard opens,
+  // only the visual one. The sheet is `fixed` and 92dvh tall, so it keeps its
+  // full height while the keyboard covers its bottom — including the last
+  // fields and the submit button. Three separate things were wrong before:
   //
-  // ponytail: one rAF is enough because vaul writes the new height
-  // synchronously inside its own resize listener. If a future vaul animates
-  // that height instead, wait for transitionend here.
+  //   1. Only `resize` was watched. Moving from table number to notes while
+  //      the keyboard is ALREADY open changes no viewport at all, so nothing
+  //      ran and the second field stayed covered.
+  //   2. One `requestAnimationFrame` (~16ms) lands in the middle of the iOS
+  //      keyboard animation (~300ms), which keeps firing `resize` as it goes.
+  //      The correction was computed against a viewport still in motion.
+  //   3. `scrollIntoView` walks every scrollable ancestor and asks iOS to move
+  //      the layout viewport too, which it then animates back. And at the
+  //      bottom of the list there was simply nowhere left to scroll.
+  //
+  // So: measure against the visual viewport and scroll THIS container, re-run
+  // across the whole animation, and open up real scroll room underneath.
   const fieldsRef = useRef<HTMLDivElement>(null);
+  const [keyboardInset, setKeyboardInset] = useState(0);
   useEffect(() => {
+    const container = fieldsRef.current;
+    if (!container) return;
     const viewport = window.visualViewport;
-    if (!viewport) return;
-    let previousHeight = viewport.height;
-    const onResize = () => {
-      const shrank = viewport.height < previousHeight;
-      previousHeight = viewport.height;
+
+    const reveal = () => {
+      // How much of the layout viewport the keyboard is covering. Zero on
+      // desktop and tablet, where this whole effect is a no-op.
+      const covered = viewport
+        ? Math.max(0, window.innerHeight - viewport.height - viewport.offsetTop)
+        : 0;
+      setKeyboardInset(covered);
+
       const field = document.activeElement;
-      // Only a viewport that got SMALLER (a keyboard opening), and only for a
-      // field inside this form. A desktop or tablet window resize with nothing
-      // focused must not move the scroll position at all.
-      if (!shrank || !(field instanceof HTMLElement)) return;
-      if (!fieldsRef.current?.contains(field)) return;
-      requestAnimationFrame(() => field.scrollIntoView({ block: "center" }));
+      if (!(field instanceof HTMLElement) || !container.contains(field)) return;
+      const visibleBottom = viewport ? viewport.height + viewport.offsetTop : window.innerHeight;
+      const box = field.getBoundingClientRect();
+      const gap = 16;
+      const below = box.bottom + gap - visibleBottom;
+      const above = container.getBoundingClientRect().top + gap - box.top;
+      // Already fully visible is the common case and moves nothing.
+      if (below > 0) container.scrollTop += below;
+      else if (above > 0) container.scrollTop -= above;
     };
-    viewport.addEventListener("resize", onResize);
-    return () => viewport.removeEventListener("resize", onResize);
+
+    // The last correction is the one that sticks, so run one immediately and
+    // again across the keyboard animation rather than betting on a single
+    // frame. Re-scheduling on every event keeps it to one pending set.
+    let frame = 0;
+    let timers: number[] = [];
+    const schedule = () => {
+      cancelAnimationFrame(frame);
+      timers.forEach(window.clearTimeout);
+      frame = requestAnimationFrame(reveal);
+      timers = [120, 280, 450].map((delay) => window.setTimeout(reveal, delay));
+    };
+
+    // `focusin` is what covers a focus change while the keyboard is already
+    // open; `resize`/`scroll` cover the keyboard opening, closing or moving.
+    container.addEventListener("focusin", schedule);
+    viewport?.addEventListener("resize", schedule);
+    viewport?.addEventListener("scroll", schedule);
+    return () => {
+      container.removeEventListener("focusin", schedule);
+      viewport?.removeEventListener("resize", schedule);
+      viewport?.removeEventListener("scroll", schedule);
+      cancelAnimationFrame(frame);
+      timers.forEach(window.clearTimeout);
+    };
   }, []);
 
   const deliveryFee = orderType === "delivery" ? DELIVERY_FEE : 0;
@@ -498,7 +536,14 @@ function CheckoutForm({
 
   return (
     <>
-      <div ref={fieldsRef} className="flex-1 overflow-y-auto px-5 pb-6">
+      {/* The keyboard covers the bottom of a fixed sheet, so the last field
+          needs somewhere to scroll TO. This is that room, and it is zero on
+          every device that has no software keyboard. */}
+      <div
+        ref={fieldsRef}
+        className="flex-1 overflow-y-auto px-5 pb-6"
+        style={keyboardInset > 0 ? { paddingBottom: keyboardInset + 24 } : undefined}
+      >
         {/* ── Order lines ─────────────────────────────────────────────── */}
         <section>
           <div className="flex items-baseline justify-between">
