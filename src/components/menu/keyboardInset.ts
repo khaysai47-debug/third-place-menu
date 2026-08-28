@@ -23,6 +23,15 @@
 //      viewport to scroll and which iOS then animates back — and at the bottom
 //      of the list there was no scroll room left for any method to use.
 
+/**
+ * The dataset key ./safariScrollGuard sets while an input is parked off-screen.
+ *
+ * Declared on both sides rather than imported across, so each module compiles
+ * standalone; the suite asserts the two literals are identical, which is the
+ * only thing that could drift.
+ */
+export const PARKED_ATTRIBUTE = "keyboardParked";
+
 /** The visual viewport, narrowed to what this needs. */
 export interface ViewportLike {
   readonly height: number;
@@ -33,6 +42,11 @@ export interface ViewportLike {
 
 export interface FieldLike {
   getBoundingClientRect(): { top: number; bottom: number };
+  /**
+   * Set by ./safariScrollGuard while an input is parked off-screen to stop
+   * Safari scrolling the page to it. Its rect is a lie for that one frame.
+   */
+  readonly dataset?: Record<string, string | undefined>;
 }
 
 export interface ContainerLike extends FieldLike {
@@ -115,6 +129,10 @@ export function attachKeyboardInset(
     const field = host.activeElement;
     if (!field || typeof field.getBoundingClientRect !== "function") return;
     if (!container.contains(field)) return;
+    // Parked off-screen by the Safari guard: measuring now would scroll the
+    // form to a position derived from a deliberate lie. The delayed
+    // corrections run long after the park is released.
+    if (field.dataset?.[PARKED_ATTRIBUTE]) return;
 
     const visibleBottom = viewport ? viewport.height + viewport.offsetTop : host.innerHeight;
     const box = field.getBoundingClientRect();

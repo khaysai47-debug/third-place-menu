@@ -65,7 +65,8 @@ execSync(
 // Compiled into its own directory so the api/_lib output paths above keep
 // their shape — tsc would otherwise re-root everything on the common ancestor.
 execSync(
-  `npx tsc src/components/menu/keyboardInset.ts --outDir ${outDir}/menu` +
+  "npx tsc src/components/menu/keyboardInset.ts src/components/menu/safariScrollGuard.ts" +
+    ` --outDir ${outDir}/menu` +
     " --module nodenext --moduleResolution nodenext --target es2022" +
     " --lib es2022,dom --skipLibCheck",
   { stdio: "inherit" },
@@ -112,7 +113,11 @@ assert.ok(
    The sheet is a fixed 92dvh panel and iOS shrinks only the VISUAL viewport,
    so the keyboard covers the bottom of it. Coordinates here are screen-space:
    the container occupies 100..800 and a field's rect moves as it scrolls. */
-const { attachKeyboardInset, CORRECTION_DELAYS } = await load("menu/keyboardInset.js");
+const {
+  attachKeyboardInset,
+  CORRECTION_DELAYS,
+  PARKED_ATTRIBUTE: INSET_PARKED_KEY,
+} = await load("menu/keyboardInset.js");
 
 function keyboardHarness({ innerHeight = 800, hasViewport = true } = {}) {
   const listeners = { focusin: [], resize: [], scroll: [] };
@@ -439,17 +444,284 @@ const isClear = (box, visibleBottom) => box.bottom + 16 <= visibleBottom + 0.5;
   detach();
 }
 
-// ONE owner for input repositioning. Vaul's own version listens to the same
-// visualViewport events and rewrites the drawer height; two of them fighting
-// over one field is what made this look flaky on a real device.
+/* ── The Mobile Safari protections, kept without a second repositioner ──────
+
+   vaul 1.1.2 gates preventScrollMobileSafari and its OWN field repositioning on
+   the same `repositionInputs` prop. Turning it off to settle ownership also
+   threw away the protections that stop Safari scrolling the page out from
+   under a fixed drawer, so ./safariScrollGuard restores those — and only
+   those. Its focus handler deliberately does not scrollIntoView; that belongs
+   to ./keyboardInset. */
+const { attachSafariScrollGuard, PARKED_ATTRIBUTE } = await load("menu/safariScrollGuard.js");
+
+// The one thing that could drift between two standalone modules.
+assert.equal(
+  PARKED_ATTRIBUTE,
+  INSET_PARKED_KEY,
+  "the guard parks a field under exactly the key keyboardInset refuses to measure",
+);
+
+function guardHarness({ isSupported = true } = {}) {
+  const bound = new Map();
+  const key = (target, type) => `${target}:${type}`;
+  const frames = [];
+  const state = { active: null, windowScrolls: 0 };
+
+  const input = (name) => ({
+    name,
+    style: { transform: "" },
+    dataset: {},
+    focused: 0,
+    focus() {
+      this.focused += 1;
+      state.active = this;
+      const handler = bound.get(key("document", "focus"));
+      if (handler) handler({ target: this, preventDefault: () => {} });
+    },
+  });
+
+  const host = {
+    isSupported,
+    get activeElement() {
+      return state.active;
+    },
+    on(target, type, handler) {
+      bound.set(key(target, type), handler);
+      return () => bound.delete(key(target, type));
+    },
+    requestAnimationFrame(callback) {
+      frames.push(callback);
+      return frames.length;
+    },
+    scrollParentOf: () => state.scrollable ?? null,
+    asInput: (target) => (target && target.style ? target : null),
+    scrollWindowToTop: () => {
+      state.windowScrolls += 1;
+    },
+  };
+
+  const fire = (target, type, event = {}) => {
+    const handler = bound.get(key(target, type));
+    let prevented = false;
+    handler?.({ preventDefault: () => (prevented = true), ...event });
+    return prevented;
+  };
+
+  return {
+    host,
+    input,
+    state,
+    fire,
+    bound,
+    listenerCount: () => bound.size,
+    flushFrames() {
+      const due = frames.splice(0);
+      due.forEach((fn) => fn());
+    },
+    touch(scrollable) {
+      state.scrollable = scrollable;
+    },
+    attach: () => attachSafariScrollGuard(host),
+  };
+}
+
+const scroller = (over) => ({
+  scrollTop: 0,
+  scrollHeight: 1000,
+  clientHeight: 500,
+  isWindowLevel: false,
+  ...over,
+});
+
+{
+  // 1. NATIVE FOCUS CANNOT SCROLL THE PAGE. Tapping an input is taken over:
+  //    the field is parked off-screen first so Safari has nothing to centre.
+  const g = guardHarness();
+  const detach = g.attach();
+  const table = g.input("table");
+
+  const prevented = g.fire("document", "touchend", { target: table });
+  assert.equal(prevented, true, "Safari's own focus handling is prevented");
+  assert.equal(table.style.transform, "translateY(-2000px)", "the field is parked off-screen");
+  assert.equal(table.dataset[PARKED_ATTRIBUTE], "1", "and marked unmeasurable while parked");
+  assert.equal(table.focused, 1, "the guard focuses it itself");
+
+  g.flushFrames();
+  assert.equal(table.style.transform, "", "the park is released on the next frame");
+  assert.equal(table.dataset[PARKED_ATTRIBUTE], undefined, "and the mark is cleared");
+  detach();
+}
+
+{
+  // 2. KEYBOARD NEXT/PREVIOUS, table number → notes. Focus arrives without a
+  //    tap, which is case (4) in vaul's list: Safari scrolls the whole page.
+  const g = guardHarness();
+  const detach = g.attach();
+  const notes = g.input("notes");
+
+  g.fire("document", "focus", { target: notes });
+  assert.equal(notes.style.transform, "translateY(-2000px)", "next/previous focus is parked too");
+  g.flushFrames();
+  assert.equal(notes.style.transform, "", "and released");
+  detach();
+}
+
+{
+  // 3. NO DOUBLE REPOSITIONING. The guard never scrolls a field into view, and
+  //    keyboardInset refuses to measure one while it is parked — so the two
+  //    cannot both act on the same frame.
+  const guardCode = readFileSync("src/components/menu/safariScrollGuard.ts", "utf8")
+    .split("\n")
+    .filter((line) => !/^\s*(\/\/|\*|\/\*)/.test(line))
+    .join("\n");
+  assert.ok(
+    !/scrollIntoView/.test(guardCode),
+    "the guard restores protection only — repositioning stays with keyboardInset",
+  );
+  assert.ok(!/scrollTop\s*[-+]?=/.test(guardCode), "and it never moves a scroll position itself");
+
+  const h = keyboardHarness();
+  const detach = h.attach();
+  const table = h.field(560);
+  table.dataset = { [PARKED_ATTRIBUTE]: "1" };
+  h.focus(table);
+  h.keyboard(340);
+  h.flushFrames();
+  assert.equal(h.container.scrollTop, 0, "a parked field is not measured");
+  assert.equal(h.inset(), 340, "but the inset is still reported");
+
+  delete table.dataset[PARKED_ATTRIBUTE];
+  h.runTimers();
+  assert.ok(h.container.scrollTop > 0, "the delayed correction runs once the park is released");
+  detach();
+}
+
+{
+  // 4. TOUCH / OVERSCROLL CONTAINMENT. Outside a scroller the gesture would
+  //    scroll the window behind the drawer; at either end of a scroller Safari
+  //    hands the gesture to the window instead.
+  const g = guardHarness();
+  const detach = g.attach();
+
+  g.touch(null);
+  assert.equal(
+    g.fire("document", "touchmove", { changedTouches: [{ pageY: 10 }] }),
+    true,
+    "a gesture outside any scroller cannot scroll the window",
+  );
+
+  g.touch(scroller({ isWindowLevel: true }));
+  assert.equal(
+    g.fire("document", "touchmove", { changedTouches: [{ pageY: 10 }] }),
+    true,
+    "the page-level scroller is treated the same way",
+  );
+
+  // Mid-list: the container scrolls, so the gesture is left alone.
+  const list = scroller({ scrollTop: 200 });
+  g.touch(list);
+  g.fire("document", "touchstart", { target: {}, changedTouches: [{ pageY: 100 }] });
+  assert.equal(
+    g.fire("document", "touchmove", { changedTouches: [{ pageY: 90 }] }),
+    false,
+    "scrolling within the list is untouched",
+  );
+
+  // At the top, dragging down would chain to the page.
+  const atTop = scroller({ scrollTop: 0 });
+  g.touch(atTop);
+  g.fire("document", "touchstart", { target: {}, changedTouches: [{ pageY: 100 }] });
+  assert.equal(
+    g.fire("document", "touchmove", { changedTouches: [{ pageY: 140 }] }),
+    true,
+    "overscroll at the top is contained",
+  );
+
+  // At the bottom, dragging up would chain to the page.
+  const atBottom = scroller({ scrollTop: 500 });
+  g.touch(atBottom);
+  g.fire("document", "touchstart", { target: {}, changedTouches: [{ pageY: 100 }] });
+  assert.equal(
+    g.fire("document", "touchmove", { changedTouches: [{ pageY: 60 }] }),
+    true,
+    "overscroll at the bottom is contained",
+  );
+
+  // A list with nothing to scroll is not a trap.
+  g.touch(scroller({ scrollHeight: 500, clientHeight: 500 }));
+  g.fire("document", "touchstart", { target: {}, changedTouches: [{ pageY: 100 }] });
+  assert.equal(
+    g.fire("document", "touchmove", { changedTouches: [{ pageY: 140 }] }),
+    false,
+    "a non-scrolling list does not block the gesture",
+  );
+  detach();
+}
+
+{
+  // 5. BODY/PAGE STABILITY. If the page scrolled anyway, it is put back.
+  const g = guardHarness();
+  const detach = g.attach();
+  g.fire("window", "scroll");
+  g.fire("window", "scroll");
+  assert.equal(g.state.windowScrolls, 2, "a stray page scroll is reversed every time");
+  detach();
+}
+
+{
+  // 6. CLOSE / REOPEN. Every listener goes, nothing acts afterwards, and
+  //    reattaching takes the same five rather than ten.
+  const g = guardHarness();
+  const detach = g.attach();
+  assert.equal(g.listenerCount(), 5, "touchstart, touchmove, touchend, focus, window scroll");
+
+  detach();
+  assert.equal(g.listenerCount(), 0, "every guard listener is removed");
+
+  const orphan = g.input("orphan");
+  assert.equal(g.fire("document", "touchend", { target: orphan }), false);
+  assert.equal(orphan.focused, 0, "a detached guard takes over nothing");
+  assert.equal(g.state.windowScrolls, 0);
+
+  const again = g.attach();
+  assert.equal(g.listenerCount(), 5, "reopening attaches five, not ten");
+  again();
+  assert.equal(g.listenerCount(), 0);
+}
+
+{
+  // 7. DESKTOP / TABLET. Not iOS, so the guard attaches nothing at all and
+  //    cannot transform an input or swallow a gesture.
+  const g = guardHarness({ isSupported: false });
+  const detach = g.attach();
+  assert.equal(g.listenerCount(), 0, "nothing is bound off iOS");
+  const name = g.input("name");
+  assert.equal(g.fire("document", "touchend", { target: name }), false);
+  assert.equal(name.style.transform, "", "no input is ever transformed off iOS");
+  assert.equal(typeof detach, "function", "and detaching is still safe");
+  detach();
+}
+
+// ONE owner for actual repositioning, and the protections kept beside it.
 assert.match(
   checkoutSource,
   /repositionInputs=\{false\}/,
   "vaul's competing input repositioning is off, so ./keyboardInset owns it alone",
 );
 assert.ok(
-  checkoutSource.includes("attachKeyboardInset(container, setKeyboardInset)"),
-  "the sheet delegates to the tested controller rather than re-implementing it",
+  checkoutSource.includes("attachSafariScrollGuard(browserGuardHost())") &&
+    checkoutSource.includes("attachKeyboardInset(container, setKeyboardInset)"),
+  "the sheet attaches the protection and the controller, and re-implements neither",
+);
+assert.match(
+  checkoutSource,
+  /releaseInset\(\);\s*releaseGuard\(\);\s*setKeyboardInset\(0\);/,
+  "closing releases both and collapses the padding",
+);
+assert.match(
+  checkoutSource,
+  /\}, \[confirmed\]\);/,
+  "swapping the form for the confirmation detaches, rather than listening on a dead container",
 );
 assert.ok(
   checkoutSource.includes("paddingBottom: keyboardInset + 24"),

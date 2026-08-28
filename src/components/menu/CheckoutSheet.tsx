@@ -4,6 +4,7 @@ import { type OrderPayload, submitOrder, submitSessionOrder } from "@/lib/orders
 import type { MenuSessionContext } from "./MenuScreen";
 import { MinusIcon, PlusIcon } from "./Icons";
 import { attachKeyboardInset } from "./keyboardInset";
+import { attachSafariScrollGuard, browserGuardHost } from "./safariScrollGuard";
 import { OrderTypeRail } from "./OrderTypeRail";
 import type { OrderType } from "./orderType";
 
@@ -202,13 +203,27 @@ function CheckoutForm({
   // reports is how much of the screen the keyboard covers, which becomes the
   // bottom padding that gives the LAST field somewhere to scroll to. It is 0
   // on any device without a software keyboard.
+  //
+  // ./safariScrollGuard is its companion: it restores the Mobile Safari
+  // protections vaul only offers bundled with its own repositioning, WITHOUT
+  // that repositioning. Two modules, one owner for moving a field.
+  //
+  // `confirmed` is a dependency because the form is replaced by the success
+  // screen: without it the controller would keep listening on a detached
+  // container for the rest of the sheet's life.
   const fieldsRef = useRef<HTMLDivElement>(null);
   const [keyboardInset, setKeyboardInset] = useState(0);
   useEffect(() => {
     const container = fieldsRef.current;
     if (!container) return;
-    return attachKeyboardInset(container, setKeyboardInset);
-  }, []);
+    const releaseGuard = attachSafariScrollGuard(browserGuardHost());
+    const releaseInset = attachKeyboardInset(container, setKeyboardInset);
+    return () => {
+      releaseInset();
+      releaseGuard();
+      setKeyboardInset(0);
+    };
+  }, [confirmed]);
 
   const deliveryFee = orderType === "delivery" ? DELIVERY_FEE : 0;
   const finalTotal = total + deliveryFee;
