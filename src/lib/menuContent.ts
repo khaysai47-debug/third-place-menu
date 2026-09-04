@@ -44,6 +44,21 @@ export interface MenuItemContent {
   readonly unit?: string;
 }
 
+/** The live row's operational state, as the app already models it. */
+export type LiveAvailability = "Available" | "Sold Out" | "Hidden";
+
+/**
+ * One live `menu_items` row's OPERATIONAL fields.
+ *
+ * Passing this says "the database answered for this item". Passing nothing
+ * says "it did not" — and those are different situations, which is the whole
+ * reason this is a distinct argument rather than merged into the fallback.
+ */
+export interface LiveMenuRow {
+  readonly status: LiveAvailability;
+  readonly price?: number;
+}
+
 /** One menu item, resolved for a language and ready to render. */
 export interface LocalizedMenuItem {
   /** CANONICAL. The item_code. Never localised, never derived from display. */
@@ -55,8 +70,25 @@ export interface LocalizedMenuItem {
   readonly description: string;
   readonly unit?: string;
   readonly imageUrl?: string;
-  /** undefined means "ask staff" — never invented, never defaulted to 0. */
+  /** undefined means "we cannot quote this" — never invented, never 0. */
   readonly price?: number;
+  /**
+   * We know we cannot quote a price: none anywhere, OR a live row whose price
+   * is not a usable amount. The card says "ask staff" and the item cannot be
+   * ordered. It is deliberately NOT papered over with the compiled price —
+   * a live row saying 0 is an operational problem, and showing a plausible
+   * figure from the bundle instead would hide it behind a number a customer
+   * might pay against.
+   */
+  readonly priceUnavailable: boolean;
+  /**
+   * Dropped from the browse list — but STILL RESOLVABLE, because an item may
+   * already be in a cart when staff hide it, and it has to stay visible there
+   * to be removed rather than silently vanishing out of the order.
+   */
+  readonly hidden: boolean;
+  readonly soldOut: boolean;
+  /** The one question the UI asks: may this be added and submitted? */
   readonly available: boolean;
   readonly category: MenuCategoryId;
   readonly popular: boolean;
@@ -95,21 +127,39 @@ export function approvedImageUrl(value: string | null | undefined): string | und
   return raw;
 }
 
+/** A number we are willing to charge against: finite and above zero. */
+const isUsablePrice = (value: number | undefined): value is number =>
+  typeof value === "number" && Number.isFinite(value) && value > 0;
+
 /**
- * A price we are willing to show.
+ * What to show for money, and whether the item can be ordered at all.
  *
- * The database read maps a missing/non-numeric price to 0, which would put
- * "฿0" on a card. Only a finite positive number is accepted from the row;
- * anything else falls through to the compiled fallback, and if that has none
- * either the card says "Price · ask staff" rather than inventing a figure.
+ * The two cases are deliberately NOT the same:
+ *
+ *   LIVE ROW PRESENT — its price governs, full stop. If it is 0, negative,
+ *   NaN or absent, we do not quietly substitute the figure compiled into the
+ *   bundle: that would present a plausible price for an item the operational
+ *   record says has none, and the customer could pay against it. The card
+ *   says "ask staff" and the item is blocked.
+ *
+ *   NO LIVE ROW — the read failed or the item is not in the table. Here the
+ *   compiled price IS the right answer: it is the last known good value and
+ *   the alternative is a menu with no prices on it. The server recomputes
+ *   every total from menu_items at intake regardless, so a stale figure can
+ *   never become a wrong charge.
  */
-function usablePrice(...candidates: (number | undefined)[]): number | undefined {
-  for (const candidate of candidates) {
-    if (typeof candidate === "number" && Number.isFinite(candidate) && candidate > 0) {
-      return candidate;
-    }
+function resolvePrice(
+  live: LiveMenuRow | undefined,
+  compiled: number | undefined,
+): { price?: number; priceUnavailable: boolean } {
+  if (live) {
+    return isUsablePrice(live.price)
+      ? { price: live.price, priceUnavailable: false }
+      : { price: undefined, priceUnavailable: true };
   }
-  return undefined;
+  return isUsablePrice(compiled)
+    ? { price: compiled, priceUnavailable: false }
+    : { price: undefined, priceUnavailable: true };
 }
 
 /**
@@ -125,7 +175,7 @@ export function localizeMenuItem(
   fallback: MenuItem,
   content: MenuItemContent | undefined,
   language: Language,
-  availability?: { available: boolean; price?: number },
+  live?: LiveMenuRow,
 ): LocalizedMenuItem {
   const canonicalName = pick(content?.nameEn, fallback.nameEn) ?? fallback.id;
   const englishDescription = pick(content?.descriptionEn, fallback.descriptionEn) ?? "";
@@ -144,6 +194,10 @@ export function localizeMenuItem(
         ? (pick(content?.descriptionTh, fallback.descriptionTh, englishDescription) ?? "")
         : englishDescription;
 
+  const { price, priceUnavailable } = resolvePrice(live, fallback.price);
+  const hidden = live ? live.status === "Hidden" : false;
+  const soldOut = live ? live.status === "Sold Out" : !fallback.available;
+
   return {
     id: fallback.id,
     canonicalName,
@@ -151,8 +205,13 @@ export function localizeMenuItem(
     description,
     unit: pick(content?.unit, fallback.unit),
     imageUrl: approvedImageUrl(content?.imageUrl),
-    price: usablePrice(availability?.price, fallback.price),
-    available: availability?.available ?? fallback.available,
+    price,
+    priceUnavailable,
+    hidden,
+    soldOut,
+    // One question, answered in one place. An item is orderable only if it is
+    // on the menu, in stock, and has a price we are willing to charge.
+    available: !hidden && !soldOut && !priceUnavailable,
     // Taxonomy stays with the compiled row: it is a typed union driving icons
     // and layout, not free text from a database column.
     category: fallback.category,

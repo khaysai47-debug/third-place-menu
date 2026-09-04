@@ -99,7 +99,11 @@ export function MenuScreen({
   // first read returns, and it STAYS null if that read fails, which is what
   // makes the compiled menu the fallback rather than an empty screen.
   const [live, setLive] = useState<ReadonlyMap<string, MenuAvailabilityItem> | null>(null);
-  const [availabilityWarning, setAvailabilityWarning] = useState(false);
+  // pending → live → degraded. "degraded" means the last read did NOT
+  // succeed, so what is on screen came from the compiled menu or from an
+  // earlier response. The customer is told plainly; the reason stays in the
+  // console for whoever is debugging, never on the page.
+  const [readState, setReadState] = useState<"pending" | "live" | "degraded">("pending");
   const [cart, setCart] = useState<Record<string, number>>(() => {
     try {
       const raw = localStorage.getItem("tp_cart");
@@ -132,11 +136,14 @@ export function MenuScreen({
     try {
       const rows = await getMenuAvailability();
       setLive(new Map(rows.map((row) => [row.menuItemId, row])));
+      setReadState("live");
     } catch (error) {
       console.error("Live availability unavailable; using local menu data", error);
-      // Only the initial load surfaces the soft warning; background refreshes
-      // stay silent and keep the last-known availability.
-      if (isInitial) setAvailabilityWarning(true);
+      // EVERY failure marks the read degraded, not just the first. A silent
+      // background failure used to leave the banner off while the screen
+      // showed stale or compiled data — which told the customer nothing and
+      // implied the availability they were looking at had been verified.
+      setReadState("degraded");
     } finally {
       refreshingAvailabilityRef.current = false;
     }
@@ -170,18 +177,27 @@ export function MenuScreen({
   // database wins field by field where it has content; anything it lacks (or
   // an outage, which leaves `live` null) falls back to the bundle, so the menu
   // renders and stays orderable either way. Hidden items are dropped.
-  const menu = useMemo<LocalizedMenuItem[]>(
+  // EVERY compiled item, resolved for the language — hidden ones included.
+  // This is the collection cart lines resolve against, so an item staff hide
+  // while it is already in someone's cart stays visible there to be removed
+  // instead of silently dropping out of their order.
+  const allItems = useMemo<LocalizedMenuItem[]>(
     () =>
-      MENU.flatMap((item) => {
+      MENU.map((item) => {
         const row = live?.get(item.id);
-        if (row?.availability === "Hidden") return [];
-        const availabilityInput = row
-          ? { available: row.availability === "Available", price: row.price }
-          : undefined;
-        return [localizeMenuItem(item, row?.content, language, availabilityInput)];
+        return localizeMenuItem(
+          item,
+          row?.content,
+          language,
+          row ? { status: row.availability, price: row.price } : undefined,
+        );
       }),
     [live, language],
   );
+
+  // What the customer BROWSES. Hidden items are off the menu; that is the
+  // only thing hiding does.
+  const menu = useMemo(() => allItems.filter((item) => !item.hidden), [allItems]);
 
   const addToCart = (item: LocalizedMenuItem) => {
     if (!item.available || item.price === undefined) return;
@@ -218,23 +234,32 @@ export function MenuScreen({
   // order payload; `displayName` is what the customer reads. Keeping them as
   // two fields is what stops a Burmese item name being submitted to the
   // automation as a product it has never heard of.
+  // Resolved against allItems, NOT the browse list: a line that has gone
+  // sold out, hidden, or lost its price stays ON the order as a blocked row
+  // the customer can see and remove. Dropping it would change their order
+  // behind their back and leave a total they never chose.
+  //
+  // A blocked line contributes 0 to the total and `soldOut` blocks the whole
+  // submit, so the only way forward is to remove it — which is what the
+  // existing Remove button on a sold-out row already does.
   const cartItems = useMemo(
     () =>
       Object.entries(cart).flatMap(([id, qty]) => {
-        const item = menu.find((i) => i.id === id);
-        if (!item || item.price === undefined) return [];
+        const item = allItems.find((i) => i.id === id);
+        if (!item) return [];
         return [
           {
             id,
             name: item.canonicalName,
             displayName: item.displayName,
             qty,
-            subtotal: item.price * qty,
+            subtotal: item.price !== undefined ? item.price * qty : 0,
             soldOut: !item.available,
+            priceUnavailable: item.priceUnavailable,
           },
         ];
       }),
-    [cart, menu],
+    [cart, allItems],
   );
 
   const cartHasSoldOut = cartItems.some((i) => i.soldOut);
@@ -294,7 +319,7 @@ export function MenuScreen({
           </div>
         )}
 
-        {availabilityWarning && (
+        {readState === "degraded" && (
           <p className="tp-rise-sm mx-5 mt-4 rounded-xl border border-[var(--color-gold)]/25 bg-[var(--color-charcoal-soft)]/60 px-4 py-2.5 text-center text-[12px] leading-relaxed text-[var(--color-gold-soft)]/80">
             <FunctionalZh>即時供應狀態暫時無法更新 · </FunctionalZh>
             {t("menu.availabilityWarning")}

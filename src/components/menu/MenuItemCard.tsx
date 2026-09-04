@@ -126,14 +126,22 @@ function AddControl({
  * reader announcing the dish twice helps nobody.
  */
 function ItemImage({ src }: { src?: string }) {
-  const [failed, setFailed] = useState(false);
-  if (!src || failed) return <SkewerFlameIcon className="h-6 w-6" />;
+  // The URL that failed, not a boolean. A boolean would LATCH: once one photo
+  // broke, a corrected image_url arriving on the next availability refresh
+  // would keep showing the icon until the card happened to remount. Storing
+  // WHICH url failed means a different one is simply not failed — no reset
+  // effect, no stale flag, correct by construction.
+  const [failedSrc, setFailedSrc] = useState<string | null>(null);
+  if (!src || failedSrc === src) return <SkewerFlameIcon className="h-6 w-6" />;
   return (
     <img
+      // Keyed on the url so a changed photo mounts a fresh element instead of
+      // reusing one the browser has already marked broken.
+      key={src}
       src={src}
       alt=""
       loading="lazy"
-      onError={() => setFailed(true)}
+      onError={() => setFailedSrc(src)}
       className="h-full w-full object-cover"
     />
   );

@@ -494,7 +494,16 @@ const removed = diffLines
 // possible, the canonical/display split, or a comment. This is what stops a
 // structural edit — a new ref, a changed dependency array, another scroll
 // container — riding along inside a "text only" change.
-const TEXT_OR_I18N = /t\(["`]|useT|FunctionalZh|displayName|^import |^\s*(\/\/|\/\*|\*)/;
+// Each alternative is a CONTENT concern, never a structural one:
+//   t("…"), useT            — a translation
+//   FunctionalZh/IdentityZh — the Chinese policy components
+//   ORDER_TYPE_ZH           — the shared functional-Chinese vocabulary
+//   displayName             — the localised half of the canonical/display split
+//   priceUnavailable        — the "no quotable price" content flag
+//   toLocaleString          — money formatting on a line being re-rendered
+//   import, comments        — plumbing
+const TEXT_OR_I18N =
+  /t\(["`]|useT|FunctionalZh|IdentityZh|ORDER_TYPE_ZH|displayName|priceUnavailable|toLocaleString|^import |^\s*(\/\/|\/\*|\*)/;
 // Wrapping a one-line text element onto several lines leaves punctuation-only
 // lines behind. They carry no identifier, no prop and no handler, so they are
 // allowed as their own category rather than by loosening the rule above — a

@@ -3,12 +3,12 @@ import { Drawer } from "vaul";
 import { type OrderPayload, submitOrder, submitSessionOrder } from "@/lib/orders";
 import type { MenuSessionContext } from "./MenuScreen";
 import { MinusIcon, PlusIcon } from "./Icons";
-import { FunctionalZh } from "./ChineseText";
+import { FunctionalZh, IdentityZh } from "./ChineseText";
 import { useT } from "@/lib/i18nContext";
 import { attachKeyboardInset } from "./keyboardInset";
 import { attachSafariScrollGuard, browserGuardHost } from "./safariScrollGuard";
 import { OrderTypeRail } from "./OrderTypeRail";
-import type { OrderType } from "./orderType";
+import { ORDER_TYPE_ZH, type OrderType } from "./orderType";
 
 export type { OrderType };
 
@@ -22,8 +22,12 @@ interface CartItem {
   displayName: string;
   qty: number;
   subtotal: number;
-  /** Item is no longer orderable (sold out / hidden) — blocks placing the order. */
+  /** Item is no longer orderable — sold out, hidden, or with no usable
+   *  price. Blocks placing the order and shows the Remove action. */
   soldOut?: boolean;
+  /** No price we are willing to quote. The line shows "ask staff" instead of
+   *  a figure, and contributes nothing to the total. */
+  priceUnavailable?: boolean;
 }
 
 interface Props {
@@ -365,9 +369,9 @@ function CheckoutForm({
           {/* Chop mark. Presses in with an overshoot, the way a seal is
               actually stamped, and a single gold sheen crosses it once. */}
           <div className="tp-seal relative h-[74px] w-[74px] overflow-hidden rounded-[14px] border border-[var(--color-vermillion-deep)] bg-[var(--color-vermillion)] shadow-[0_20px_44px_-18px_oklch(0.45_0.18_27/0.9)]">
-            <span className="font-display absolute inset-0 flex items-center justify-center text-[38px] leading-none text-[var(--color-cream)]">
+            <IdentityZh className="font-display absolute inset-0 flex items-center justify-center text-[38px] leading-none text-[var(--color-cream)]">
               訂
-            </span>
+            </IdentityZh>
             <span
               aria-hidden
               className="tp-sheen absolute inset-y-0 -left-1/2 w-1/2 bg-gradient-to-r from-transparent via-[var(--color-cream)]/45 to-transparent"
@@ -378,14 +382,14 @@ function CheckoutForm({
             className="tp-display tp-rise mt-6 text-[30px] text-[var(--color-gold-soft)]"
             style={{ ["--i" as string]: 6 }}
           >
-            Order received
+            {t("checkout.orderReceived")}
           </h3>
-          <p
-            className="tp-rise mt-1 text-[13px] tracking-[0.22em] text-[var(--color-cream)]/45"
+          <FunctionalZh
+            className="tp-rise mt-1 block text-[13px] tracking-[0.22em] text-[var(--color-cream)]/45"
             style={{ ["--i" as string]: 7 }}
           >
             訂單已送出
-          </p>
+          </FunctionalZh>
 
           {confirmed.orderId && (
             <p
@@ -412,11 +416,13 @@ function CheckoutForm({
               className="tp-rise mt-4 inline-flex items-baseline gap-2 rounded-full border border-[var(--color-gold)]/25 bg-[var(--color-ink)]/60 px-4 py-2 text-[13px] text-[var(--color-cream)]/80"
               style={{ ["--i" as string]: 10 }}
             >
-              Table{" "}
+              {t("checkout.tableLabel")}{" "}
               <span className="tp-num text-[17px] text-[var(--color-gold)]">
                 {tableNumber.trim()}
               </span>
-              <span className="text-[11px] text-[var(--color-cream)]/45">堂食</span>
+              <FunctionalZh className="text-[11px] text-[var(--color-cream)]/45">
+                {ORDER_TYPE_ZH["dine-in"]}
+              </FunctionalZh>
             </div>
           )}
           {orderType !== "dine-in" && (name.trim() || phone.trim()) && (
@@ -466,7 +472,9 @@ function CheckoutForm({
                   </span>
                 </span>
                 <span className="tp-num shrink-0 text-[13px] text-[var(--color-gold-soft)]">
-                  ฿{item.subtotal.toLocaleString("en-US")}
+                  {item.priceUnavailable
+                    ? t("item.priceAskStaff")
+                    : `฿${item.subtotal.toLocaleString("en-US")}`}
                 </span>
               </div>
             ))}
@@ -521,7 +529,8 @@ function CheckoutForm({
         <section>
           <div className="flex items-baseline justify-between">
             <h3 className="text-[10.5px] uppercase tracking-[0.24em] text-[var(--color-cream)]/45">
-              菜品 · Items
+              <FunctionalZh>菜品 · </FunctionalZh>
+              {t("checkout.itemsHeading")}
             </h3>
             {items.length > 0 && (
               <button
@@ -564,7 +573,9 @@ function CheckoutForm({
                       {item.displayName}
                     </p>
                     <p className="tp-num mt-0.5 text-[12px] text-[var(--color-gold-soft)]/65">
-                      ฿{item.subtotal.toLocaleString("en-US")}
+                      {item.priceUnavailable
+                        ? t("item.priceAskStaff")
+                        : `฿${item.subtotal.toLocaleString("en-US")}`}
                     </p>
                   </div>
                   {item.soldOut ? (
