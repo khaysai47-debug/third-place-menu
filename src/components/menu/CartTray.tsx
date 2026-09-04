@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useCountUp } from "./useCountUp";
+import { useT } from "@/lib/i18nContext";
 
 interface Props {
   count: number;
@@ -25,6 +26,7 @@ const ADDED_MS = 1400;
  * and departure are both animated.
  */
 export function CartTray({ count, hasSoldOut, onOpen }: Props) {
+  const t = useT();
   const shown = count > 0;
   const animatedCount = useCountUp(count);
 
@@ -38,11 +40,11 @@ export function CartTray({ count, hasSoldOut, onOpen }: Props) {
     previous.current = count;
     if (!grew) return;
     setJustAdded(true);
-    const t = window.setTimeout(() => setJustAdded(false), ADDED_MS);
-    return () => window.clearTimeout(t);
+    const timer = window.setTimeout(() => setJustAdded(false), ADDED_MS);
+    return () => window.clearTimeout(timer);
   }, [count]);
 
-  const status = justAdded ? "Item added" : "Ready to review";
+  const status = justAdded ? t("cart.itemAdded") : t("cart.readyToReview");
 
   return (
     <div
@@ -70,7 +72,7 @@ export function CartTray({ count, hasSoldOut, onOpen }: Props) {
               status would run under the CTA at 375. */}
           <span className="flex min-w-0 flex-col items-start">
             <span className="w-full truncate text-[10px] uppercase leading-[1.4] tracking-[0.2em] opacity-80">
-              Your order
+              {t("cart.yourOrder")}
             </span>
             {/* Keyed on the text so each swap re-enters instead of the label
                 silently changing underneath the customer. */}
@@ -85,7 +87,7 @@ export function CartTray({ count, hasSoldOut, onOpen }: Props) {
           </span>
         </span>
         <span className="shrink-0 whitespace-nowrap text-[13px] font-semibold uppercase tracking-[0.12em]">
-          {hasSoldOut ? "Remove sold-out" : "View Cart →"}
+          {hasSoldOut ? t("cart.removeSoldOut") : t("cart.viewCart")}
         </span>
       </button>
     </div>

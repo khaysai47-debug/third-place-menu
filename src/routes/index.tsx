@@ -1,6 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
 import { MenuScreen } from "@/components/menu/MenuScreen";
+import { LanguageProvider } from "@/lib/i18nContext";
 
 // The public customer menu. The screen itself lives in
 // src/components/menu/MenuScreen.tsx so that the Phase 3D secure bot-session
@@ -48,5 +49,12 @@ function isBrowseOnly(): boolean {
 // (source "customer_menu", zero n8n executions).
 function MenuPage() {
   const [browseOnly] = useState(isBrowseOnly);
-  return <MenuScreen browseOnly={browseOnly} />;
+  // The provider is mounted per customer route, never at the router root, so
+  // the staff and owner dashboards neither consume it nor inherit a
+  // customer's language on a shared browser.
+  return (
+    <LanguageProvider>
+      <MenuScreen browseOnly={browseOnly} />
+    </LanguageProvider>
+  );
 }

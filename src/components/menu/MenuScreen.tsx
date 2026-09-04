@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Hero } from "@/components/menu/Hero";
+import { LanguageSwitch } from "@/components/menu/LanguageSwitch";
 import { ServiceRail } from "@/components/menu/ServiceRail";
 import { CategoryRail } from "@/components/menu/CategoryRail";
 import { SectionHeading } from "@/components/menu/SectionHeading";
@@ -9,6 +10,7 @@ import { CheckoutSheet } from "@/components/menu/CheckoutSheet";
 import type { OrderType } from "@/components/menu/orderType";
 import { CATEGORIES, MENU, type MenuCategoryId, type MenuItem } from "@/data/menu";
 import { getMenuAvailability, type MenuAvailabilityStatus } from "@/lib/menuAvailability";
+import { useT } from "@/lib/i18nContext";
 
 // The approved customer menu. Extracted VERBATIM from src/routes/index.tsx in
 // Phase 3D so that both "/" (normal web menu) and "/m" (secure bot-session
@@ -46,6 +48,7 @@ export function MenuScreen({
    *  out of it into this same screen's ordinary ordering tree. */
   browseOnly?: boolean;
 }) {
+  const t = useT();
   // Seeded by the prop, left ONLY by Order Now. Until that intentional tap
   // this is exactly the browse-only tree it was before: no add control, no
   // cart bar, no checkout sheet is mounted, so nothing is merely "disabled".
@@ -240,6 +243,10 @@ export function MenuScreen({
       <main className="relative z-10 mx-auto max-w-[680px] pb-32">
         <Hero />
 
+        {/* Above the order-type tray and outside the browse ternary, so it is
+            reachable in browse mode and in ordering mode alike. */}
+        <LanguageSwitch />
+
         {/* The order-type tray answers "how are you eating", which is not a
             question this mode can act on — a dead selector is worse than none.
             The label below says plainly what this page is, and the bar at the
@@ -289,9 +296,9 @@ export function MenuScreen({
           {items.length === 0 ? (
             <div className="px-5">
               <p className="tp-rise paper-grain rounded-xl border border-[var(--color-gold)]/25 px-4 py-5 text-center text-[13px] leading-relaxed text-[var(--color-ink)]/75">
-                暫時售罄 · Nothing in this section is available right now.
+                暫時售罄 · {t("menu.sectionEmpty")}
                 <span className="mt-1 block text-[12px] text-[var(--color-ink)]/60">
-                  Please try another section, or ask our staff.
+                  {t("menu.sectionEmptyHint")}
                 </span>
               </p>
             </div>

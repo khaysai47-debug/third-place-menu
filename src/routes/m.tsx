@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { MenuScreen } from "@/components/menu/MenuScreen";
 import { SessionNotice } from "@/components/menu/SessionNotice";
 import { resolveMenuSession, type MenuSessionResult } from "@/lib/menuSession";
+import { LanguageProvider } from "@/lib/i18nContext";
 import {
   captureMenuSessionToken,
   clearMenuSessionToken,
@@ -28,8 +29,22 @@ export const Route = createFileRoute("/m")({
       { name: "robots", content: "noindex, nofollow" },
     ],
   }),
-  component: SecureMenuPage,
+  component: SecureMenuRoute,
 });
+
+/**
+ * The language provider wraps the WHOLE route, not just the menu, so the
+ * loading frame, the lookup-failure frame and the terminal SessionNotice all
+ * resolve copy through the same customer language. Mounted here rather than
+ * in __root.tsx so staff and owner routes never inherit it.
+ */
+function SecureMenuRoute() {
+  return (
+    <LanguageProvider>
+      <SecureMenuPage />
+    </LanguageProvider>
+  );
+}
 
 function SecureMenuPage() {
   const router = useRouter();

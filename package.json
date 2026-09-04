@@ -39,7 +39,8 @@
     "agent:orchestrate": "node agent/cli.mjs orchestrate",
     "agent:status": "node agent/cli.mjs status",
     "agent:report": "node agent/cli.mjs report",
-    "agent:verify": "node agent/cli.mjs verify"
+    "agent:verify": "node agent/cli.mjs verify",
+    "test:i18n": "node scripts/test-i18n.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
