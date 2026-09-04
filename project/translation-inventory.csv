@@ -1,0 +1,199 @@
+id,section,source,en,my,th,my_status,th_status,owner_specific,notes
+menu.category.signature.name,MENU_CATEGORY_NAME,src/data/menu.ts,Signature,ထူးခြားဟင်းများ,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.category.signature.blurb,MENU_CATEGORY_BLURB,src/data/menu.ts,Chef's picks — the soul of the lounge.,,,MISSING_MY,MISSING_TH,yes,"Marketing voice - translate for tone, not literally"
+menu.category.skewers.name,MENU_CATEGORY_NAME,src/data/menu.ts,BBQ Skewers,ကင်ကြော,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.category.skewers.blurb,MENU_CATEGORY_BLURB,src/data/menu.ts,"Charcoal-grilled, brushed with house spice.",,,MISSING_MY,MISSING_TH,yes,"Marketing voice - translate for tone, not literally"
+menu.category.skewers-veg.name,MENU_CATEGORY_NAME,src/data/menu.ts,Veg Skewers,ဟင်းသီးဟင်းရွက်ကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.category.skewers-veg.blurb,MENU_CATEGORY_BLURB,src/data/menu.ts,Garden-side of the grill.,,,MISSING_MY,MISSING_TH,yes,"Marketing voice - translate for tone, not literally"
+menu.category.stir-fried.name,MENU_CATEGORY_NAME,src/data/menu.ts,Stir Fried,လှော်ထားသောဟင်းများ,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.category.stir-fried.blurb,MENU_CATEGORY_BLURB,src/data/menu.ts,"Wok-tossed, smoky breath of the kitchen.",,,MISSING_MY,MISSING_TH,yes,"Marketing voice - translate for tone, not literally"
+menu.category.rice-noodles.name,MENU_CATEGORY_NAME,src/data/menu.ts,Rice & Noodles,ထမင်းနှင့်ခေါက်ဆွဲ,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.category.rice-noodles.blurb,MENU_CATEGORY_BLURB,src/data/menu.ts,Warm bowls to anchor the table.,,,MISSING_MY,MISSING_TH,yes,"Marketing voice - translate for tone, not literally"
+menu.category.soup.name,MENU_CATEGORY_NAME,src/data/menu.ts,Soup,ဟင်းချို,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.category.soup.blurb,MENU_CATEGORY_BLURB,src/data/menu.ts,"Slow, restorative, shared.",,,MISSING_MY,MISSING_TH,yes,"Marketing voice - translate for tone, not literally"
+menu.item.A01.name,MENU_ITEM_NAME,src/data/menu.ts,Beef,နွားသားကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A01.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,"Tender beef skewers seasoned with Yunnan spices, grilled over open flame.",,,MISSING_MY,MISSING_TH,yes,
+menu.item.A02.name,MENU_ITEM_NAME,src/data/menu.ts,Beef Louver,နွားဗိုက်ပိုးကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A02.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Tender beef honeycomb tripe skewers with aromatic spice seasoning.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.A03.name,MENU_ITEM_NAME,src/data/menu.ts,Chicken,ကြက်သားကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A03.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Juicy chicken skewer grilled with house seasoning.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.A04.name,MENU_ITEM_NAME,src/data/menu.ts,Chicken Wing,ကြက်တောင်ကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A04.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Crispy grilled chicken wing with smoky char.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.A05.name,MENU_ITEM_NAME,src/data/menu.ts,Chicken Heart,ကြက်နှလုံးကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A05.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Grilled chicken heart skewer with light seasoning.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.A06.name,MENU_ITEM_NAME,src/data/menu.ts,Chicken Gizzard,ကြက်ဝမ်းစိမ်းကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A06.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Chewy grilled chicken gizzard with savory seasoning.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.A07.name,MENU_ITEM_NAME,src/data/menu.ts,Chicken Skin,ကြက်သားအရေကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A07.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Crispy grilled chicken skin — light and crunchy.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.A08.name,MENU_ITEM_NAME,src/data/menu.ts,Yunnan Drumstick,ယူနန်ကြက်ခြေထောက်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A08.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Signature Yunnan-style chicken drumstick marinated in secret spice blend.,,,MISSING_MY,MISSING_TH,yes,ALSO MISSING PRICE - owner must confirm
+menu.item.A09.name,MENU_ITEM_NAME,src/data/menu.ts,Mutton,သိုးသားကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A09.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Juicy mutton skewers with aromatic cumin and chili marinade.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.A10.name,MENU_ITEM_NAME,src/data/menu.ts,Pork Ear,ဝက်နားကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A10.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Thinly sliced pork ear grilled until tender with a satisfying crunch.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.A11.name,MENU_ITEM_NAME,src/data/menu.ts,Pork Tongue,ဝက်လျှာကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A11.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Tender sliced pork tongue grilled with seasoning.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.A12.name,MENU_ITEM_NAME,src/data/menu.ts,Pork Belly,ဝက်ဝမ်းဗိုက်ကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A12.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,"Three-layer pork belly skewer, fatty and flavourful.",,,MISSING_MY,MISSING_TH,yes,
+menu.item.A13.name,MENU_ITEM_NAME,src/data/menu.ts,Pork Skin,ဝက်သားအရေကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A13.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,"Grilled pork skin — crispy outside, chewy inside.",,,MISSING_MY,MISSING_TH,yes,
+menu.item.A15.name,MENU_ITEM_NAME,src/data/menu.ts,Pork,ဝက်သားကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A15.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Classic grilled pork skewer with house spice rub.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.A16.name,MENU_ITEM_NAME,src/data/menu.ts,Shrimp,ပုစွန်ကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A16.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Grilled fresh shrimp skewer with light seasoning.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.A17.name,MENU_ITEM_NAME,src/data/menu.ts,Squid,ကျွဲငှက်ကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A17.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Tender grilled squid skewer.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.A19.name,MENU_ITEM_NAME,src/data/menu.ts,Chicken Sausage,ကြက်သားဆောစေ့ကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A19.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Grilled chicken sausage skewer.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.A20.name,MENU_ITEM_NAME,src/data/menu.ts,Fish Tofu,ငါးသားတို့ဟူးကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A20.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Soft fish tofu skewer with light char.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.A21.name,MENU_ITEM_NAME,src/data/menu.ts,Pork Ball,ဝက်သားလုံးကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A21.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Grilled pork meatball skewer.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.A22.name,MENU_ITEM_NAME,src/data/menu.ts,Chicken Ball,ကြက်သားလုံးကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A22.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Grilled chicken meatball skewer.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.A14.name,MENU_ITEM_NAME,src/data/menu.ts,Bacon Mushroom Roll,ဝက်ဝမ်းဗိုက်မှိဖု့ကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A14.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Enoki mushrooms wrapped in pork belly and grilled until golden.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.A18.name,MENU_ITEM_NAME,src/data/menu.ts,Yellow Bean,ပဲဝါကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A18.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,"Roasted yellow beans, simple and snackable.",,,MISSING_MY,MISSING_TH,yes,
+menu.item.A23.name,MENU_ITEM_NAME,src/data/menu.ts,Broccoli,ဘရိုကိုလီကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A23.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Grilled broccoli florets with light seasoning.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.A24.name,MENU_ITEM_NAME,src/data/menu.ts,Potato (BBQ),အာလူးကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A24.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Grilled potato skewer with seasoning.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.A25.name,MENU_ITEM_NAME,src/data/menu.ts,Chinese Chives,မြေက်ပင်ကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A25.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Grilled Chinese chives with fragrant seasoning.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.A26.name,MENU_ITEM_NAME,src/data/menu.ts,Lotus Root,ကြာမြစ်ကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A26.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Sliced lotus root grilled until tender and slightly caramelized.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.A27.name,MENU_ITEM_NAME,src/data/menu.ts,Mushroom,မှိပင်ကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.A27.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Grilled mushroom skewer with savory seasoning.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.B01.name,MENU_ITEM_NAME,src/data/menu.ts,Mala BBQ Fish,မာလာငါးကင်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.B01.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,"Whole fish grilled with house Mala sauce — bold, numbing, and unforgettable.",,,MISSING_MY,MISSING_TH,yes,
+menu.item.B02.name,MENU_ITEM_NAME,src/data/menu.ts,Mapo Tofu,မာပိုးတို့ဟူး,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.B02.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Silken tofu in rich spicy Mapo sauce with minced pork and Sichuan pepper.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.B03.name,MENU_ITEM_NAME,src/data/menu.ts,Spicy Crispy Chicken,ချင်စပကြက်ကြော်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.B03.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Golden crispy chicken tossed in house spicy sauce.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.B04.name,MENU_ITEM_NAME,src/data/menu.ts,Stir Fried Pork Intestine,ဝက်အူကြော်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.B04.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Wok-fried pork intestine with dried chilies and aromatics.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.B05.name,MENU_ITEM_NAME,src/data/menu.ts,Mala Potato,မာလာအာလူး,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.B05.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Crispy potato cubes tossed in signature Mala spice blend.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.B06.name,MENU_ITEM_NAME,src/data/menu.ts,Stir Fried Potato,အာလူးကြော်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.B06.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Shredded potato stir-fried with garlic and light seasoning.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.B07.name,MENU_ITEM_NAME,src/data/menu.ts,White Rice,ထမင်းဖြူ,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.B07.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Steamed jasmine white rice.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.B08.name,MENU_ITEM_NAME,src/data/menu.ts,Stir Fried Kale,ကိုင်းလန်ကြော်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.B08.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Fresh kale stir-fried with garlic and oyster sauce.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.B09.name,MENU_ITEM_NAME,src/data/menu.ts,Fried Rice,ထမင်းကြော်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.B09.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Classic wok-fried rice with egg and seasoning.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.B10.name,MENU_ITEM_NAME,src/data/menu.ts,Stir Fried Morning Glory,ဟင်းနုနွယ်ကြော်,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.B10.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Morning glory stir-fried with garlic and chili.,,,MISSING_MY,MISSING_TH,yes,
+menu.item.B11.name,MENU_ITEM_NAME,src/data/menu.ts,Tomyum Soup,တွမ်ယမ်ဟင်းချို,,EXISTING_MY,MISSING_TH,yes,Myanmar exists but menu.ts flags: spelling needs native confirmation
+menu.item.B11.description,MENU_ITEM_DESCRIPTION,src/data/menu.ts,Classic Thai hot and sour soup with fresh herbs and mushroom.,,,MISSING_MY,MISSING_TH,yes,
+menu.unit.per-dish,MENU_UNIT,src/data/menu.ts,per dish,,,MISSING_MY,MISSING_TH,yes,"Customer-visible on every card (MenuItemCard.tsx:219,248,289)"
+menu.unit.per-serving,MENU_UNIT,src/data/menu.ts,per serving,,,MISSING_MY,MISSING_TH,yes,"Customer-visible on every card (MenuItemCard.tsx:219,248,289)"
+menu.unit.per-skewer,MENU_UNIT,src/data/menu.ts,per skewer,,,MISSING_MY,MISSING_TH,yes,"Customer-visible on every card (MenuItemCard.tsx:219,248,289)"
+menu.unit.x3-skewers,MENU_UNIT,src/data/menu.ts,x3 skewers,,,MISSING_MY,MISSING_TH,yes,"Customer-visible on every card (MenuItemCard.tsx:219,248,289)"
+menu.unit.x4-skewers,MENU_UNIT,src/data/menu.ts,x4 skewers,,,MISSING_MY,MISSING_TH,yes,"Customer-visible on every card (MenuItemCard.tsx:219,248,289)"
+menu.tag.meat,MENU_TAG,src/data/menu.ts,Meat,,,MISSING_MY,MISSING_TH,no,"Customer-visible chip (MenuItemCard.tsx:198-200,249)"
+menu.tag.rice,MENU_TAG,src/data/menu.ts,Rice,,,MISSING_MY,MISSING_TH,no,"Customer-visible chip (MenuItemCard.tsx:198-200,249)"
+menu.tag.seafood,MENU_TAG,src/data/menu.ts,Seafood,,,MISSING_MY,MISSING_TH,no,"Customer-visible chip (MenuItemCard.tsx:198-200,249)"
+menu.tag.signature,MENU_TAG,src/data/menu.ts,Signature,,,MISSING_MY,MISSING_TH,no,"Customer-visible chip (MenuItemCard.tsx:198-200,249)"
+menu.tag.soup,MENU_TAG,src/data/menu.ts,Soup,,,MISSING_MY,MISSING_TH,no,"Customer-visible chip (MenuItemCard.tsx:198-200,249)"
+menu.tag.spicy,MENU_TAG,src/data/menu.ts,Spicy,,,MISSING_MY,MISSING_TH,no,"Customer-visible chip (MenuItemCard.tsx:198-200,249)"
+menu.tag.vegetable,MENU_TAG,src/data/menu.ts,Vegetable,,,MISSING_MY,MISSING_TH,no,"Customer-visible chip (MenuItemCard.tsx:198-200,249)"
+cart.yourOrder,WEB_UI,src/**/CartTray.tsx,Your order,,,MISSING_MY,MISSING_TH,no,WIRED through the seam in this package
+cart.itemAdded,WEB_UI,src/**/CartTray.tsx,Item added,,,MISSING_MY,MISSING_TH,no,WIRED
+cart.readyToReview,WEB_UI,src/**/CartTray.tsx,Ready to review,,,MISSING_MY,MISSING_TH,no,WIRED - width-sensitive at 375px
+cart.removeSoldOut,WEB_UI,src/**/CartTray.tsx,Remove sold-out,,,MISSING_MY,MISSING_TH,no,WIRED
+cart.viewCart,WEB_UI,src/**/CartTray.tsx,View Cart →,,,MISSING_MY,MISSING_TH,no,WIRED - keep the arrow
+menu.sectionEmpty,WEB_UI,src/**/MenuScreen.tsx,Nothing in this section is available right now.,,,MISSING_MY,MISSING_TH,no,WIRED - brand 暫時售罄 stays beside it
+menu.sectionEmptyHint,WEB_UI,src/**/MenuScreen.tsx,"Please try another section, or ask our staff.",,,MISSING_MY,MISSING_TH,no,WIRED
+language.label,WEB_UI,src/**/LanguageSwitch.tsx,Language,,,MISSING_MY,MISSING_TH,no,WIRED - aria-label
+hero.openNow,WEB_UI,src/**/Hero.tsx,Open now,,,MISSING_MY,MISSING_TH,no,Beside brand 菜單 · Menu
+hero.tagline,WEB_UI,src/**/Hero.tsx,Chinese BBQ made for sharing.,,,MISSING_MY,MISSING_TH,no,Brand voice
+hero.nearby,WEB_UI,src/**/Hero.tsx,Near Assumption University,,,MISSING_MY,MISSING_TH,yes,OWNER: location changes per restaurant
+hero.hours,WEB_UI,src/**/Hero.tsx,11:00 — 23:00,,,MISSING_MY,MISSING_TH,yes,OWNER: opening hours - numerals may not need translation
+hero.logoAlt,WEB_UI,src/**/Hero.tsx,The Third Place — Chinese BBQ & Lounge,,,MISSING_MY,MISSING_TH,yes,OWNER: alt text / brand name
+orderType.dineIn,WEB_UI,src/**/orderType.ts,Dine In,,,MISSING_MY,MISSING_TH,no,Shown above brand 堂食
+orderType.pickup,WEB_UI,src/**/orderType.ts,Pick Up,,,MISSING_MY,MISSING_TH,no,Shown above brand 自取
+orderType.delivery,WEB_UI,src/**/orderType.ts,Delivery,,,MISSING_MY,MISSING_TH,no,Shown above brand 外送
+orderType.ariaLabel,WEB_UI,src/**/ServiceRail.tsx,Order type,,,MISSING_MY,MISSING_TH,no,aria-label
+serviceRail.popular,WEB_UI,src/**/ServiceRail.tsx,Popular,,,MISSING_MY,MISSING_TH,no,Shown above brand 人氣
+categoryRail.ariaLabel,WEB_UI,src/**/CategoryRail.tsx,Menu sections,,,MISSING_MY,MISSING_TH,no,aria-label
+categoryRail.count,WEB_UI,src/**/CategoryRail.tsx,{n} sections,,,MISSING_MY,MISSING_TH,no,Interpolated count - plural rules differ per language
+section.eyebrowChefsTable,WEB_UI,src/**/MenuScreen.tsx,Chef's Table,,,MISSING_MY,MISSING_TH,no,Signature section only
+section.eyebrowDefault,WEB_UI,src/**/MenuScreen.tsx,Section,,,MISSING_MY,MISSING_TH,no,
+menu.browseOnlyBanner,WEB_UI,src/**/MenuScreen.tsx,Browse only — read the full menu here. Ordering stays off until you ask for it.,,,MISSING_MY,MISSING_TH,no,Beside brand 瀏覽菜單
+menu.browseOnlyHint,WEB_UI,src/**/MenuScreen.tsx,Tap “Order Now” below when you are ready.,,,MISSING_MY,MISSING_TH,no,Quotes wrap the localised CTA
+menu.orderNow,WEB_UI,src/**/MenuScreen.tsx,Order Now,,,MISSING_MY,MISSING_TH,no,Leaves browse mode - suite asserts this string exists
+menu.availabilityWarning,WEB_UI,src/**/MenuScreen.tsx,Live availability couldn't refresh — a few items may have just sold out. Staff will confirm your order.,,,MISSING_MY,MISSING_TH,no,Beside brand 即時供應狀態暫時無法更新
+item.priceAskStaff,WEB_UI,src/**/MenuItemCard.tsx,Price · ask staff,,,MISSING_MY,MISSING_TH,no,Shown when price is undefined (A08 today)
+item.soldOut,WEB_UI,src/**/MenuItemCard.tsx,Sold out,,,MISSING_MY,MISSING_TH,no,
+item.bestSeller,WEB_UI,src/**/MenuItemCard.tsx,Best Seller,,,MISSING_MY,MISSING_TH,no,
+checkout.tapAgainToClear,WEB_UI,src/**/CheckoutSheet.tsx,Tap again to clear,,,MISSING_MY,MISSING_TH,no,"SENSITIVE FILE - keyboard logic, text-only edits"
+checkout.clear,WEB_UI,src/**/CheckoutSheet.tsx,Clear,,,MISSING_MY,MISSING_TH,no,SENSITIVE FILE
+checkout.soldOutBlock,WEB_UI,src/**/CheckoutSheet.tsx,Some items just sold out — please remove them from your cart first.,,,MISSING_MY,MISSING_TH,no,SENSITIVE FILE
+checkout.errTableRequired,WEB_UI,src/**/CheckoutSheet.tsx,Table number is required,,,MISSING_MY,MISSING_TH,no,Validation
+checkout.errNameRequired,WEB_UI,src/**/CheckoutSheet.tsx,Name is required,,,MISSING_MY,MISSING_TH,no,Validation
+checkout.errPhoneRequired,WEB_UI,src/**/CheckoutSheet.tsx,Phone is required,,,MISSING_MY,MISSING_TH,no,Validation
+checkout.errAddressRequired,WEB_UI,src/**/CheckoutSheet.tsx,Delivery address is required,,,MISSING_MY,MISSING_TH,no,Validation
+checkout.fieldTableNumber,WEB_UI,src/**/CheckoutSheet.tsx,Table number,,,MISSING_MY,MISSING_TH,no,Dine-in only
+checkout.fieldName,WEB_UI,src/**/CheckoutSheet.tsx,Name,,,MISSING_MY,MISSING_TH,no,
+checkout.fieldPhone,WEB_UI,src/**/CheckoutSheet.tsx,Phone number,,,MISSING_MY,MISSING_TH,no,
+checkout.fieldAddress,WEB_UI,src/**/CheckoutSheet.tsx,Delivery address,,,MISSING_MY,MISSING_TH,no,Delivery only
+checkout.fieldNotes,WEB_UI,src/**/CheckoutSheet.tsx,Order notes (optional),,,MISSING_MY,MISSING_TH,no,
+checkout.subtotal,WEB_UI,src/**/CheckoutSheet.tsx,Subtotal,,,MISSING_MY,MISSING_TH,no,Appears twice
+checkout.deliveryFee,WEB_UI,src/**/CheckoutSheet.tsx,Delivery fee,,,MISSING_MY,MISSING_TH,no,Appears twice
+checkout.placeOrder,WEB_UI,src/**/CheckoutSheet.tsx,Place order,,,MISSING_MY,MISSING_TH,no,Primary CTA
+checkout.sending,WEB_UI,src/**/CheckoutSheet.tsx,Sending order…,,,MISSING_MY,MISSING_TH,no,In-flight state
+checkout.close,WEB_UI,src/**/CheckoutSheet.tsx,Close,,,MISSING_MY,MISSING_TH,no,aria-label on the success X
+success.prepareShortly,WEB_UI,src/**/CheckoutSheet.tsx,Staff will prepare it shortly.,,,MISSING_MY,MISSING_TH,no,Dine-in
+success.confirmPickup,WEB_UI,src/**/CheckoutSheet.tsx,Staff will confirm when it is ready for pickup.,,,MISSING_MY,MISSING_TH,no,Pickup
+success.confirmDelivery,WEB_UI,src/**/CheckoutSheet.tsx,Staff will confirm delivery and payment.,,,MISSING_MY,MISSING_TH,no,Delivery
+success.keepPhoneAvailable,WEB_UI,src/**/CheckoutSheet.tsx,Please keep your phone available — staff may call to confirm.,,,MISSING_MY,MISSING_TH,no,
+success.deliveryFeeIncluded,WEB_UI,src/**/CheckoutSheet.tsx,The ฿30 delivery fee is included in your total.,,,MISSING_MY,MISSING_TH,yes,OWNER: fee amount is configurable
+success.paymentViaStaffChat,WEB_UI,src/**/CheckoutSheet.tsx,Payment confirmation may happen through staff chat.,,,MISSING_MY,MISSING_TH,no,Payment instruction
+session.completedTitle,WEB_UI,src/**/SessionNotice.tsx,Order received,,,MISSING_MY,MISSING_TH,no,Beside brand 訂單已送出
+session.completedBlurb,WEB_UI,src/**/SessionNotice.tsx,This link has already been used for your order. It can't place another one.,,,MISSING_MY,MISSING_TH,no,
+session.expiredTitle,WEB_UI,src/**/SessionNotice.tsx,This link has expired,,,MISSING_MY,MISSING_TH,no,Beside brand 連結已過期
+session.expiredBlurb,WEB_UI,src/**/SessionNotice.tsx,Secure menu links stay open for 24 hours. This one has closed.,,,MISSING_MY,MISSING_TH,no,
+session.revokedTitle,WEB_UI,src/**/SessionNotice.tsx,This link was replaced,,,MISSING_MY,MISSING_TH,no,Beside brand 連結已更新
+session.revokedBlurb,WEB_UI,src/**/SessionNotice.tsx,A newer menu link was sent to your chat. Please use the most recent one.,,,MISSING_MY,MISSING_TH,no,
+session.invalidTitle,WEB_UI,src/**/SessionNotice.tsx,This link isn't valid,,,MISSING_MY,MISSING_TH,no,Beside brand 連結無效
+session.invalidBlurb,WEB_UI,src/**/SessionNotice.tsx,"The link may be incomplete, or it was opened without its secure part.",,,MISSING_MY,MISSING_TH,no,
+session.orderLabel,WEB_UI,src/**/SessionNotice.tsx,Order,,,MISSING_MY,MISSING_TH,no,Precedes the order number
+session.startNewHeading,WEB_UI,src/**/SessionNotice.tsx,Start New Order,,,MISSING_MY,MISSING_TH,no,Beside brand 再下一單
+session.returnToChat,WEB_UI,src/**/SessionNotice.tsx,Return to your {platform} chat with us and send,,,MISSING_MY,MISSING_TH,no,Interpolates Messenger/Instagram
+session.returnToChatGeneric,WEB_UI,src/**/SessionNotice.tsx,Return to your chat with The Third Place and send,,,MISSING_MY,MISSING_TH,yes,OWNER: restaurant name
+session.sendKeywords,WEB_UI,src/**/SessionNotice.tsx,"menu, order, or start order — we'll reply with a fresh secure link.",,,MISSING_MY,MISSING_TH,no,KEYWORDS must stay recognisable to the bot - see open question
+session.startNewButton,WEB_UI,src/**/SessionNotice.tsx,Start New Order on {platform},,,MISSING_MY,MISSING_TH,no,
+session.openSameConversation,WEB_UI,src/**/SessionNotice.tsx,Open the same conversation you received this link in.,,,MISSING_MY,MISSING_TH,no,No configured handle
+session.browsePublicMenu,WEB_UI,src/**/SessionNotice.tsx,Browse Public Menu,,,MISSING_MY,MISSING_TH,no,
+session.browseDisclaimer,WEB_UI,src/**/SessionNotice.tsx,This opens our normal web menu. An order placed there is a direct web order and is not connected to your {platform} chat with us.,,,MISSING_MY,MISSING_TH,no,
+secureMenu.didntLoad,WEB_UI,src/**/m.tsx,This didn't load,,,MISSING_MY,MISSING_TH,no,
+secureMenu.didntLoadBlurb,WEB_UI,src/**/m.tsx,We couldn't check your link just now. Your link is still fine — please try again.,,,MISSING_MY,MISSING_TH,no,
+secureMenu.tryAgain,WEB_UI,src/**/m.tsx,Try again,,,MISSING_MY,MISSING_TH,no,
+secureMenu.opening,WEB_UI,src/**/m.tsx,Opening your menu,,,MISSING_MY,MISSING_TH,no,Beside brand 開啟菜單
+errorPage.title,WEB_ERROR_PAGE,src/**/error-page.ts,This page didn't load,,,MISSING_MY,MISSING_TH,no,"Static HTML string - NOT React, needs its own approach"
+errorPage.blurb,WEB_ERROR_PAGE,src/**/error-page.ts,Something went wrong on our end. You can try refreshing or head back home.,,,MISSING_MY,MISSING_TH,no,Static HTML
+errorPage.tryAgain,WEB_ERROR_PAGE,src/**/error-page.ts,Try again,,,MISSING_MY,MISSING_TH,no,Static HTML
+errorPage.goHome,WEB_ERROR_PAGE,src/**/error-page.ts,Go home,,,MISSING_MY,MISSING_TH,no,Static HTML
+meta.index.title,WEB_META,"src/routes/index.tsx, src/routes/m.tsx",The Third Place — Chinese BBQ & Lounge | E-Menu,,,MISSING_MY,MISSING_TH,yes,SEO title - OWNER brand; SEO copy is usually left in one language - decide before translating
+meta.index.description,WEB_META,"src/routes/index.tsx, src/routes/m.tsx","Chinese BBQ made for sharing. Browse the menu and order for dine-in, pickup, or delivery from The Third Place, near Assumption University.",,,MISSING_MY,MISSING_TH,yes,SEO description - OWNER; SEO copy is usually left in one language - decide before translating
+meta.index.ogTitle,WEB_META,"src/routes/index.tsx, src/routes/m.tsx",The Third Place — Chinese BBQ & Lounge,,,MISSING_MY,MISSING_TH,yes,OG title - OWNER; SEO copy is usually left in one language - decide before translating
+meta.index.ogDescription,WEB_META,"src/routes/index.tsx, src/routes/m.tsx","Chinese BBQ made for sharing. Browse the menu and order for dine-in, pickup, or delivery from The Third Place.",,,MISSING_MY,MISSING_TH,yes,OG description - OWNER; SEO copy is usually left in one language - decide before translating
+meta.m.title,WEB_META,"src/routes/index.tsx, src/routes/m.tsx",Your Order — The Third Place,,,MISSING_MY,MISSING_TH,yes,"Secure link title - noindex, low priority; SEO copy is usually left in one language - decide before translating"
+msg.welcome,MESSENGER,n8n Messenger Receiver (NOT in this repo),Welcome message introducing the four options,,,MISSING_MY,MISSING_TH,no,"Composed in n8n Messenger Receiver; DESCRIPTION not final copy - exact strings live in n8n, extract in Phase 5"
+msg.languageChoice,MESSENGER,n8n Messenger Receiver (NOT in this repo),Language selection prompt (English / မြန်မာ / ไทย),,,MISSING_MY,MISSING_TH,no,"NEW in Phase 5 - does not exist yet; DESCRIPTION not final copy - exact strings live in n8n, extract in Phase 5"
+msg.optionPlaceOrder,MESSENGER,n8n Messenger Receiver (NOT in this repo),Place an Order,,,MISSING_MY,MISSING_TH,no,"Quick-reply title; payload ORDER_START is NOT translated; DESCRIPTION not final copy - exact strings live in n8n, extract in Phase 5"
+msg.optionMenu,MESSENGER,n8n Messenger Receiver (NOT in this repo),Menu,,,MISSING_MY,MISSING_TH,no,"Quick-reply title; payload SHOW_MENU untranslated; DESCRIPTION not final copy - exact strings live in n8n, extract in Phase 5"
+msg.optionLocation,MESSENGER,n8n Messenger Receiver (NOT in this repo),Location,,,MISSING_MY,MISSING_TH,no,"Quick-reply title; payload SHOW_LOCATION untranslated; DESCRIPTION not final copy - exact strings live in n8n, extract in Phase 5"
+msg.optionOpeningTime,MESSENGER,n8n Messenger Receiver (NOT in this repo),Opening Time,,,MISSING_MY,MISSING_TH,no,"Quick-reply title; payload SHOW_OPENING_HOURS untranslated; DESCRIPTION not final copy - exact strings live in n8n, extract in Phase 5"
+msg.orderLink,MESSENGER,n8n Messenger Receiver (NOT in this repo),Your secure order link is ready.,,,MISSING_MY,MISSING_TH,no,"Will carry ?lang= built by this package's seam; DESCRIPTION not final copy - exact strings live in n8n, extract in Phase 5"
+msg.locationBody,MESSENGER,n8n Messenger Receiver (NOT in this repo),Restaurant location text + Open in Google Maps,,,MISSING_MY,MISSING_TH,yes,"OWNER: real address; DESCRIPTION not final copy - exact strings live in n8n, extract in Phase 5"
+msg.openingHoursBody,MESSENGER,n8n Messenger Receiver (NOT in this repo),Opening hours text,,,MISSING_MY,MISSING_TH,yes,"OWNER: real hours; DESCRIPTION not final copy - exact strings live in n8n, extract in Phase 5"
+msg.paymentInstructions,MESSENGER,n8n Messenger Receiver (NOT in this repo),"Pay by scanning the QR, then send the slip",,,MISSING_MY,MISSING_TH,no,"Accompanies the payment QR image; DESCRIPTION not final copy - exact strings live in n8n, extract in Phase 5"
+msg.paymentTotal,MESSENGER,n8n Messenger Receiver (NOT in this repo),Authoritative order total in THB,,,MISSING_MY,MISSING_TH,no,"Number formatting differs per locale; DESCRIPTION not final copy - exact strings live in n8n, extract in Phase 5"
+msg.paymentReceived,MESSENGER,n8n Messenger Receiver (NOT in this repo),"Payment slip received, awaiting review",,,MISSING_MY,MISSING_TH,no,"; DESCRIPTION not final copy - exact strings live in n8n, extract in Phase 5"
+msg.paymentApproved,MESSENGER,n8n Messenger Receiver (NOT in this repo),Payment approved / order confirmed,,,MISSING_MY,MISSING_TH,no,"Must send exactly once; DESCRIPTION not final copy - exact strings live in n8n, extract in Phase 5"
+msg.paymentRejected,MESSENGER,n8n Messenger Receiver (NOT in this repo),Payment rejected + reason,,,MISSING_MY,MISSING_TH,no,"Reasons come from proofReview.ts preset list; DESCRIPTION not final copy - exact strings live in n8n, extract in Phase 5"
+msg.unsupportedInput,MESSENGER,n8n Messenger Receiver (NOT in this repo),Fallback for unrecognised text,,,MISSING_MY,MISSING_TH,no,"Must not dead-end; DESCRIPTION not final copy - exact strings live in n8n, extract in Phase 5"
+msg.errorGeneric,MESSENGER,n8n Messenger Receiver (NOT in this repo),"Something went wrong, please try again",,,MISSING_MY,MISSING_TH,no,"; DESCRIPTION not final copy - exact strings live in n8n, extract in Phase 5"
