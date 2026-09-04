@@ -1,6 +1,7 @@
 import logo from "@/assets/logo.jpg";
 import { SmokeMotif } from "./Icons";
-import { IdentityZh } from "./ChineseText";
+import { FunctionalZh, IdentityZh } from "./ChineseText";
+import { useT } from "@/lib/i18nContext";
 
 /**
  * The approved hero, with the redesign's layered motion.
@@ -17,6 +18,7 @@ import { IdentityZh } from "./ChineseText";
  * seal, then the title, then the quote. Nothing blocks input while it plays.
  */
 export function Hero() {
+  const t = useT();
   return (
     <header className="relative overflow-hidden">
       {/* Masked so the smoke dissolves before it reaches the title — unmasked
@@ -29,10 +31,13 @@ export function Hero() {
       <div className="tp-parallax-fast relative px-5 pb-5 pt-6">
         {/* Status bar */}
         <div className="tp-rise-sm flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-[var(--color-gold-soft)]/80">
-          <span>菜單 · Menu</span>
+          <span>
+            <FunctionalZh>菜單 · </FunctionalZh>
+            {t("hero.menuLabel")}
+          </span>
           <span className="flex items-center gap-1.5">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400 motion-reduce:animate-none" />
-            Open now
+            {t("hero.openNow")}
           </span>
         </div>
 
@@ -44,7 +49,7 @@ export function Hero() {
                 pushed the eyebrow and the subtitle onto second lines. */}
             <img
               src={logo}
-              alt="The Third Place — Chinese BBQ &amp; Lounge"
+              alt={t("hero.logoAlt")}
               className="relative h-22 w-22 rounded-full object-cover shadow-[0_10px_30px_-10px_oklch(0_0_0/0.6)] ring-1 ring-[var(--color-gold)]/40"
             />
           </div>
@@ -84,14 +89,14 @@ export function Hero() {
           {/* A statement, not a quotation: no quote marks, no italic, and a
               lighter weight than the old slogan carried. */}
           <p className="font-display text-balance text-[22px] font-medium leading-snug tracking-[-0.01em]">
-            Chinese BBQ made for sharing.
+            {t("hero.tagline")}
           </p>
           <div className="mt-4 flex items-center justify-between text-[11px] uppercase tracking-[0.18em] text-[var(--color-ink)]/70">
             <span className="flex items-center gap-1.5">
               <span className="h-1 w-6 bg-[var(--color-vermillion)]" />
-              Near Assumption University
+              {t("hero.nearby")}
             </span>
-            <span>11:00 — 23:00</span>
+            <span>{t("hero.hours")}</span>
           </div>
         </div>
       </div>

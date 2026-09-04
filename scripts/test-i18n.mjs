@@ -78,6 +78,7 @@ const contextSource = readFileSync("src/lib/i18nContext.tsx", "utf8");
 const switchSource = readFileSync("src/components/menu/LanguageSwitch.tsx", "utf8");
 const noticeSource = readFileSync("src/components/menu/SessionNotice.tsx", "utf8");
 const secureRouteSource = readFileSync("src/routes/m.tsx", "utf8");
+const checkoutSourceFull = readFileSync("src/components/menu/CheckoutSheet.tsx", "utf8");
 
 /* ── 1. Language parsing ───────────────────────────────────────────────── */
 
@@ -469,5 +470,99 @@ for (const staffRoute of ["src/routes/staff.tsx", "src/routes/owner.tsx"]) {
     `${staffRoute} does not consume the customer language seam`,
   );
 }
+
+/* ── 11. CheckoutSheet: keyboard implementation is untouched ───────────── */
+
+// The strongest form of this check available: take the ACTUAL diff of the
+// production-proven file and require every changed line to be text, i18n
+// plumbing or a comment. A structural edit — a ref, a dependency array, a
+// scroll container, a vaul prop — cannot pass this without being noticed.
+const checkoutDiff = execSync("git diff origin/main -- src/components/menu/CheckoutSheet.tsx", {
+  encoding: "utf8",
+});
+const diffLines = checkoutDiff.split(/\r?\n/).filter((line) => !/^(\+\+\+|---)/.test(line));
+const added = diffLines
+  .filter((line) => line.startsWith("+"))
+  .map((line) => line.slice(1))
+  .filter((line) => line.trim() !== "");
+const removed = diffLines
+  .filter((line) => line.startsWith("-"))
+  .map((line) => line.slice(1))
+  .filter((line) => line.trim() !== "");
+
+// EVERY ADDED LINE must be a translation call, the plumbing that makes one
+// possible, the canonical/display split, or a comment. This is what stops a
+// structural edit — a new ref, a changed dependency array, another scroll
+// container — riding along inside a "text only" change.
+const TEXT_OR_I18N = /t\(["`]|useT|FunctionalZh|displayName|^import |^\s*(\/\/|\/\*|\*)/;
+// Wrapping a one-line text element onto several lines leaves punctuation-only
+// lines behind. They carry no identifier, no prop and no handler, so they are
+// allowed as their own category rather than by loosening the rule above — a
+// new ref, hook, prop or callback still cannot pass either filter.
+const JSX_WRAPPER = /^\s*(\{zh\b|\)\}|<\/?[A-Za-z][\w.]*\s*\/?>?$|[a-zA-Z][\w-]*=|>$|\/>$)/;
+assert.deepEqual(
+  added.filter((line) => !TEXT_OR_I18N.test(line) && !JSX_WRAPPER.test(line)),
+  [],
+  "every line ADDED to CheckoutSheet is visible text, i18n plumbing, a comment or JSX wrapping",
+);
+
+// Reflow is allowed above, so the guard against it hiding something is here:
+// an attribute NAME that appears in the added lines and in no removed line is
+// a new prop — a ref, a key, a handler — and must not slip in as "reflow".
+const attributeNames = (lines) =>
+  new Set(
+    lines.flatMap((line) =>
+      [...line.matchAll(/(?:^|\s)([a-zA-Z][\w-]*)=/g)].map((match) => match[1]),
+    ),
+  );
+const removedAttributes = attributeNames(removed);
+assert.deepEqual(
+  [...attributeNames(added)].filter((name) => !removedAttributes.has(name)),
+  [],
+  "no NEW JSX attribute appears in CheckoutSheet — reflow only, never a new prop",
+);
+
+// NO REMOVED LINE may touch the keyboard implementation. Removed lines are
+// otherwise expected to be plain English copy, so they are checked against the
+// keyboard-critical vocabulary rather than against the i18n one.
+const KEYBOARD_CRITICAL =
+  /keyboardInset|safariScrollGuard|browserGuardHost|repositionInputs|fieldsRef|visualViewport|scrollIntoView|paddingBottom|sessionKey|useRef|useEffect\(/;
+assert.deepEqual(
+  removed.filter((line) => KEYBOARD_CRITICAL.test(line)),
+  [],
+  "nothing keyboard-related was removed from CheckoutSheet",
+);
+
+// And the load-bearing keyboard lines are still exactly what production runs.
+for (const invariant of [
+  "repositionInputs={false}",
+  "const releaseGuard = attachSafariScrollGuard(browserGuardHost());",
+  "const releaseInset = attachKeyboardInset(container, setKeyboardInset);",
+  "style={keyboardInset > 0 ? { paddingBottom: keyboardInset + 24 } : undefined}",
+  "const fieldsRef = useRef<HTMLDivElement>(null);",
+  "}, [confirmed]);",
+  "dismissible={!submitting}",
+]) {
+  assert.ok(checkoutSourceFull.includes(invariant), `keyboard invariant intact: ${invariant}`);
+}
+for (const id of [
+  "checkout-table",
+  "checkout-name",
+  "checkout-phone",
+  "checkout-address",
+  "checkout-notes",
+]) {
+  assert.ok(checkoutSourceFull.includes(`id="${id}"`), `input id ${id} is unchanged`);
+}
+// Nothing may remount the sheet, the form or a field when the language
+// changes — that would drop typed input mid-order.
+assert.ok(
+  !/key={language}|key={lang}/.test(checkoutSourceFull),
+  "nothing in the checkout sheet is keyed by language",
+);
+assert.ok(
+  checkoutSourceFull.includes("key={sessionKey}"),
+  "the form still remounts per drawer session, and only per drawer session",
+);
 
 console.log("test-i18n: all assertions passed");

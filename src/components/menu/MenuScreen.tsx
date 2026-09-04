@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Hero } from "@/components/menu/Hero";
 import { LanguageSwitch } from "@/components/menu/LanguageSwitch";
-import { FunctionalZh } from "@/components/menu/ChineseText";
+import { FunctionalZh, IdentityZh } from "@/components/menu/ChineseText";
 import { ServiceRail } from "@/components/menu/ServiceRail";
 import { CategoryRail } from "@/components/menu/CategoryRail";
 import { SectionHeading } from "@/components/menu/SectionHeading";
@@ -10,8 +10,9 @@ import { CartTray } from "@/components/menu/CartTray";
 import { CheckoutSheet } from "@/components/menu/CheckoutSheet";
 import type { OrderType } from "@/components/menu/orderType";
 import { CATEGORIES, MENU, type MenuCategoryId, type MenuItem } from "@/data/menu";
-import { getMenuAvailability, type MenuAvailabilityStatus } from "@/lib/menuAvailability";
-import { useT } from "@/lib/i18nContext";
+import { getMenuAvailability, type MenuAvailabilityItem } from "@/lib/menuAvailability";
+import { useLanguage } from "@/lib/i18nContext";
+import { localizeCategory, localizeMenuItem, type LocalizedMenuItem } from "@/lib/menuContent";
 
 // The approved customer menu. Extracted VERBATIM from src/routes/index.tsx in
 // Phase 3D so that both "/" (normal web menu) and "/m" (secure bot-session
@@ -49,7 +50,7 @@ export function MenuScreen({
    *  out of it into this same screen's ordinary ordering tree. */
   browseOnly?: boolean;
 }) {
-  const t = useT();
+  const { language, t } = useLanguage();
   // Seeded by the prop, left ONLY by Order Now. Until that intentional tap
   // this is exactly the browse-only tree it was before: no add control, no
   // cart bar, no checkout sheet is mounted, so nothing is merely "disabled".
@@ -94,10 +95,10 @@ export function MenuScreen({
   }, []);
 
   // Live "Availability Status" by menu item id; null until fetched.
-  const [availability, setAvailability] = useState<ReadonlyMap<
-    string,
-    MenuAvailabilityStatus
-  > | null>(null);
+  // The live rows by item code — availability AND content. null until the
+  // first read returns, and it STAYS null if that read fails, which is what
+  // makes the compiled menu the fallback rather than an empty screen.
+  const [live, setLive] = useState<ReadonlyMap<string, MenuAvailabilityItem> | null>(null);
   const [availabilityWarning, setAvailabilityWarning] = useState(false);
   const [cart, setCart] = useState<Record<string, number>>(() => {
     try {
@@ -129,8 +130,8 @@ export function MenuScreen({
     if (refreshingAvailabilityRef.current) return;
     refreshingAvailabilityRef.current = true;
     try {
-      const live = await getMenuAvailability();
-      setAvailability(new Map(live.map((i) => [i.menuItemId, i.availability])));
+      const rows = await getMenuAvailability();
+      setLive(new Map(rows.map((row) => [row.menuItemId, row])));
     } catch (error) {
       console.error("Live availability unavailable; using local menu data", error);
       // Only the initial load surfaces the soft warning; background refreshes
@@ -165,17 +166,24 @@ export function MenuScreen({
 
   // Local menu with live availability overlaid. Hidden items are dropped;
   // items the API doesn't know about keep their local availability.
-  const menu = useMemo(() => {
-    if (!availability) return MENU;
-    return MENU.flatMap((item) => {
-      const status = availability.get(item.id);
-      if (!status) return [item];
-      if (status === "Hidden") return [];
-      return [{ ...item, available: status === "Available" }];
-    });
-  }, [availability]);
+  // Compiled menu + live rows, resolved for the active language. The
+  // database wins field by field where it has content; anything it lacks (or
+  // an outage, which leaves `live` null) falls back to the bundle, so the menu
+  // renders and stays orderable either way. Hidden items are dropped.
+  const menu = useMemo<LocalizedMenuItem[]>(
+    () =>
+      MENU.flatMap((item) => {
+        const row = live?.get(item.id);
+        if (row?.availability === "Hidden") return [];
+        const availabilityInput = row
+          ? { available: row.availability === "Available", price: row.price }
+          : undefined;
+        return [localizeMenuItem(item, row?.content, language, availabilityInput)];
+      }),
+    [live, language],
+  );
 
-  const addToCart = (item: MenuItem) => {
+  const addToCart = (item: LocalizedMenuItem) => {
     if (!item.available || item.price === undefined) return;
     setCart((c) => ({ ...c, [item.id]: (c[item.id] ?? 0) + 1 }));
   };
@@ -202,16 +210,31 @@ export function MenuScreen({
 
   // Cart rows resolve against the full local MENU so an item that went
   // Sold Out (or Hidden) after being added is flagged instead of vanishing.
+  // Cart rows resolve against the FULL localised menu (not the filtered
+  // section) so an item that went Sold Out after being added is flagged
+  // instead of vanishing.
+  //
+  // `name` is the CANONICAL English name and is the only one that reaches an
+  // order payload; `displayName` is what the customer reads. Keeping them as
+  // two fields is what stops a Burmese item name being submitted to the
+  // automation as a product it has never heard of.
   const cartItems = useMemo(
     () =>
       Object.entries(cart).flatMap(([id, qty]) => {
-        const item = MENU.find((i) => i.id === id);
+        const item = menu.find((i) => i.id === id);
         if (!item || item.price === undefined) return [];
-        const status = availability?.get(id);
-        const orderable = status ? status === "Available" : item.available;
-        return [{ id, name: item.nameEn, qty, subtotal: item.price * qty, soldOut: !orderable }];
+        return [
+          {
+            id,
+            name: item.canonicalName,
+            displayName: item.displayName,
+            qty,
+            subtotal: item.price * qty,
+            soldOut: !item.available,
+          },
+        ];
       }),
-    [cart, availability],
+    [cart, menu],
   );
 
   const cartHasSoldOut = cartItems.some((i) => i.soldOut);
@@ -220,6 +243,7 @@ export function MenuScreen({
   const total = useMemo(() => cartItems.reduce((s, i) => s + i.subtotal, 0), [cartItems]);
 
   const activeCategory = CATEGORIES.find((c) => c.id === active)!;
+  const activeCategoryCopy = localizeCategory(activeCategory, language);
   const items = menu.filter((m) => m.category === active).sort((a, b) => a.order - b.order);
 
   // Skewers read as a price list, everything else as description-led cards.
@@ -254,10 +278,10 @@ export function MenuScreen({
             bottom is the one way out of it. */}
         {browsing ? (
           <p className="tp-rise-sm mx-5 mt-4 rounded-xl border border-[var(--color-gold)]/25 bg-[var(--color-charcoal-soft)]/60 px-4 py-2.5 text-center text-[12px] leading-relaxed text-[var(--color-gold-soft)]/80">
-            瀏覽菜單 · Browse only — read the full menu here. Ordering stays off until you ask for
-            it.
+            <FunctionalZh>瀏覽菜單 · </FunctionalZh>
+            {t("menu.browseOnlyBanner")}
             <span className="mt-1 block text-[11px] text-[var(--color-gold-soft)]/60">
-              Tap “Order Now” below when you are ready.
+              {t("menu.browseOnlyHint")}
             </span>
           </p>
         ) : (
@@ -272,8 +296,8 @@ export function MenuScreen({
 
         {availabilityWarning && (
           <p className="tp-rise-sm mx-5 mt-4 rounded-xl border border-[var(--color-gold)]/25 bg-[var(--color-charcoal-soft)]/60 px-4 py-2.5 text-center text-[12px] leading-relaxed text-[var(--color-gold-soft)]/80">
-            即時供應狀態暫時無法更新 · Live availability couldn't refresh — a few items may have
-            just sold out. Staff will confirm your order.
+            <FunctionalZh>即時供應狀態暫時無法更新 · </FunctionalZh>
+            {t("menu.availabilityWarning")}
           </p>
         )}
 
@@ -286,10 +310,12 @@ export function MenuScreen({
             as content silently swapping underneath the heading. */}
         <div key={active}>
           <SectionHeading
-            eyebrow={active === "signature" ? "Chef's Table" : "Section"}
-            title={activeCategory.nameEn}
+            eyebrow={
+              active === "signature" ? t("section.eyebrowChefsTable") : t("section.eyebrowDefault")
+            }
+            title={activeCategoryCopy.name}
             zh={CATEGORY_ZH[active]}
-            blurb={activeCategory.blurb}
+            blurb={activeCategoryCopy.blurb}
           />
 
           {/* Without this a fully sold-out or hidden section is just a heading
@@ -316,6 +342,7 @@ export function MenuScreen({
                 >
                   <MenuItemCard
                     item={item}
+                    categoryLabel={activeCategoryCopy.name}
                     variant={variantFor(idx)}
                     qty={cart[item.id] ?? 0}
                     onAdd={addToCart}
@@ -333,16 +360,16 @@ export function MenuScreen({
         <footer className="mt-14 px-5 text-center">
           <div className="flex items-center justify-center gap-3">
             <span className="h-px w-12 bg-[var(--color-gold)]/40" />
-            <span className="font-display text-[15px] tracking-[0.4em] text-[var(--color-gold-soft)]">
+            <IdentityZh className="font-display text-[15px] tracking-[0.4em] text-[var(--color-gold-soft)]">
               第三空間
-            </span>
+            </IdentityZh>
             <span className="h-px w-12 bg-[var(--color-gold)]/40" />
           </div>
           <p className="mt-3 text-[11px] uppercase tracking-[0.22em] text-[var(--color-muted-foreground)]">
             The Third Place · Chinese BBQ &amp; Lounge
           </p>
           <p className="mt-1 text-[11px] text-[var(--color-muted-foreground)]">
-            Near Assumption University · Powered by Atlas
+            {t("hero.nearby")} · Powered by Atlas
           </p>
         </footer>
       </main>
@@ -362,7 +389,8 @@ export function MenuScreen({
             onClick={() => setBrowsing(false)}
             className="flex w-full items-center justify-center gap-3 rounded-2xl border border-[var(--color-vermillion-deep)] bg-[var(--color-vermillion)] px-4 py-3 text-[15px] text-[var(--color-cream)] shadow-[0_20px_40px_-18px_oklch(0.45_0.18_27/0.7)] transition-transform duration-150 ease-[var(--ease-fluid)] active:scale-[0.98] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-gold)]"
           >
-            開始點餐 · Order Now
+            <FunctionalZh>開始點餐 · </FunctionalZh>
+            {t("menu.orderNow")}
           </button>
         </div>
       ) : (

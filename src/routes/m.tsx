@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { MenuScreen } from "@/components/menu/MenuScreen";
 import { SessionNotice } from "@/components/menu/SessionNotice";
 import { resolveMenuSession, type MenuSessionResult } from "@/lib/menuSession";
-import { LanguageProvider } from "@/lib/i18nContext";
+import { LanguageProvider, useT } from "@/lib/i18nContext";
+import { FunctionalZh, IdentityZh } from "@/components/menu/ChineseText";
 import {
   captureMenuSessionToken,
   clearMenuSessionToken,
@@ -47,6 +48,7 @@ function SecureMenuRoute() {
 }
 
 function SecureMenuPage() {
+  const t = useT();
   const router = useRouter();
   // Captured SYNCHRONOUSLY during the first render, before any effect can
   // observe or clear the fragment.
@@ -99,16 +101,16 @@ function SecureMenuPage() {
     return (
       <SecureMenuFrame>
         <h1 className="tp-display text-[26px] text-[var(--color-gold-soft)]">
-          This didn&apos;t load
+          {t("secureMenu.didntLoad")}
         </h1>
         <p className="mt-2 max-w-[34ch] text-[13.5px] leading-relaxed text-[var(--color-cream)]/60">
-          We couldn&apos;t check your link just now. Your link is still fine — please try again.
+          {t("secureMenu.didntLoadBlurb")}
         </p>
         <button
           onClick={() => setAttempt((a) => a + 1)}
           className="relative mt-6 rounded-2xl border border-[var(--color-gold)]/30 bg-[var(--color-ink)]/60 px-6 py-3 text-[13px] uppercase tracking-[0.18em] text-[var(--color-cream)]/80 transition-[transform,background-color] duration-150 ease-[var(--ease-fluid)] active:scale-[0.985] hover:bg-[var(--color-cream)]/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-gold)]"
         >
-          Try again
+          {t("secureMenu.tryAgain")}
         </button>
       </SecureMenuFrame>
     );
@@ -119,16 +121,17 @@ function SecureMenuPage() {
     return (
       <SecureMenuFrame>
         <div className="tp-seal relative h-[74px] w-[74px] overflow-hidden rounded-[14px] border border-[var(--color-vermillion-deep)] bg-[var(--color-vermillion)]">
-          <span className="font-display absolute inset-0 flex items-center justify-center text-[38px] leading-none text-[var(--color-cream)]">
+          <IdentityZh className="font-display absolute inset-0 flex items-center justify-center text-[38px] leading-none text-[var(--color-cream)]">
             訂
-          </span>
+          </IdentityZh>
           <span
             aria-hidden
             className="tp-sheen-loop absolute inset-y-0 -left-1/2 w-1/2 bg-gradient-to-r from-transparent via-[var(--color-cream)]/35 to-transparent"
           />
         </div>
         <p className="mt-6 text-[12px] uppercase tracking-[0.2em] text-[var(--color-cream)]/45">
-          開啟菜單 · Opening your menu
+          <FunctionalZh>開啟菜單 · </FunctionalZh>
+          {t("secureMenu.opening")}
         </p>
       </SecureMenuFrame>
     );

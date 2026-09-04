@@ -761,7 +761,13 @@ assert.ok(
   menuSource.includes("browseOnly={browsing}"),
   "the cards read the live browse state, so add controls appear with the cart",
 );
-assert.ok(browseArm.includes("Order Now"), "browse mode exposes a customer-facing Order Now");
+// The label is now resolved through the i18n seam, so the assertion tracks
+// the copy KEY rather than the English text. Same guarantee: browse mode
+// still exposes a customer-facing way out of it.
+assert.ok(
+  browseArm.includes('t("menu.orderNow")'),
+  "browse mode exposes a customer-facing Order Now",
+);
 assert.ok(
   browseArm.includes("onClick={() => setBrowsing(false)}"),
   "Order Now enters the existing ordering path by leaving browse mode in place",

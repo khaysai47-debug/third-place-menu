@@ -1,5 +1,7 @@
 import type { MenuSessionPlatform, MenuSessionState } from "@/lib/menuSession";
 import { useT } from "@/lib/i18nContext";
+import { FunctionalZh, IdentityZh } from "./ChineseText";
+import type { CopyKey } from "@/lib/i18n";
 
 // Terminal states of a secure bot-session link (Phase 3D).
 //
@@ -29,27 +31,18 @@ const PLATFORM_LABEL: Record<MenuSessionPlatform, string> = {
   messenger: "Messenger",
 };
 
-const COPY: Record<TerminalState, { zh: string; en: string; blurb: string }> = {
+// The Chinese here is FUNCTIONAL — 訂單已送出 says the same thing as "Order
+// received" — so it renders beside the English and disappears in Myanmar and
+// Thai. The English and its blurb are copy keys.
+const COPY: Record<TerminalState, { zh: string; title: CopyKey; blurb: CopyKey }> = {
   completed: {
     zh: "訂單已送出",
-    en: "Order received",
-    blurb: "This link has already been used for your order. It can't place another one.",
+    title: "session.completedTitle",
+    blurb: "session.completedBlurb",
   },
-  expired: {
-    zh: "連結已過期",
-    en: "This link has expired",
-    blurb: "Secure menu links stay open for 24 hours. This one has closed.",
-  },
-  revoked: {
-    zh: "連結已更新",
-    en: "This link was replaced",
-    blurb: "A newer menu link was sent to your chat. Please use the most recent one.",
-  },
-  invalid: {
-    zh: "連結無效",
-    en: "This link isn't valid",
-    blurb: "The link may be incomplete, or it was opened without its secure part.",
-  },
+  expired: { zh: "連結已過期", title: "session.expiredTitle", blurb: "session.expiredBlurb" },
+  revoked: { zh: "連結已更新", title: "session.revokedTitle", blurb: "session.revokedBlurb" },
+  invalid: { zh: "連結無效", title: "session.invalidTitle", blurb: "session.invalidBlurb" },
 };
 
 export function SessionNotice({ state, returnToChat, orderNumber }: Props) {
@@ -68,9 +61,9 @@ export function SessionNotice({ state, returnToChat, orderNumber }: Props) {
       <main className="relative z-10 mx-auto flex min-h-dvh max-w-[680px] flex-col items-center justify-center px-5 py-16 text-center">
         {/* The same chop mark the checkout confirmation stamps. */}
         <div className="tp-seal relative h-[74px] w-[74px] overflow-hidden rounded-[14px] border border-[var(--color-vermillion-deep)] bg-[var(--color-vermillion)] shadow-[0_20px_44px_-18px_oklch(0.45_0.18_27/0.9)]">
-          <span className="font-display absolute inset-0 flex items-center justify-center text-[38px] leading-none text-[var(--color-cream)]">
+          <IdentityZh className="font-display absolute inset-0 flex items-center justify-center text-[38px] leading-none text-[var(--color-cream)]">
             訂
-          </span>
+          </IdentityZh>
           <span
             aria-hidden
             className="tp-sheen absolute inset-y-0 -left-1/2 w-1/2 bg-gradient-to-r from-transparent via-[var(--color-cream)]/45 to-transparent"
@@ -81,21 +74,22 @@ export function SessionNotice({ state, returnToChat, orderNumber }: Props) {
           className="tp-display tp-rise mt-6 text-[30px] text-[var(--color-gold-soft)]"
           style={{ ["--i" as string]: 6 }}
         >
-          {copy.en}
+          {t(copy.title)}
         </h1>
-        <p
-          className="tp-rise mt-1 text-[13px] tracking-[0.22em] text-[var(--color-cream)]/45"
+        <FunctionalZh
+          className="tp-rise mt-1 block text-[13px] tracking-[0.22em] text-[var(--color-cream)]/45"
           style={{ ["--i" as string]: 7 }}
         >
           {copy.zh}
-        </p>
+        </FunctionalZh>
 
         {orderNumber && (
           <p
             className="tp-rise mt-4 rounded-full border border-[var(--color-gold)]/25 bg-[var(--color-ink)]/60 px-4 py-1.5 text-[12px] text-[var(--color-cream)]/55"
             style={{ ["--i" as string]: 8 }}
           >
-            Order <span className="tp-num text-[var(--color-cream)]/85">{orderNumber}</span>
+            {t("session.orderLabel")}{" "}
+            <span className="tp-num text-[var(--color-cream)]/85">{orderNumber}</span>
           </p>
         )}
 
@@ -103,7 +97,7 @@ export function SessionNotice({ state, returnToChat, orderNumber }: Props) {
           className="tp-rise mt-4 max-w-[38ch] text-[13.5px] leading-relaxed text-[var(--color-cream)]/60"
           style={{ ["--i" as string]: 9 }}
         >
-          {copy.blurb}
+          {t(copy.blurb)}
         </p>
 
         {/* ── Start New Order ─────────────────────────────────────────────── */}
@@ -112,7 +106,8 @@ export function SessionNotice({ state, returnToChat, orderNumber }: Props) {
           style={{ ["--i" as string]: 10 }}
         >
           <h2 className="text-[10px] uppercase tracking-[0.24em] text-[var(--color-cream)]/45">
-            再下一單 · Start New Order
+            <FunctionalZh>再下一單 · </FunctionalZh>
+            {t("session.startNewHeading")}
           </h2>
 
           {/* This used to tell customers to type "menu", "order" or "start
@@ -134,13 +129,15 @@ export function SessionNotice({ state, returnToChat, orderNumber }: Props) {
               rel="noreferrer"
               className="relative mt-4 flex w-full items-center justify-center rounded-2xl border border-[var(--color-vermillion-deep)] bg-[var(--color-vermillion)] py-3.5 text-[15px] font-semibold text-[var(--color-cream)] shadow-[0_22px_44px_-20px_oklch(0.45_0.18_27/0.8)] transition-transform duration-150 ease-[var(--ease-fluid)] active:scale-[0.985] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-gold)]"
             >
-              Start New Order{chatName ? ` on ${chatName}` : ""}
+              {chatName
+                ? t("session.startNewButton", { platform: chatName })
+                : t("session.startNewButtonGeneric")}
             </a>
           ) : (
             // No configured handle — instructions only. Never a button that
             // goes nowhere, and never an invented destination.
             <p className="mt-3 text-[12px] leading-relaxed text-[var(--color-cream)]/45">
-              Open the same conversation you received this link in.
+              {t("session.openSameConversation")}
             </p>
           )}
         </div>
@@ -151,13 +148,12 @@ export function SessionNotice({ state, returnToChat, orderNumber }: Props) {
             href="/"
             className="relative text-[12px] uppercase tracking-[0.2em] text-[var(--color-cream)]/65 underline-offset-4 transition-colors duration-150 ease-[var(--ease-fluid)] hover:text-[var(--color-cream)]/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-gold)]"
           >
-            Browse Public Menu
+            {t("session.browsePublicMenu")}
           </a>
           <p className="mt-2 text-[11.5px] leading-relaxed text-[var(--color-cream)]/40">
-            This opens our normal web menu. An order placed there is a direct web order and is
             {chatName
-              ? ` not connected to your ${chatName} chat with us.`
-              : " not connected to your chat with us."}
+              ? t("session.browseDisclaimer", { platform: chatName })
+              : t("session.browseDisclaimerGeneric")}
           </p>
         </div>
       </main>

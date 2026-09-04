@@ -155,17 +155,142 @@ export interface CopyParams {
  * these keys — a typo at a call site is a compile error, not a blank label.
  */
 export const COPY = {
+  /* ── Language picker ─────────────────────────────────────────────────── */
+  "language.label": { en: "Language" },
+
+  /* ── Hero ────────────────────────────────────────────────────────────── */
+  // Paired with the functional 菜單 in English mode.
+  "hero.menuLabel": { en: "Menu" },
+  "hero.openNow": { en: "Open now" },
+  "hero.logoAlt": { en: "The Third Place — Chinese BBQ & Lounge" },
+  "hero.tagline": { en: "Chinese BBQ made for sharing." },
+  "hero.nearby": { en: "Near Assumption University" },
+  // Digits, but the dash and any AM/PM convention are not universal, so it
+  // stays translatable rather than being assumed locale-free.
+  "hero.hours": { en: "11:00 — 23:00" },
+
+  /* ── Order type / service rail ───────────────────────────────────────── */
+  "orderType.ariaLabel": { en: "Order type" },
+  "orderType.dineIn": { en: "Dine In" },
+  "orderType.pickup": { en: "Pick Up" },
+  "orderType.delivery": { en: "Delivery" },
+  "serviceRail.popular": { en: "Popular" },
+
+  /* ── Category rail ───────────────────────────────────────────────────── */
+  "categoryRail.ariaLabel": { en: "Menu sections" },
+  "categoryRail.heading": { en: "Menu" },
+  // Plural entry: both forms are whole phrases.
+  "categoryRail.sectionCount": {
+    en: { one: "{count} section", other: "{count} sections" },
+  },
+
+  /* ── Menu screen ─────────────────────────────────────────────────────── */
+  "menu.browseOnlyBanner": {
+    en: "Browse only — read the full menu here. Ordering stays off until you ask for it.",
+  },
+  "menu.browseOnlyHint": { en: "Tap “Order Now” below when you are ready." },
+  "menu.orderNow": { en: "Order Now" },
+  "menu.availabilityWarning": {
+    en: "Live availability couldn't refresh — a few items may have just sold out. Staff will confirm your order.",
+  },
+  "menu.sectionEmpty": { en: "Nothing in this section is available right now." },
+  "menu.sectionEmptyHint": { en: "Please try another section, or ask our staff." },
+  "section.eyebrowChefsTable": { en: "Chef's Table" },
+  "section.eyebrowDefault": { en: "Section" },
+
+  /* ── Item card ───────────────────────────────────────────────────────── */
+  "item.priceAskStaff": { en: "Price · ask staff" },
+  "item.soldOut": { en: "Sold out" },
+  "item.bestSeller": { en: "Best Seller" },
+  // Accessible names are whole phrases with the item name inserted — never
+  // an English verb concatenated onto a translated noun.
+  "item.addAria": { en: "Add {item} to your order" },
+  "item.addAnotherAria": { en: "Add another {item}" },
+  "item.removeOneAria": { en: "Remove one {item}" },
+
+  /* ── Cart bar ────────────────────────────────────────────────────────── */
   "cart.yourOrder": { en: "Your order" },
   "cart.itemAdded": { en: "Item added" },
   "cart.readyToReview": { en: "Ready to review" },
   "cart.removeSoldOut": { en: "Remove sold-out" },
   "cart.viewCart": { en: "View Cart →" },
-  "menu.sectionEmpty": { en: "Nothing in this section is available right now." },
-  "menu.sectionEmptyHint": { en: "Please try another section, or ask our staff." },
-  "language.label": { en: "Language" },
-  // The parameterised/plural example. Both forms are whole phrases.
-  "categoryRail.sectionCount": {
-    en: { one: "{count} section", other: "{count} sections" },
+
+  /* ── Checkout ────────────────────────────────────────────────────────── */
+  "checkout.reviewOrder": { en: "Review Order" },
+  "checkout.clear": { en: "Clear" },
+  "checkout.tapAgainToClear": { en: "Tap again to clear" },
+  "checkout.soldOutBlock": {
+    en: "Some items just sold out — please remove them from your cart first.",
+  },
+  "checkout.errTableRequired": { en: "Table number is required" },
+  "checkout.errNameRequired": { en: "Name is required" },
+  "checkout.errPhoneRequired": { en: "Phone is required" },
+  "checkout.errAddressRequired": { en: "Delivery address is required" },
+  "checkout.fieldTableNumber": { en: "Table number" },
+  "checkout.fieldName": { en: "Name" },
+  "checkout.fieldPhone": { en: "Phone number" },
+  "checkout.fieldAddress": { en: "Delivery address" },
+  "checkout.fieldNotes": { en: "Order notes (optional)" },
+  "checkout.subtotal": { en: "Subtotal" },
+  "checkout.deliveryFee": { en: "Delivery fee" },
+  "checkout.placeOrder": { en: "Place order" },
+  "checkout.sending": { en: "Sending order…" },
+  "checkout.close": { en: "Close" },
+  "checkout.total": { en: "Total" },
+  "checkout.remove": { en: "Remove" },
+  "checkout.emptyCart": { en: "Your order is empty." },
+  "checkout.emptyCartHint": { en: "Close this and add a dish to begin." },
+  "checkout.howToServe": { en: "How to serve it" },
+  "checkout.itemCount": { en: { one: "{count} item", other: "{count} items" } },
+  // Placeholders are examples, not labels: a Thai address example is not a
+  // useful hint to a Burmese reader, so they are translatable like any copy.
+  "checkout.phTable": { en: "e.g. 12" },
+  "checkout.phName": { en: "e.g. Somchai" },
+  "checkout.phPhone": { en: "e.g. 081 234 5678" },
+  "checkout.phAddress": { en: "e.g. 88 Soi Bangna 12, Bang Na" },
+  "checkout.phNotes": { en: "e.g. less spicy, no peanuts" },
+
+  /* ── Order confirmation ──────────────────────────────────────────────── */
+  "success.prepareShortly": { en: "Staff will prepare it shortly." },
+  "success.confirmPickup": { en: "Staff will confirm when it is ready for pickup." },
+  "success.confirmDelivery": { en: "Staff will confirm delivery and payment." },
+  "success.keepPhoneAvailable": {
+    en: "Please keep your phone available — staff may call to confirm.",
+  },
+  // The fee is a parameter: its amount is configuration, not copy.
+  "success.deliveryFeeIncluded": {
+    en: "The ฿{fee} delivery fee is included in your total.",
+  },
+  "success.paymentViaStaffChat": { en: "Payment confirmation may happen through staff chat." },
+
+  /* ── Secure-link terminal states ─────────────────────────────────────── */
+  "session.completedTitle": { en: "Order received" },
+  "session.completedBlurb": {
+    en: "This link has already been used for your order. It can't place another one.",
+  },
+  "session.expiredTitle": { en: "This link has expired" },
+  "session.expiredBlurb": { en: "Secure menu links stay open for 24 hours. This one has closed." },
+  "session.revokedTitle": { en: "This link was replaced" },
+  "session.revokedBlurb": {
+    en: "A newer menu link was sent to your chat. Please use the most recent one.",
+  },
+  "session.invalidTitle": { en: "This link isn't valid" },
+  "session.invalidBlurb": {
+    en: "The link may be incomplete, or it was opened without its secure part.",
+  },
+  "session.orderLabel": { en: "Order" },
+  "session.startNewHeading": { en: "Start New Order" },
+  "session.startNewButton": { en: "Start New Order on {platform}" },
+  "session.startNewButtonGeneric": { en: "Start New Order" },
+  "session.openSameConversation": {
+    en: "Open the same conversation you received this link in.",
+  },
+  "session.browsePublicMenu": { en: "Browse Public Menu" },
+  "session.browseDisclaimer": {
+    en: "This opens our normal web menu. An order placed there is a direct web order and is not connected to your {platform} chat with us.",
+  },
+  "session.browseDisclaimerGeneric": {
+    en: "This opens our normal web menu. An order placed there is a direct web order and is not connected to your chat with us.",
   },
   // Recovery copy. It must not promise that typing a keyword does anything:
   // the Messenger flow is driven by quick-reply payloads (ORDER_START,
@@ -177,6 +302,22 @@ export const COPY = {
   "session.reopenOptionsGeneric": {
     en: "Go back to your chat with us and send any message — we'll show your options again, including Place an Order.",
   },
+
+  /* ── Secure-link loading / failure ───────────────────────────────────── */
+  "secureMenu.didntLoad": { en: "This didn't load" },
+  "secureMenu.didntLoadBlurb": {
+    en: "We couldn't check your link just now. Your link is still fine — please try again.",
+  },
+  "secureMenu.tryAgain": { en: "Try again" },
+  "secureMenu.opening": { en: "Opening your menu" },
+
+  /* ── Static catastrophic error page (no React, no client JS) ─────────── */
+  "errorPage.title": { en: "This page didn't load" },
+  "errorPage.blurb": {
+    en: "Something went wrong on our end. You can try refreshing or head back home.",
+  },
+  "errorPage.tryAgain": { en: "Try again" },
+  "errorPage.goHome": { en: "Go home" },
 } satisfies Record<string, CopyEntry>;
 
 export type CopyKey = keyof typeof COPY;
@@ -184,8 +325,11 @@ export type CopyKey = keyof typeof COPY;
 /** A string that actually says something. An empty or whitespace-only
  *  translation is treated as ABSENT, not as copy — a translator leaving a cell
  *  blank must fall back to English, never blank the customer's screen. */
-const nonBlank = (value: string | undefined): string | undefined =>
+export const nonBlankText = (value: string | null | undefined): string | undefined =>
   typeof value === "string" && value.trim() !== "" ? value : undefined;
+
+/** Internal alias kept short for the copy paths below. */
+const nonBlank = nonBlankText;
 
 /** The raw text of a value, ignoring blankness — the last resort that keeps
  *  the return type total. */

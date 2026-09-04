@@ -2,6 +2,9 @@ import { useEffect, useRef } from "react";
 import type { ReactElement } from "react";
 import { CATEGORIES, type MenuCategoryId } from "@/data/menu";
 import { useT } from "@/lib/i18nContext";
+import { FunctionalZh } from "./ChineseText";
+import { localizeCategory } from "@/lib/menuContent";
+import { useLanguage } from "@/lib/i18nContext";
 import {
   NoodleBowlIcon,
   SkewerFlameIcon,
@@ -66,6 +69,7 @@ interface Props {
  */
 export function CategoryRail({ active, onChange }: Props) {
   const t = useT();
+  const { language } = useLanguage();
   const scrollerRef = useRef<HTMLDivElement>(null);
   const index = CATEGORIES.findIndex((c) => c.id === active);
 
@@ -88,13 +92,14 @@ export function CategoryRail({ active, onChange }: Props) {
     // backdrop-filter support, which is what left the original nav
     // transparent on browsers that lack it.
     <nav
-      aria-label="Menu sections"
+      aria-label={t("categoryRail.ariaLabel")}
       className="sticky top-0 z-30 border-y border-[var(--color-gold)]/15 bg-[var(--color-charcoal)]/95 backdrop-blur supports-[backdrop-filter]:bg-[var(--color-charcoal)]/85"
     >
       <div className="px-5 py-3">
         <div className="mb-2.5 flex items-center justify-between">
           <p className="font-display text-[13px] uppercase tracking-[0.3em] text-[var(--color-gold-soft)]">
-            Menu · 菜譜
+            {t("categoryRail.heading")}
+            <FunctionalZh> · 菜譜</FunctionalZh>
           </p>
           <span className="divider-stamp mx-3 flex-1" />
           <p className="text-[10px] uppercase tracking-[0.2em] text-[var(--color-muted-foreground)]">
@@ -163,9 +168,9 @@ export function CategoryRail({ active, onChange }: Props) {
                           every cell, so it degrades in height, never by
                           spilling into a neighbour. */}
                       <span className="text-center text-[10px] font-medium uppercase leading-[1.2] tracking-[0.02em]">
-                        {c.nameEn}
+                        {localizeCategory(c, language).name}
                       </span>
-                      <span
+                      <FunctionalZh
                         className={`mt-0.5 text-[9.5px] transition-colors duration-200 ease-[var(--ease-fluid)] ${
                           isActive
                             ? "text-[var(--color-ink)]/60 delay-[170ms] motion-reduce:delay-0"
@@ -173,7 +178,7 @@ export function CategoryRail({ active, onChange }: Props) {
                         }`}
                       >
                         {CATEGORY_ZH[c.id]}
-                      </span>
+                      </FunctionalZh>
                     </span>
                   </button>
                 );

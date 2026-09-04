@@ -1,6 +1,10 @@
+import { FunctionalZh } from "./ChineseText";
+
 interface Props {
   eyebrow?: string;
   title: string;
+  /** FUNCTIONAL Chinese — the section name in 中文, which says the same
+   *  thing as `title`. Shown only in English mode. */
   zh?: string;
   blurb?: string;
 }
@@ -23,7 +27,11 @@ export function SectionHeading({ eyebrow, title, zh, blurb }: Props) {
               {title}
             </h2>
           </div>
-          {zh && <span className="font-display text-[26px] text-[var(--color-gold)]/80">{zh}</span>}
+          {zh && (
+            <FunctionalZh className="font-display text-[26px] text-[var(--color-gold)]/80">
+              {zh}
+            </FunctionalZh>
+          )}
         </div>
         {blurb && (
           <p className="mt-2 max-w-[36ch] text-[12.5px] text-[var(--color-muted-foreground)]">

@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useLanguage } from "@/lib/i18nContext";
 
 /**
@@ -9,6 +9,13 @@ import { useLanguage } from "@/lib/i18nContext";
  * distinction a Burmese or Thai customer needs us to get right.
  */
 
+interface ZhProps {
+  children: ReactNode;
+  className?: string;
+  /** The tp-rise stagger sets --i through an inline style. */
+  style?: CSSProperties;
+}
+
 /**
  * IDENTITY. The restaurant's own name and marks — 第三空間 beside "The Third
  * Place", the 訂 chop. This is who the place IS, not information about an
@@ -18,9 +25,9 @@ import { useLanguage } from "@/lib/i18nContext";
  * switches voice for it instead of spelling Chinese out in English phonemes.
  * A restaurant's name is worth hearing.
  */
-export function IdentityZh({ children, className }: { children: ReactNode; className?: string }) {
+export function IdentityZh({ children, className, style }: ZhProps) {
   return (
-    <span lang="zh-Hant" className={className}>
+    <span lang="zh-Hant" className={className} style={style}>
       {children}
     </span>
   );
@@ -43,11 +50,11 @@ export function IdentityZh({ children, className }: { children: ReactNode; class
  * Put any separator inside the children (`暫時售罄 · `) so it disappears with
  * the Chinese rather than being left stranded in front of Burmese text.
  */
-export function FunctionalZh({ children, className }: { children: ReactNode; className?: string }) {
+export function FunctionalZh({ children, className, style }: ZhProps) {
   const { showZh } = useLanguage();
   if (!showZh) return null;
   return (
-    <span lang="zh-Hant" aria-hidden className={className}>
+    <span lang="zh-Hant" aria-hidden className={className} style={style}>
       {children}
     </span>
   );

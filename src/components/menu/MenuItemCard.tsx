@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from "react";
-import type { MenuItem } from "@/data/menu";
+import type { LocalizedMenuItem } from "@/lib/menuContent";
+import { useT } from "@/lib/i18nContext";
 import { MinusIcon, PlusIcon, SkewerFlameIcon } from "./Icons";
 
 interface Props {
-  item: MenuItem;
+  item: LocalizedMenuItem;
+  /** Localised category name for the feature card's eyebrow. */
+  categoryLabel?: string;
   variant?: "feature" | "compact" | "row";
   /** Quantity already in the cart. 0 collapses the control back to "add". */
   qty: number;
-  onAdd: (item: MenuItem) => void;
+  onAdd: (item: LocalizedMenuItem) => void;
   onIncrease: (id: string) => void;
   onDecrease: (id: string) => void;
   /** Read-only menu (the Messenger "Menu" option): prices and availability
@@ -33,10 +36,11 @@ const tagColor = (tag: string) => {
 };
 
 function Price({ value }: { value?: number }) {
+  const t = useT();
   if (value === undefined) {
     return (
       <span className="text-[13px] italic leading-none text-[var(--color-ink)]/50">
-        Price · ask staff
+        {t("item.priceAskStaff")}
       </span>
     );
   }
@@ -61,11 +65,12 @@ function AddControl({
   onAdd,
   onIncrease,
   onDecrease,
-}: Omit<Props, "variant" | "browseOnly">) {
+}: Omit<Props, "variant" | "browseOnly" | "categoryLabel">) {
+  const t = useT();
   if (!item.available) {
     return (
       <span className="flex h-9 shrink-0 items-center justify-center rounded-full border border-[var(--color-ink)]/15 bg-[var(--color-ink)]/15 px-2.5 text-[10px] uppercase tracking-[0.18em] text-[var(--color-ink)]/55">
-        Sold out
+        {t("item.soldOut")}
       </span>
     );
   }
@@ -75,7 +80,7 @@ function AddControl({
       <div className="flex h-9 shrink-0 items-center gap-0.5 rounded-full border border-[var(--color-gold)]/30 bg-[var(--color-ink)] px-1 text-[var(--color-cream)] shadow-[0_6px_14px_-6px_oklch(0_0_0/0.6)] animate-in fade-in zoom-in-95 duration-200 motion-reduce:animate-none">
         <button
           onClick={() => onDecrease(item.id)}
-          aria-label={`Remove one ${item.nameEn}`}
+          aria-label={t("item.removeOneAria", { item: item.displayName })}
           className="relative flex h-7 w-7 items-center justify-center rounded-full transition-[transform,background-color] duration-150 ease-[var(--ease-fluid)] hover:bg-[var(--color-cream)]/12 active:scale-90 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--color-gold)] before:absolute before:-inset-1.5 before:content-['']"
         >
           <MinusIcon className="h-3.5 w-3.5" />
@@ -87,7 +92,7 @@ function AddControl({
         </span>
         <button
           onClick={() => onIncrease(item.id)}
-          aria-label={`Add another ${item.nameEn}`}
+          aria-label={t("item.addAnotherAria", { item: item.displayName })}
           className="relative flex h-7 w-7 items-center justify-center rounded-full bg-[var(--color-vermillion)] transition-[transform,background-color] duration-150 ease-[var(--ease-fluid)] active:scale-90 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--color-gold)] before:absolute before:-inset-1.5 before:content-['']"
         >
           <PlusIcon className="h-3.5 w-3.5" />
@@ -101,11 +106,36 @@ function AddControl({
   return (
     <button
       onClick={() => onAdd(item)}
-      aria-label={`Add ${item.nameEn} to your order`}
+      aria-label={t("item.addAria", { item: item.displayName })}
       className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--color-gold)]/30 bg-[var(--color-ink)] text-[var(--color-cream)] shadow-[0_6px_14px_-6px_oklch(0_0_0/0.6)] transition-[transform,background-color] duration-150 ease-[var(--ease-fluid)] hover:bg-[var(--color-vermillion)] active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-gold)] before:absolute before:-inset-1 before:content-['']"
     >
       <PlusIcon className="h-4 w-4" />
     </button>
+  );
+}
+
+/**
+ * The item photo, or the designed icon.
+ *
+ * The icon is the fallback for BOTH "no photo configured" and "the photo
+ * failed to load", so a broken or slow URL degrades to what the menu looked
+ * like before photos existed rather than to a torn image box. The tile keeps
+ * its exact 44px geometry either way, so nothing on the card moves.
+ *
+ * alt="" on purpose: the item name is immediately beside it, and a screen
+ * reader announcing the dish twice helps nobody.
+ */
+function ItemImage({ src }: { src?: string }) {
+  const [failed, setFailed] = useState(false);
+  if (!src || failed) return <SkewerFlameIcon className="h-6 w-6" />;
+  return (
+    <img
+      src={src}
+      alt=""
+      loading="lazy"
+      onError={() => setFailed(true)}
+      className="h-full w-full object-cover"
+    />
   );
 }
 
@@ -128,6 +158,7 @@ function useAddPulse(qty: number) {
 
 export function MenuItemCard({
   item,
+  categoryLabel,
   variant = "compact",
   qty,
   onAdd,
@@ -135,6 +166,7 @@ export function MenuItemCard({
   onDecrease,
   browseOnly = false,
 }: Props) {
+  const t = useT();
   const pulsing = useAddPulse(qty);
   const soldOutClass = item.available ? "" : " opacity-70 saturate-[0.85]";
 
@@ -182,17 +214,17 @@ export function MenuItemCard({
         <div className="flex flex-col p-5">
           <div className="flex items-center justify-between gap-2">
             <span className="text-[11px] uppercase tracking-[0.2em] text-[var(--color-ink)]/70">
-              {item.category.replace("-", " ")}
+              {categoryLabel ?? item.category.replace("-", " ")}
             </span>
             {item.popular && (
               <span className="rounded-sm border border-[var(--color-vermillion)]/40 bg-[var(--color-vermillion)]/10 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.18em] text-[var(--color-vermillion)]">
-                Best Seller
+                {t("item.bestSeller")}
               </span>
             )}
           </div>
 
           <h3 className="font-display mt-2 text-[22px] font-semibold leading-[1.15] text-[var(--color-ink)]">
-            {item.nameEn}
+            {item.displayName}
           </h3>
 
           {item.tags && item.tags.length > 0 && (
@@ -209,7 +241,7 @@ export function MenuItemCard({
           )}
 
           <p className="mt-2.5 line-clamp-3 text-[13px] leading-relaxed text-[var(--color-ink)]/75">
-            {item.descriptionEn}
+            {item.description}
           </p>
 
           <div className="mt-4 flex items-center justify-between">
@@ -233,13 +265,13 @@ export function MenuItemCard({
         className={`paper-grain relative flex items-center gap-3 overflow-hidden rounded-xl border border-[var(--color-gold)]/25 px-3.5 py-3${soldOutClass}${cartEdge}`}
       >
         {ring}
-        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-[var(--color-ink)] text-[var(--color-gold-soft)]">
-          <SkewerFlameIcon className="h-6 w-6" />
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-[var(--color-ink)] text-[var(--color-gold-soft)]">
+          <ItemImage src={item.imageUrl} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline justify-between gap-3">
             <h4 className="font-display truncate text-[16px] font-semibold text-[var(--color-ink)]">
-              {item.nameEn}
+              {item.displayName}
             </h4>
             <span className="mx-1 min-w-2 flex-1 translate-y-[-3px] border-b border-dotted border-[var(--color-ink)]/25" />
             <Price value={item.price} />
@@ -264,14 +296,14 @@ export function MenuItemCard({
       className={`paper-grain relative flex items-center gap-3 overflow-hidden rounded-xl border border-[var(--color-gold)]/25 px-3.5 py-3${soldOutClass}${cartEdge}`}
     >
       {ring}
-      <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-[var(--color-ink)] text-[var(--color-gold-soft)]">
-        <SkewerFlameIcon className="h-6 w-6" />
+      <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-[var(--color-ink)] text-[var(--color-gold-soft)]">
+        <ItemImage src={item.imageUrl} />
       </div>
 
       <div className="min-w-0 flex-1">
         <div className="flex items-start justify-between gap-2">
           <h4 className="font-display text-[16px] font-semibold leading-tight text-[var(--color-ink)]">
-            {item.nameEn}
+            {item.displayName}
           </h4>
           {item.popular && (
             <span className="shrink-0 rounded-sm border border-[var(--color-vermillion)]/35 bg-[var(--color-vermillion)]/10 px-1.5 py-0.5 text-[9px] text-[var(--color-vermillion)]">
@@ -280,7 +312,7 @@ export function MenuItemCard({
           )}
         </div>
         <p className="mt-0.5 line-clamp-1 text-[12px] leading-snug text-[var(--color-ink)]/70">
-          {item.descriptionEn}
+          {item.description}
         </p>
         <div className="mt-1 flex items-center gap-1.5">
           <Price value={item.price} />

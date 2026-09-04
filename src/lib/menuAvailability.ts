@@ -10,6 +10,7 @@
 // - "n8n": the original webhook bridge, kept UNTOUCHED as the rollback path
 //   (n8n talks to the same Supabase menu_items via its own credentials).
 
+import type { MenuItemContent } from "./menuContent";
 import { MENU_AVAILABILITY_SOURCE } from "./data/dataSource";
 import { staffWrite } from "./data/staffWriteClient";
 import { supabaseSelect } from "./data/supabase";
@@ -30,6 +31,15 @@ export interface MenuAvailabilityItem {
   price: number;
   /** 3-state availability — DB availability_status since 2G-H. */
   availability: MenuAvailabilityStatus;
+  /**
+   * Localised content columns, present only on the Supabase source and only
+   * after the menu-content migration. Absent everywhere else, which is why
+   * every field of it is optional and the customer menu keeps its compiled
+   * fallback — see src/lib/menuContent.ts.
+   *
+   * Staff views ignore this entirely: they operate on the canonical name.
+   */
+  content?: MenuItemContent;
 }
 
 export type UpdateMenuAvailabilityResult = { success: true } | { success: false; error: string };
@@ -47,6 +57,14 @@ interface SupabaseMenuItemRow {
   price?: unknown;
   is_available?: unknown;
   availability_status?: unknown;
+  // Content columns — only after the menu-content migration.
+  name_my?: unknown;
+  name_th?: unknown;
+  description_en?: unknown;
+  description_my?: unknown;
+  description_th?: unknown;
+  image_url?: unknown;
+  unit?: unknown;
 }
 
 // The PUBLIC menu columns — exactly the columns the anon role is granted
@@ -57,6 +75,10 @@ interface SupabaseMenuItemRow {
 const PUBLIC_MENU_COLUMNS = "item_code,name_en,category,price,is_available,availability_status";
 // Pre-migration column list (availability_status not yet added).
 const PRE_MIGRATION_MENU_COLUMNS = "item_code,name_en,category,price,is_available";
+// With the menu-content migration applied. Tried FIRST; a database without
+// those columns 400s and the read steps down to the list above, so the same
+// build works either side of the migration and nothing has to be timed.
+const CONTENT_MENU_COLUMNS = `${PUBLIC_MENU_COLUMNS},name_my,name_th,description_en,description_my,description_th,image_url,unit`;
 const MENU_ORDER = "order=sort_order.asc,item_code.asc";
 
 const DB_STATUS_TO_APP: Record<string, MenuAvailabilityStatus> = {
@@ -80,28 +102,52 @@ function mapSupabaseRow(row: SupabaseMenuItemRow): MenuAvailabilityItem {
     category: asString(row.category) || "Other",
     price: asNumber(row.price),
     availability: fromStatus ?? (row.is_available === true ? "Available" : "Sold Out"),
+    content: contentOf(row),
   };
+}
+
+/** The content columns of a row, or undefined when the row carries none —
+ *  which is what a pre-migration database and the n8n source both look like.
+ *  Blank strings are dropped here so menuContent's fallback sees "absent". */
+function contentOf(row: SupabaseMenuItemRow): MenuItemContent | undefined {
+  const content: Record<string, string> = {};
+  const put = (key: string, value: unknown) => {
+    if (typeof value === "string" && value.trim() !== "") content[key] = value;
+  };
+  put("nameEn", row.name_en);
+  put("nameMy", row.name_my);
+  put("nameTh", row.name_th);
+  put("descriptionEn", row.description_en);
+  put("descriptionMy", row.description_my);
+  put("descriptionTh", row.description_th);
+  put("imageUrl", row.image_url);
+  put("unit", row.unit);
+  return Object.keys(content).length > 0 ? (content as MenuItemContent) : undefined;
 }
 
 // Returns ALL rows incl. Hidden: the customer menu drops Hidden itself
 // (index.tsx) and staff views need to see/restore hidden items.
 async function getMenuAvailabilityFromSupabase(): Promise<MenuAvailabilityItem[]> {
-  let rows: SupabaseMenuItemRow[];
-  try {
-    rows = await supabaseSelect<SupabaseMenuItemRow>(
-      "menu_items",
-      `select=${PUBLIC_MENU_COLUMNS}&${MENU_ORDER}`,
-    );
-  } catch {
-    // Transitional safety: before the 2G-H migration, selecting the
-    // not-yet-created availability_status column 400s. Retry once with the
-    // pre-migration list → boolean mapping (never invents Hidden). A real
-    // outage fails here too and throws to the caller as before.
-    rows = await supabaseSelect<SupabaseMenuItemRow>(
-      "menu_items",
-      `select=${PRE_MIGRATION_MENU_COLUMNS}&${MENU_ORDER}`,
-    );
+  // Three tiers, richest first. Each step down is a column list an OLDER
+  // database can still answer, so one build works before, during and after
+  // both migrations. A genuine outage fails every tier and throws to the
+  // caller exactly as before — the customer menu then falls open to its
+  // compiled data (MenuScreen), and staff views show their error state.
+  const tiers = [CONTENT_MENU_COLUMNS, PUBLIC_MENU_COLUMNS, PRE_MIGRATION_MENU_COLUMNS];
+  let rows: SupabaseMenuItemRow[] | null = null;
+  let lastError: unknown;
+  for (const columns of tiers) {
+    try {
+      rows = await supabaseSelect<SupabaseMenuItemRow>(
+        "menu_items",
+        `select=${columns}&${MENU_ORDER}`,
+      );
+      break;
+    } catch (error) {
+      lastError = error;
+    }
   }
+  if (!rows) throw lastError;
   return rows.map(mapSupabaseRow).filter((item) => item.menuItemId);
 }
 

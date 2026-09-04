@@ -3,6 +3,8 @@ import { Drawer } from "vaul";
 import { type OrderPayload, submitOrder, submitSessionOrder } from "@/lib/orders";
 import type { MenuSessionContext } from "./MenuScreen";
 import { MinusIcon, PlusIcon } from "./Icons";
+import { FunctionalZh } from "./ChineseText";
+import { useT } from "@/lib/i18nContext";
 import { attachKeyboardInset } from "./keyboardInset";
 import { attachSafariScrollGuard, browserGuardHost } from "./safariScrollGuard";
 import { OrderTypeRail } from "./OrderTypeRail";
@@ -12,7 +14,12 @@ export type { OrderType };
 
 interface CartItem {
   id: string;
+  /** CANONICAL English name. This is the ONLY one that goes into the order
+   *  payload — the n8n intake path still sends it, and a localised name would
+   *  reach the automation as a product it does not know. */
   name: string;
+  /** What the customer reads. Localised, never submitted. */
+  displayName: string;
   qty: number;
   subtotal: number;
   /** Item is no longer orderable (sold out / hidden) — blocks placing the order. */
@@ -81,7 +88,11 @@ function Field({
         className="mb-1.5 flex items-baseline gap-2 text-[11px] uppercase tracking-[0.18em] text-[var(--color-cream)]/75"
       >
         {label}
-        {zh && <span className="tracking-[0.1em] text-[var(--color-gold-soft)]/45">{zh}</span>}
+        {zh && (
+          <FunctionalZh className="tracking-[0.1em] text-[var(--color-gold-soft)]/45">
+            {zh}
+          </FunctionalZh>
+        )}
       </label>
       {children}
       {error && (
@@ -105,11 +116,12 @@ function LineStepper({
   onIncrease: (id: string) => void;
   onDecrease: (id: string) => void;
 }) {
+  const t = useT();
   return (
     <div className="flex shrink-0 items-center gap-0.5 rounded-full border border-[var(--color-gold)]/20 bg-[var(--color-ink)]">
       <button
         onClick={() => onDecrease(item.id)}
-        aria-label={`Remove one ${item.name}`}
+        aria-label={t("item.removeOneAria", { item: item.displayName })}
         className="relative flex h-8 w-8 items-center justify-center rounded-full text-[var(--color-cream)]/80 transition-[transform,background-color] duration-150 ease-[var(--ease-fluid)] active:scale-90 hover:bg-[var(--color-cream)]/10 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--color-gold)] before:absolute before:-inset-1.5 before:content-['']"
       >
         <MinusIcon className="h-3.5 w-3.5" />
@@ -122,7 +134,7 @@ function LineStepper({
       </span>
       <button
         onClick={() => onIncrease(item.id)}
-        aria-label={`Add another ${item.name}`}
+        aria-label={t("item.addAnotherAria", { item: item.displayName })}
         className="relative flex h-8 w-8 items-center justify-center rounded-full text-[var(--color-cream)]/80 transition-[transform,background-color] duration-150 ease-[var(--ease-fluid)] active:scale-90 hover:bg-[var(--color-cream)]/10 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-[var(--color-gold)] before:absolute before:-inset-1.5 before:content-['']"
       >
         <PlusIcon className="h-3.5 w-3.5" />
@@ -155,6 +167,7 @@ function CheckoutForm({
    *  clearing the cart on success cannot blank it on the confirmation screen. */
   onConfirmedItemCount: (count: number) => void;
 }) {
+  const t = useT();
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [tableNumber, setTableNumber] = useState(
@@ -264,19 +277,19 @@ function CheckoutForm({
 
   const handlePlaceOrder = async () => {
     if (items.some((i) => i.soldOut)) {
-      setSubmitError("Some items just sold out — please remove them from your cart first.");
+      setSubmitError(t("checkout.soldOutBlock"));
       return;
     }
 
     const e: Record<string, string> = {};
 
     if (orderType === "dine-in") {
-      if (!tableNumber.trim()) e.tableNumber = "Table number is required";
+      if (!tableNumber.trim()) e.tableNumber = t("checkout.errTableRequired");
     } else {
-      if (!name.trim()) e.name = "Name is required";
-      if (!phone.trim()) e.phone = "Phone is required";
+      if (!name.trim()) e.name = t("checkout.errNameRequired");
+      if (!phone.trim()) e.phone = t("checkout.errPhoneRequired");
     }
-    if (orderType === "delivery" && !address.trim()) e.address = "Delivery address is required";
+    if (orderType === "delivery" && !address.trim()) e.address = t("checkout.errAddressRequired");
 
     if (Object.keys(e).length > 0) {
       setErrors(e);
@@ -388,10 +401,10 @@ function CheckoutForm({
             style={{ ["--i" as string]: 9 }}
           >
             {orderType === "dine-in"
-              ? "Staff will prepare it shortly."
+              ? t("success.prepareShortly")
               : orderType === "pickup"
-                ? "Staff will confirm when it is ready for pickup."
-                : "Staff will confirm delivery and payment."}
+                ? t("success.confirmPickup")
+                : t("success.confirmDelivery")}
           </p>
 
           {orderType === "dine-in" && tableNumber.trim() && (
@@ -424,9 +437,9 @@ function CheckoutForm({
             style={{ ["--i" as string]: 11 }}
           >
             {[
-              "Please keep your phone available — staff may call to confirm.",
-              "The ฿30 delivery fee is included in your total.",
-              "Payment confirmation may happen through staff chat.",
+              t("success.keepPhoneAvailable"),
+              t("success.deliveryFeeIncluded", { fee: DELIVERY_FEE }),
+              t("success.paymentViaStaffChat"),
             ].map((line) => (
               <li key={line} className="flex gap-2">
                 <span className="mt-[7px] h-1 w-1 shrink-0 rounded-full bg-[var(--color-gold)]/60" />
@@ -447,7 +460,7 @@ function CheckoutForm({
             {confirmed.items.map((item) => (
               <div key={item.id} className="flex items-baseline justify-between gap-3">
                 <span className="min-w-0 truncate text-[13px] text-[var(--color-cream)]/85">
-                  {item.name}{" "}
+                  {item.displayName}{" "}
                   <span className="tp-num text-[11px] text-[var(--color-cream)]/45">
                     ×{item.qty}
                   </span>
@@ -462,18 +475,18 @@ function CheckoutForm({
             {orderType === "delivery" && (
               <>
                 <div className="flex items-baseline justify-between text-[12px] text-[var(--color-cream)]/55">
-                  <span>Subtotal</span>
+                  <span>{t("checkout.subtotal")}</span>
                   <span className="tp-num">฿{confirmed.subtotal.toLocaleString("en-US")}</span>
                 </div>
                 <div className="flex items-baseline justify-between text-[12px] text-[var(--color-cream)]/55">
-                  <span>Delivery fee</span>
+                  <span>{t("checkout.deliveryFee")}</span>
                   <span className="tp-num">฿{deliveryFee.toLocaleString("en-US")}</span>
                 </div>
               </>
             )}
             <div className="flex items-baseline justify-between pt-0.5">
               <span className="text-[11px] uppercase tracking-[0.16em] text-[var(--color-cream)]/50">
-                Total
+                {t("checkout.total")}
               </span>
               <span className="tp-num text-[19px] text-[var(--color-vermillion-text)]">
                 ฿{confirmed.total.toLocaleString("en-US")}
@@ -487,7 +500,7 @@ function CheckoutForm({
             onClick={onClose}
             className="relative text-[12px] uppercase tracking-[0.2em] text-[var(--color-cream)]/65 transition-colors duration-150 ease-[var(--ease-fluid)] hover:text-[var(--color-cream)]/85 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-gold)] before:absolute before:-inset-x-3 before:-inset-y-3 before:content-['']"
           >
-            Close
+            {t("checkout.close")}
           </button>
         </div>
       </div>
@@ -519,16 +532,17 @@ function CheckoutForm({
                     : "text-[var(--color-cream)]/45 hover:text-[var(--color-cream)]/70"
                 }`}
               >
-                {confirmClear ? "Tap again to clear" : "Clear"}
+                {confirmClear ? t("checkout.tapAgainToClear") : t("checkout.clear")}
               </button>
             )}
           </div>
 
           {items.length === 0 ? (
             <p className="mt-4 rounded-2xl border border-dashed border-[var(--color-gold)]/25 px-4 py-8 text-center text-[13px] leading-relaxed text-[var(--color-cream)]/45">
-              空的 · Your order is empty.
+              <FunctionalZh>空的 · </FunctionalZh>
+              {t("checkout.emptyCart")}
               <span className="mt-1 block text-[12px] text-[var(--color-cream)]/35">
-                Close this and add a dish to begin.
+                {t("checkout.emptyCartHint")}
               </span>
             </p>
           ) : (
@@ -547,7 +561,7 @@ function CheckoutForm({
                           : "text-[var(--color-cream)]"
                       }`}
                     >
-                      {item.name}
+                      {item.displayName}
                     </p>
                     <p className="tp-num mt-0.5 text-[12px] text-[var(--color-gold-soft)]/65">
                       ฿{item.subtotal.toLocaleString("en-US")}
@@ -560,7 +574,7 @@ function CheckoutForm({
                       onClick={() => onRemove(item.id)}
                       className="relative shrink-0 rounded-full border border-[var(--color-vermillion)]/40 bg-[var(--color-vermillion)]/18 px-3 py-1.5 text-[10.5px] uppercase tracking-[0.14em] text-[var(--color-vermillion-text)] transition-[transform,background-color] duration-150 ease-[var(--ease-fluid)] active:scale-95 hover:bg-[var(--color-vermillion)]/28 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-gold)] before:absolute before:-inset-2 before:content-['']"
                     >
-                      Remove
+                      {t("checkout.remove")}
                     </button>
                   ) : (
                     <LineStepper item={item} onIncrease={onIncrease} onDecrease={onDecrease} />
@@ -573,18 +587,18 @@ function CheckoutForm({
           {items.length > 0 && (
             <div className="mt-4 space-y-1.5 rounded-2xl border border-[var(--color-gold)]/15 bg-[var(--color-ink)]/60 px-4 py-3.5">
               <div className="flex items-baseline justify-between text-[12.5px] text-[var(--color-cream)]/55">
-                <span className="uppercase tracking-[0.14em]">Subtotal</span>
+                <span className="uppercase tracking-[0.14em]">{t("checkout.subtotal")}</span>
                 <span className="tp-num">฿{total.toLocaleString("en-US")}</span>
               </div>
               {orderType === "delivery" && (
                 <div className="tp-rise-sm flex items-baseline justify-between text-[12.5px] text-[var(--color-cream)]/55">
-                  <span className="uppercase tracking-[0.14em]">Delivery fee</span>
+                  <span className="uppercase tracking-[0.14em]">{t("checkout.deliveryFee")}</span>
                   <span className="tp-num">฿{deliveryFee.toLocaleString("en-US")}</span>
                 </div>
               )}
               <div className="flex items-baseline justify-between border-t border-[var(--color-gold)]/12 pt-2.5">
                 <span className="text-[12.5px] uppercase tracking-[0.14em] text-[var(--color-cream)]/60">
-                  Total
+                  {t("checkout.total")}
                 </span>
                 <span className="tp-num text-[22px] leading-none text-[var(--color-vermillion-text)]">
                   ฿{finalTotal.toLocaleString("en-US")}
@@ -597,7 +611,8 @@ function CheckoutForm({
         {/* ── Details ─────────────────────────────────────────────────── */}
         <section className="mt-8 space-y-4">
           <h3 className="text-[10.5px] uppercase tracking-[0.24em] text-[var(--color-cream)]/45">
-            取餐方式 · How to serve it
+            <FunctionalZh>取餐方式 · </FunctionalZh>
+            {t("checkout.howToServe")}
           </h3>
 
           {/* Order type first, so the fields below react immediately. */}
@@ -612,7 +627,7 @@ function CheckoutForm({
 
           {orderType === "dine-in" && (
             <Field
-              label="Table number"
+              label={t("checkout.fieldTableNumber")}
               zh="桌號"
               htmlFor="checkout-table"
               error={errors.tableNumber}
@@ -621,7 +636,7 @@ function CheckoutForm({
                 id="checkout-table"
                 type="text"
                 inputMode="numeric"
-                placeholder="e.g. 12"
+                placeholder={t("checkout.phTable")}
                 value={tableNumber}
                 onChange={(e) => {
                   setTableNumber(e.target.value);
@@ -635,11 +650,16 @@ function CheckoutForm({
           {/* Name & Phone — not shown for dine-in (table number is enough) */}
           {orderType !== "dine-in" && (
             <>
-              <Field label="Name" zh="姓名" htmlFor="checkout-name" error={errors.name}>
+              <Field
+                label={t("checkout.fieldName")}
+                zh="姓名"
+                htmlFor="checkout-name"
+                error={errors.name}
+              >
                 <input
                   id="checkout-name"
                   type="text"
-                  placeholder="e.g. Somchai"
+                  placeholder={t("checkout.phName")}
                   value={name}
                   onChange={(e) => {
                     setName(e.target.value);
@@ -649,12 +669,17 @@ function CheckoutForm({
                 />
               </Field>
 
-              <Field label="Phone number" zh="電話" htmlFor="checkout-phone" error={errors.phone}>
+              <Field
+                label={t("checkout.fieldPhone")}
+                zh="電話"
+                htmlFor="checkout-phone"
+                error={errors.phone}
+              >
                 <input
                   id="checkout-phone"
                   type="tel"
                   inputMode="tel"
-                  placeholder="e.g. 081 234 5678"
+                  placeholder={t("checkout.phPhone")}
                   value={phone}
                   onChange={(e) => {
                     setPhone(e.target.value);
@@ -668,7 +693,7 @@ function CheckoutForm({
 
           {orderType === "delivery" && (
             <Field
-              label="Delivery address"
+              label={t("checkout.fieldAddress")}
               zh="地址"
               htmlFor="checkout-address"
               error={errors.address}
@@ -676,7 +701,7 @@ function CheckoutForm({
               <input
                 id="checkout-address"
                 type="text"
-                placeholder="e.g. 88 Soi Bangna 12, Bang Na"
+                placeholder={t("checkout.phAddress")}
                 value={address}
                 onChange={(e) => {
                   setAddress(e.target.value);
@@ -687,10 +712,10 @@ function CheckoutForm({
             </Field>
           )}
 
-          <Field label="Order notes (optional)" zh="備註" htmlFor="checkout-notes">
+          <Field label={t("checkout.fieldNotes")} zh="備註" htmlFor="checkout-notes">
             <textarea
               id="checkout-notes"
-              placeholder="e.g. less spicy, no peanuts"
+              placeholder={t("checkout.phNotes")}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={2}
@@ -721,7 +746,7 @@ function CheckoutForm({
             />
           )}
           <span className="relative text-[17px] font-semibold tracking-[0.01em]">
-            {isSubmitting ? "Sending order…" : "Place order"}
+            {isSubmitting ? t("checkout.sending") : t("checkout.placeOrder")}
           </span>
           {!isSubmitting && (
             // The figure the customer commits to is never tweened — it is the
@@ -754,6 +779,7 @@ export function CheckoutSheet({
   initialOrderType,
   session,
 }: Props) {
+  const t = useT();
   const [submitting, setSubmitting] = useState(false);
   // Frozen at confirmation time. Without it, clearing the cart on success
   // would drop this header to "0 items" while the confirmation is on screen.
@@ -789,15 +815,16 @@ export function CheckoutSheet({
           <div className="flex shrink-0 items-start justify-between gap-3 px-5 pb-4 pt-4">
             <div>
               <Drawer.Title className="font-display text-[22px] text-[var(--color-cream)]">
-                Review Order
+                {t("checkout.reviewOrder")}
               </Drawer.Title>
               <p className="tp-num mt-0.5 text-[11px] uppercase tracking-[0.2em] text-[var(--color-gold-soft)]/55">
-                訂單 · {count} {count === 1 ? "item" : "items"}
+                <FunctionalZh>訂單 · </FunctionalZh>
+                {t("checkout.itemCount", { count })}
               </p>
             </div>
             <Drawer.Close asChild>
               <button
-                aria-label="Close"
+                aria-label={t("checkout.close")}
                 disabled={submitting}
                 className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--color-gold)]/20 text-[16px] text-[var(--color-cream)]/60 transition-[transform,background-color] duration-150 ease-[var(--ease-fluid)] active:scale-90 hover:bg-[var(--color-cream)]/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-gold)] disabled:opacity-40 before:absolute before:-inset-1.5 before:content-['']"
               >

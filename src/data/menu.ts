@@ -13,8 +13,11 @@ export type MenuCategoryId =
 export interface MenuCategory {
   id: MenuCategoryId;
   nameEn: string;        // Category English (display)
-  nameMy?: string;       // Category Myanmar (hidden in UI for now)
+  nameMy?: string;       // Category Myanmar — DRAFT, needs native confirmation
+  nameTh?: string; // Category Thai — not yet translated
   blurb: string;
+  blurbMy?: string; // not yet translated
+  blurbTh?: string; // not yet translated
 }
 
 export interface MenuItem {
@@ -25,7 +28,9 @@ export interface MenuItem {
   categoryMy?: string;        // Category Myanmar
   tags?: string[];            // Item Type / Tags
   descriptionEn: string;      // Description English
-  descriptionMy?: string;     // Description Myanmar
+  descriptionMy?: string;     // Description Myanmar — not yet written
+  descriptionTh?: string; // Description Thai — not yet written
+  nameTh?: string; // Item Name Thai — not yet translated
   price?: number;             // Price (THB). undefined => "Need confirmation"
   unit?: string;              // Portion / Unit
   image?: string;             // Image URL — falls back to designed placeholder

@@ -1,6 +1,8 @@
 import type { ReactElement } from "react";
 import { ScooterIcon, ShopBagIcon, StampStarIcon, TableChopsticksIcon } from "./Icons";
-import { ORDER_TYPES, ORDER_TYPE_LABELS, ORDER_TYPE_ZH, type OrderType } from "./orderType";
+import { ORDER_TYPES, ORDER_TYPE_COPY_KEYS, ORDER_TYPE_ZH, type OrderType } from "./orderType";
+import { FunctionalZh } from "./ChineseText";
+import { useT } from "@/lib/i18nContext";
 
 const ORDER_ICONS: Record<OrderType, ReactElement> = {
   "dine-in": <TableChopsticksIcon className="h-full w-full" />,
@@ -36,6 +38,7 @@ interface Props {
  * and the colour shift happens naturally as the fill arrives.
  */
 export function ServiceRail({ orderType, onOrderTypeChange, onPopularClick }: Props) {
+  const t = useT();
   const index = ORDER_TYPES.indexOf(orderType);
 
   return (
@@ -43,7 +46,7 @@ export function ServiceRail({ orderType, onOrderTypeChange, onPopularClick }: Pr
       <div className="flex items-stretch gap-3">
         <div
           role="radiogroup"
-          aria-label="Order type"
+          aria-label={t("orderType.ariaLabel")}
           className="relative grid flex-1 grid-cols-3 rounded-2xl border border-[var(--color-gold)]/30 bg-[var(--color-ink)]"
         >
           <span
@@ -70,15 +73,15 @@ export function ServiceRail({ orderType, onOrderTypeChange, onPopularClick }: Pr
                 <span className="h-7 w-7">{ORDER_ICONS[type]}</span>
                 <span className="flex flex-col items-center leading-none">
                   <span className="text-[11px] font-medium uppercase tracking-wide">
-                    {ORDER_TYPE_LABELS[type]}
+                    {t(ORDER_TYPE_COPY_KEYS[type])}
                   </span>
-                  <span
+                  <FunctionalZh
                     className={`mt-1 text-[10px] transition-colors duration-200 ease-[var(--ease-fluid)] ${
                       active ? "text-[var(--color-cream)]/75" : "text-[var(--color-cream)]/45"
                     }`}
                   >
                     {ORDER_TYPE_ZH[type]}
-                  </span>
+                  </FunctionalZh>
                 </span>
               </button>
             );
@@ -93,8 +96,12 @@ export function ServiceRail({ orderType, onOrderTypeChange, onPopularClick }: Pr
             <StampStarIcon className="h-full w-full" />
           </span>
           <span className="flex flex-col items-center leading-none">
-            <span className="text-[11px] font-medium uppercase tracking-wide">Popular</span>
-            <span className="mt-1 text-[10px] text-[var(--color-ink)]/60">人氣</span>
+            <span className="text-[11px] font-medium uppercase tracking-wide">
+              {t("serviceRail.popular")}
+            </span>
+            <FunctionalZh className="mt-1 text-[10px] text-[var(--color-ink)]/60">
+              人氣
+            </FunctionalZh>
           </span>
         </button>
       </div>

@@ -1,5 +1,7 @@
 import { ScooterIcon, ShopBagIcon, TableChopsticksIcon } from "./Icons";
-import { ORDER_TYPES, ORDER_TYPE_LABELS, ORDER_TYPE_ZH, type OrderType } from "./orderType";
+import { ORDER_TYPES, ORDER_TYPE_COPY_KEYS, ORDER_TYPE_ZH, type OrderType } from "./orderType";
+import { FunctionalZh } from "./ChineseText";
+import { useT } from "@/lib/i18nContext";
 
 const ICONS: Record<OrderType, typeof ScooterIcon> = {
   "dine-in": TableChopsticksIcon,
@@ -27,13 +29,14 @@ interface Props {
  * own wrapper, which does not affect that maths.
  */
 export function OrderTypeRail({ value, onChange, size = "lg" }: Props) {
+  const t = useT();
   const index = ORDER_TYPES.indexOf(value);
   const large = size === "lg";
 
   return (
     <div
       role="radiogroup"
-      aria-label="Order type"
+      aria-label={t("orderType.ariaLabel")}
       className="relative grid grid-cols-3 rounded-2xl border border-[var(--color-gold)]/20 bg-[var(--color-ink)]"
     >
       <span
@@ -63,14 +66,14 @@ export function OrderTypeRail({ value, onChange, size = "lg" }: Props) {
               <span
                 className={`${large ? "text-[11px]" : "text-[10px]"} uppercase tracking-[0.16em]`}
               >
-                {ORDER_TYPE_LABELS[type]}
+                {t(ORDER_TYPE_COPY_KEYS[type])}
               </span>
               {large && (
-                <span
+                <FunctionalZh
                   className={`mt-1.5 text-[10px] ${active ? "text-[var(--color-cream)]/70" : "text-[var(--color-cream)]/35"}`}
                 >
                   {ORDER_TYPE_ZH[type]}
-                </span>
+                </FunctionalZh>
               )}
             </span>
           </button>
