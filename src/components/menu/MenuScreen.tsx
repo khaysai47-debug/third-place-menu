@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Hero } from "@/components/menu/Hero";
 import { LanguageSwitch } from "@/components/menu/LanguageSwitch";
+import { FunctionalZh } from "@/components/menu/ChineseText";
 import { ServiceRail } from "@/components/menu/ServiceRail";
 import { CategoryRail } from "@/components/menu/CategoryRail";
 import { SectionHeading } from "@/components/menu/SectionHeading";
@@ -296,7 +297,8 @@ export function MenuScreen({
           {items.length === 0 ? (
             <div className="px-5">
               <p className="tp-rise paper-grain rounded-xl border border-[var(--color-gold)]/25 px-4 py-5 text-center text-[13px] leading-relaxed text-[var(--color-ink)]/75">
-                暫時售罄 · {t("menu.sectionEmpty")}
+                <FunctionalZh>暫時售罄 · </FunctionalZh>
+                {t("menu.sectionEmpty")}
                 <span className="mt-1 block text-[12px] text-[var(--color-ink)]/60">
                   {t("menu.sectionEmptyHint")}
                 </span>

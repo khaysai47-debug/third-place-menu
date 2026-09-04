@@ -1,4 +1,5 @@
 import type { MenuSessionPlatform, MenuSessionState } from "@/lib/menuSession";
+import { useT } from "@/lib/i18nContext";
 
 // Terminal states of a secure bot-session link (Phase 3D).
 //
@@ -52,6 +53,7 @@ const COPY: Record<TerminalState, { zh: string; en: string; blurb: string }> = {
 };
 
 export function SessionNotice({ state, returnToChat, orderNumber }: Props) {
+  const t = useT();
   const copy = COPY[state];
   const { platform, url } = returnToChat;
   const chatName = platform ? PLATFORM_LABEL[platform] : null;
@@ -113,14 +115,17 @@ export function SessionNotice({ state, returnToChat, orderNumber }: Props) {
             再下一單 · Start New Order
           </h2>
 
+          {/* This used to tell customers to type "menu", "order" or "start
+              order". Nothing in the Messenger integration establishes that a
+              text keyword does anything: the flow is driven by quick-reply
+              PAYLOADS (ORDER_START, SHOW_MENU …), whose titles will be
+              translated per language while the payloads stay stable. What IS
+              established is that any inbound message re-triggers the greeting,
+              so that is what this promises now. */}
           <p className="mt-3 text-[13.5px] leading-relaxed text-[var(--color-cream)]/70">
             {chatName
-              ? `Return to your ${chatName} chat with us and send `
-              : "Return to your chat with The Third Place and send "}
-            <span className="text-[var(--color-gold-soft)]">menu</span>,{" "}
-            <span className="text-[var(--color-gold-soft)]">order</span>, or{" "}
-            <span className="text-[var(--color-gold-soft)]">start order</span> — we'll reply with a
-            fresh secure link.
+              ? t("session.reopenOptions", { platform: chatName })
+              : t("session.reopenOptionsGeneric")}
           </p>
 
           {url ? (

@@ -62,7 +62,10 @@ function SecureMenuPage() {
   // what makes refresh and iOS tab-restore still work.
   useEffect(() => {
     if (hasMenuSessionFragment()) {
-      void router.navigate({ to: "/m", hash: "", replace: true });
+      // search is carried through explicitly: dropping the hash must not
+      // drop ?lang=, or a Messenger link that chose the customer's language
+      // would lose it on the very first render and fall back to English.
+      void router.navigate({ to: "/m", search: (prev) => prev, hash: "", replace: true });
     }
   }, [router]);
 

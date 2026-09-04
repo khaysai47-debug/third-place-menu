@@ -1,5 +1,6 @@
 import logo from "@/assets/logo.jpg";
 import { SmokeMotif } from "./Icons";
+import { IdentityZh } from "./ChineseText";
 
 /**
  * The approved hero, with the redesign's layered motion.
@@ -59,9 +60,11 @@ export function Hero() {
             </p>
           </div>
 
-          <div className="tp-parallax-slow vertical-cn font-display pt-1 text-[18px] text-[var(--color-gold)]/70">
+          {/* IDENTITY, not localisation: the restaurant’s own name in
+              Chinese is preserved in every language. */}
+          <IdentityZh className="tp-parallax-slow vertical-cn font-display pt-1 text-[18px] text-[var(--color-gold)]/70">
             第三空間
-          </div>
+          </IdentityZh>
         </div>
 
         {/* Warm-table quote card */}

@@ -104,27 +104,27 @@ cart.itemAdded,WEB_UI,src/**/CartTray.tsx,Item added,,,MISSING_MY,MISSING_TH,no,
 cart.readyToReview,WEB_UI,src/**/CartTray.tsx,Ready to review,,,MISSING_MY,MISSING_TH,no,WIRED - width-sensitive at 375px
 cart.removeSoldOut,WEB_UI,src/**/CartTray.tsx,Remove sold-out,,,MISSING_MY,MISSING_TH,no,WIRED
 cart.viewCart,WEB_UI,src/**/CartTray.tsx,View Cart →,,,MISSING_MY,MISSING_TH,no,WIRED - keep the arrow
-menu.sectionEmpty,WEB_UI,src/**/MenuScreen.tsx,Nothing in this section is available right now.,,,MISSING_MY,MISSING_TH,no,WIRED - brand 暫時售罄 stays beside it
+menu.sectionEmpty,WEB_UI,src/**/MenuScreen.tsx,Nothing in this section is available right now.,,,MISSING_MY,MISSING_TH,no,WIRED - FUNCTIONAL Chinese 暫時售罄 drops away in my/th via FunctionalZh
 menu.sectionEmptyHint,WEB_UI,src/**/MenuScreen.tsx,"Please try another section, or ask our staff.",,,MISSING_MY,MISSING_TH,no,WIRED
 language.label,WEB_UI,src/**/LanguageSwitch.tsx,Language,,,MISSING_MY,MISSING_TH,no,WIRED - aria-label
-hero.openNow,WEB_UI,src/**/Hero.tsx,Open now,,,MISSING_MY,MISSING_TH,no,Beside brand 菜單 · Menu
+hero.openNow,WEB_UI,src/**/Hero.tsx,Open now,,,MISSING_MY,MISSING_TH,no,Beside FUNCTIONAL Chinese (drops away in my/th): 菜單 · Menu
 hero.tagline,WEB_UI,src/**/Hero.tsx,Chinese BBQ made for sharing.,,,MISSING_MY,MISSING_TH,no,Brand voice
 hero.nearby,WEB_UI,src/**/Hero.tsx,Near Assumption University,,,MISSING_MY,MISSING_TH,yes,OWNER: location changes per restaurant
 hero.hours,WEB_UI,src/**/Hero.tsx,11:00 — 23:00,,,MISSING_MY,MISSING_TH,yes,OWNER: opening hours - numerals may not need translation
 hero.logoAlt,WEB_UI,src/**/Hero.tsx,The Third Place — Chinese BBQ & Lounge,,,MISSING_MY,MISSING_TH,yes,OWNER: alt text / brand name
-orderType.dineIn,WEB_UI,src/**/orderType.ts,Dine In,,,MISSING_MY,MISSING_TH,no,Shown above brand 堂食
-orderType.pickup,WEB_UI,src/**/orderType.ts,Pick Up,,,MISSING_MY,MISSING_TH,no,Shown above brand 自取
-orderType.delivery,WEB_UI,src/**/orderType.ts,Delivery,,,MISSING_MY,MISSING_TH,no,Shown above brand 外送
+orderType.dineIn,WEB_UI,src/**/orderType.ts,Dine In,,,MISSING_MY,MISSING_TH,no,Shown above FUNCTIONAL Chinese (drops away in my/th): 堂食
+orderType.pickup,WEB_UI,src/**/orderType.ts,Pick Up,,,MISSING_MY,MISSING_TH,no,Shown above FUNCTIONAL Chinese (drops away in my/th): 自取
+orderType.delivery,WEB_UI,src/**/orderType.ts,Delivery,,,MISSING_MY,MISSING_TH,no,Shown above FUNCTIONAL Chinese (drops away in my/th): 外送
 orderType.ariaLabel,WEB_UI,src/**/ServiceRail.tsx,Order type,,,MISSING_MY,MISSING_TH,no,aria-label
-serviceRail.popular,WEB_UI,src/**/ServiceRail.tsx,Popular,,,MISSING_MY,MISSING_TH,no,Shown above brand 人氣
+serviceRail.popular,WEB_UI,src/**/ServiceRail.tsx,Popular,,,MISSING_MY,MISSING_TH,no,Shown above FUNCTIONAL Chinese (drops away in my/th): 人氣
 categoryRail.ariaLabel,WEB_UI,src/**/CategoryRail.tsx,Menu sections,,,MISSING_MY,MISSING_TH,no,aria-label
-categoryRail.count,WEB_UI,src/**/CategoryRail.tsx,{n} sections,,,MISSING_MY,MISSING_TH,no,Interpolated count - plural rules differ per language
+categoryRail.sectionCount,WEB_UI,src/**/CategoryRail.tsx,{count} section | {count} sections,,,MISSING_MY,MISSING_TH,no,"WIRED. PLURAL entry: singular | plural, both COMPLETE phrases. Translate each form whole — do not translate '{count}' plus a word. Myanmar and Thai have one form, so a single phrase in the 'my'/'th' column is enough."
 section.eyebrowChefsTable,WEB_UI,src/**/MenuScreen.tsx,Chef's Table,,,MISSING_MY,MISSING_TH,no,Signature section only
 section.eyebrowDefault,WEB_UI,src/**/MenuScreen.tsx,Section,,,MISSING_MY,MISSING_TH,no,
-menu.browseOnlyBanner,WEB_UI,src/**/MenuScreen.tsx,Browse only — read the full menu here. Ordering stays off until you ask for it.,,,MISSING_MY,MISSING_TH,no,Beside brand 瀏覽菜單
+menu.browseOnlyBanner,WEB_UI,src/**/MenuScreen.tsx,Browse only — read the full menu here. Ordering stays off until you ask for it.,,,MISSING_MY,MISSING_TH,no,Beside FUNCTIONAL Chinese (drops away in my/th): 瀏覽菜單
 menu.browseOnlyHint,WEB_UI,src/**/MenuScreen.tsx,Tap “Order Now” below when you are ready.,,,MISSING_MY,MISSING_TH,no,Quotes wrap the localised CTA
 menu.orderNow,WEB_UI,src/**/MenuScreen.tsx,Order Now,,,MISSING_MY,MISSING_TH,no,Leaves browse mode - suite asserts this string exists
-menu.availabilityWarning,WEB_UI,src/**/MenuScreen.tsx,Live availability couldn't refresh — a few items may have just sold out. Staff will confirm your order.,,,MISSING_MY,MISSING_TH,no,Beside brand 即時供應狀態暫時無法更新
+menu.availabilityWarning,WEB_UI,src/**/MenuScreen.tsx,Live availability couldn't refresh — a few items may have just sold out. Staff will confirm your order.,,,MISSING_MY,MISSING_TH,no,Beside FUNCTIONAL Chinese (drops away in my/th): 即時供應狀態暫時無法更新
 item.priceAskStaff,WEB_UI,src/**/MenuItemCard.tsx,Price · ask staff,,,MISSING_MY,MISSING_TH,no,Shown when price is undefined (A08 today)
 item.soldOut,WEB_UI,src/**/MenuItemCard.tsx,Sold out,,,MISSING_MY,MISSING_TH,no,
 item.bestSeller,WEB_UI,src/**/MenuItemCard.tsx,Best Seller,,,MISSING_MY,MISSING_TH,no,
@@ -151,19 +151,18 @@ success.confirmDelivery,WEB_UI,src/**/CheckoutSheet.tsx,Staff will confirm deliv
 success.keepPhoneAvailable,WEB_UI,src/**/CheckoutSheet.tsx,Please keep your phone available — staff may call to confirm.,,,MISSING_MY,MISSING_TH,no,
 success.deliveryFeeIncluded,WEB_UI,src/**/CheckoutSheet.tsx,The ฿30 delivery fee is included in your total.,,,MISSING_MY,MISSING_TH,yes,OWNER: fee amount is configurable
 success.paymentViaStaffChat,WEB_UI,src/**/CheckoutSheet.tsx,Payment confirmation may happen through staff chat.,,,MISSING_MY,MISSING_TH,no,Payment instruction
-session.completedTitle,WEB_UI,src/**/SessionNotice.tsx,Order received,,,MISSING_MY,MISSING_TH,no,Beside brand 訂單已送出
+session.completedTitle,WEB_UI,src/**/SessionNotice.tsx,Order received,,,MISSING_MY,MISSING_TH,no,Beside FUNCTIONAL Chinese (drops away in my/th): 訂單已送出
 session.completedBlurb,WEB_UI,src/**/SessionNotice.tsx,This link has already been used for your order. It can't place another one.,,,MISSING_MY,MISSING_TH,no,
-session.expiredTitle,WEB_UI,src/**/SessionNotice.tsx,This link has expired,,,MISSING_MY,MISSING_TH,no,Beside brand 連結已過期
+session.expiredTitle,WEB_UI,src/**/SessionNotice.tsx,This link has expired,,,MISSING_MY,MISSING_TH,no,Beside FUNCTIONAL Chinese (drops away in my/th): 連結已過期
 session.expiredBlurb,WEB_UI,src/**/SessionNotice.tsx,Secure menu links stay open for 24 hours. This one has closed.,,,MISSING_MY,MISSING_TH,no,
-session.revokedTitle,WEB_UI,src/**/SessionNotice.tsx,This link was replaced,,,MISSING_MY,MISSING_TH,no,Beside brand 連結已更新
+session.revokedTitle,WEB_UI,src/**/SessionNotice.tsx,This link was replaced,,,MISSING_MY,MISSING_TH,no,Beside FUNCTIONAL Chinese (drops away in my/th): 連結已更新
 session.revokedBlurb,WEB_UI,src/**/SessionNotice.tsx,A newer menu link was sent to your chat. Please use the most recent one.,,,MISSING_MY,MISSING_TH,no,
-session.invalidTitle,WEB_UI,src/**/SessionNotice.tsx,This link isn't valid,,,MISSING_MY,MISSING_TH,no,Beside brand 連結無效
+session.invalidTitle,WEB_UI,src/**/SessionNotice.tsx,This link isn't valid,,,MISSING_MY,MISSING_TH,no,Beside FUNCTIONAL Chinese (drops away in my/th): 連結無效
 session.invalidBlurb,WEB_UI,src/**/SessionNotice.tsx,"The link may be incomplete, or it was opened without its secure part.",,,MISSING_MY,MISSING_TH,no,
 session.orderLabel,WEB_UI,src/**/SessionNotice.tsx,Order,,,MISSING_MY,MISSING_TH,no,Precedes the order number
-session.startNewHeading,WEB_UI,src/**/SessionNotice.tsx,Start New Order,,,MISSING_MY,MISSING_TH,no,Beside brand 再下一單
-session.returnToChat,WEB_UI,src/**/SessionNotice.tsx,Return to your {platform} chat with us and send,,,MISSING_MY,MISSING_TH,no,Interpolates Messenger/Instagram
-session.returnToChatGeneric,WEB_UI,src/**/SessionNotice.tsx,Return to your chat with The Third Place and send,,,MISSING_MY,MISSING_TH,yes,OWNER: restaurant name
-session.sendKeywords,WEB_UI,src/**/SessionNotice.tsx,"menu, order, or start order — we'll reply with a fresh secure link.",,,MISSING_MY,MISSING_TH,no,KEYWORDS must stay recognisable to the bot - see open question
+session.startNewHeading,WEB_UI,src/**/SessionNotice.tsx,Start New Order,,,MISSING_MY,MISSING_TH,no,Beside FUNCTIONAL Chinese (drops away in my/th): 再下一單
+session.reopenOptions,WEB_UI,src/**/SessionNotice.tsx,"Go back to your {platform} chat with us and send any message — we'll show your options again, including Place an Order.",,,MISSING_MY,MISSING_TH,no,"WIRED. Replaced the old 'send menu/order/start order' promise: the Messenger flow is driven by quick-reply PAYLOADS, not text keywords. {platform} is a parameter. 'Place an Order' must match the localised quick-reply title chosen in Phase 5."
+session.reopenOptionsGeneric,WEB_UI,src/**/SessionNotice.tsx,"Go back to your chat with us and send any message — we'll show your options again, including Place an Order.",,,MISSING_MY,MISSING_TH,no,WIRED. Used when no chat handle is configured. Same contract as session.reopenOptions.
 session.startNewButton,WEB_UI,src/**/SessionNotice.tsx,Start New Order on {platform},,,MISSING_MY,MISSING_TH,no,
 session.openSameConversation,WEB_UI,src/**/SessionNotice.tsx,Open the same conversation you received this link in.,,,MISSING_MY,MISSING_TH,no,No configured handle
 session.browsePublicMenu,WEB_UI,src/**/SessionNotice.tsx,Browse Public Menu,,,MISSING_MY,MISSING_TH,no,
@@ -171,7 +170,7 @@ session.browseDisclaimer,WEB_UI,src/**/SessionNotice.tsx,This opens our normal w
 secureMenu.didntLoad,WEB_UI,src/**/m.tsx,This didn't load,,,MISSING_MY,MISSING_TH,no,
 secureMenu.didntLoadBlurb,WEB_UI,src/**/m.tsx,We couldn't check your link just now. Your link is still fine — please try again.,,,MISSING_MY,MISSING_TH,no,
 secureMenu.tryAgain,WEB_UI,src/**/m.tsx,Try again,,,MISSING_MY,MISSING_TH,no,
-secureMenu.opening,WEB_UI,src/**/m.tsx,Opening your menu,,,MISSING_MY,MISSING_TH,no,Beside brand 開啟菜單
+secureMenu.opening,WEB_UI,src/**/m.tsx,Opening your menu,,,MISSING_MY,MISSING_TH,no,Beside FUNCTIONAL Chinese (drops away in my/th): 開啟菜單
 errorPage.title,WEB_ERROR_PAGE,src/**/error-page.ts,This page didn't load,,,MISSING_MY,MISSING_TH,no,"Static HTML string - NOT React, needs its own approach"
 errorPage.blurb,WEB_ERROR_PAGE,src/**/error-page.ts,Something went wrong on our end. You can try refreshing or head back home.,,,MISSING_MY,MISSING_TH,no,Static HTML
 errorPage.tryAgain,WEB_ERROR_PAGE,src/**/error-page.ts,Try again,,,MISSING_MY,MISSING_TH,no,Static HTML

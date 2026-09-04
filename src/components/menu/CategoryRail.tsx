@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { ReactElement } from "react";
 import { CATEGORIES, type MenuCategoryId } from "@/data/menu";
+import { useT } from "@/lib/i18nContext";
 import {
   NoodleBowlIcon,
   SkewerFlameIcon,
@@ -64,6 +65,7 @@ interface Props {
  * neighbours.
  */
 export function CategoryRail({ active, onChange }: Props) {
+  const t = useT();
   const scrollerRef = useRef<HTMLDivElement>(null);
   const index = CATEGORIES.findIndex((c) => c.id === active);
 
@@ -96,7 +98,7 @@ export function CategoryRail({ active, onChange }: Props) {
           </p>
           <span className="divider-stamp mx-3 flex-1" />
           <p className="text-[10px] uppercase tracking-[0.2em] text-[var(--color-muted-foreground)]">
-            {CATEGORIES.length} sections
+            {t("categoryRail.sectionCount", { count: CATEGORIES.length })}
           </p>
         </div>
 
